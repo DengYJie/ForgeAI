@@ -1,0 +1,105 @@
+# ====================================================================
+# CMake & Build Artifacts
+# ====================================================================
+build/
+bin/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+Testing/
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+.fetchcontent/
+
+# CMake Presets (User presets should not be checked into git)
+CMakeUserPresets.json
+
+# ====================================================================
+# Qt & MOC / UIC / RCC Generated Files
+# ====================================================================
+*_autogen/
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+.rcc/
+*.rcc
+*.qmlc
+*.jsc
+*.moc
+
+# Qt Creator
+*.autosave
+*.user
+*.user.*
+*.pro.user
+*.pro.user.*
+*.qmlproject.user
+*.qmlproject.user.*
+
+# ====================================================================
+# C / C++ Compiled Binaries, Objects & Debug Symbols
+# ====================================================================
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.d
+
+# ====================================================================
+# IDE & Editor Specific Files
+# ====================================================================
+# JetBrains (CLion, Rider, IDEA)
+.idea/
+*.iws
+*.iml
+
+# Visual Studio / MSVC
+.vs/
+*.suo
+*.user
+*.userosv
+*.sln.docstates
+*.vsp
+*.vspx
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ====================================================================
+# Analysis Tools & Local Caches
+# ====================================================================
+.cache/
+.clangd/
+.codegraph/
+
+# ====================================================================
+# Operating System Files
+# ====================================================================
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
