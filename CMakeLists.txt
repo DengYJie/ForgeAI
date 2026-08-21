@@ -83,6 +83,21 @@ set(PROJECT_SOURCES
         src/ui/screen/main/MainWindow.h
         src/ui/screen/main/MainWindow.cpp
 
+        src/ui/screen/chat/ChatViewModel.h
+        src/ui/screen/chat/ChatViewModel.cpp
+        src/ui/screen/chat/ChatPage.h
+        src/ui/screen/chat/ChatPage.cpp
+
+        src/ui/screen/work/WorkViewModel.h
+        src/ui/screen/work/WorkViewModel.cpp
+        src/ui/screen/work/WorkPage.h
+        src/ui/screen/work/WorkPage.cpp
+
+        src/ui/screen/knowledge/KnowledgeViewModel.h
+        src/ui/screen/knowledge/KnowledgeViewModel.cpp
+        src/ui/screen/knowledge/KnowledgePage.h
+        src/ui/screen/knowledge/KnowledgePage.cpp
+
         src/core/settings/SettingsRegistry.h
         src/core/settings/SettingsRegistry.cpp
         src/core/settings/ISettingsProvider.h

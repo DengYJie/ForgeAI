@@ -5,6 +5,9 @@
 #include "MainViewModel.h"
 #include "ui/animation/AnimatedSettingsVisualSource.h"
 #include "ui/navigation/NavigationPanel.h"
+#include "ui/screen/chat/ChatPage.h"
+#include "ui/screen/work/WorkPage.h"
+#include "ui/screen/knowledge/KnowledgePage.h"
 #include "ui/screen/settings/SettingsPage.h"
 #include "ui/window/TitleBar.h"
 
@@ -21,9 +24,10 @@ namespace ui::screen::main {
     void MainWindow::setupUi() {
         resize(1000, 680);
         setMinimumSize(640, 480);
+        navigationView()->setExpandedPaneWidth(240);
 
         // 1. 注册顶部导航项：对话、工作、知识库
-        auto *chatPage = new QWidget(this);
+        auto *chatPage = new ui::screen::chat::ChatPage(this);
         addSubInterface(
             QStringLiteral("chat"),
             chatPage,
@@ -33,7 +37,7 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        auto *workPage = new QWidget(this);
+        auto *workPage = new ui::screen::work::WorkPage(this);
         addSubInterface(
             QStringLiteral("work"),
             workPage,
@@ -43,7 +47,7 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        auto *knowledgePage = new QWidget(this);
+        auto *knowledgePage = new ui::screen::knowledge::KnowledgePage(this);
         addSubInterface(
             QStringLiteral("knowledge"),
             knowledgePage,
