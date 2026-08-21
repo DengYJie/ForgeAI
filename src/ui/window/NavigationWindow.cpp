@@ -44,6 +44,9 @@ void NavigationWindow::initNavigation() {
                         : StackContentHost::TransitionEffect::SlideFromBottom);
             }
         }
+        if (m_panel && m_navigationView) {
+            m_panel->setCompacted(!m_navigationView->isPaneOpen());
+        }
         if (titleBar()) {
             titleBar()->setPaneToggleButtonVisible(!top);
         }
