@@ -25,6 +25,7 @@ namespace ui::screen::settings {
             explicit SettingsScrollView(QWidget *parent = nullptr)
                 : fluent::scrolling::ScrollView(parent) {
                 setAttribute(Qt::WA_OpaquePaintEvent, false);
+                viewport()->setAutoFillBackground(false);
                 QPalette pal = palette();
                 pal.setColor(QPalette::Window, Qt::transparent);
                 setPalette(pal);
@@ -33,6 +34,16 @@ namespace ui::screen::settings {
         protected:
             void paintEvent(QPaintEvent *) override {
                 // Keep transparent to show mica background
+            }
+
+            void onThemeUpdated() override {
+                fluent::scrolling::ScrollView::onThemeUpdated();
+                viewport()->setAutoFillBackground(false);
+
+                QPalette pal = viewport()->palette();
+                pal.setColor(QPalette::Window, Qt::transparent);
+                pal.setColor(QPalette::Base, Qt::transparent);
+                viewport()->setPalette(pal);
             }
         };
 
@@ -53,12 +64,11 @@ namespace ui::screen::settings {
                          QWidget *trailingWidget,
                          QWidget *parent = nullptr)
             : fluent::layout::Card(parent)
-              , m_trailing(trailingWidget) {
+              , m_layout(new QGridLayout(this)), m_trailing(trailingWidget) {
             setObjectName(QStringLiteral("settingsCardItem"));
             setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
             setMinimumHeight(68);
 
-            m_layout = new QGridLayout(this);
             m_layout->setContentsMargins(16, 12, 16, 12);
             m_layout->setHorizontalSpacing(16);
             m_layout->setVerticalSpacing(8);
@@ -159,21 +169,29 @@ namespace ui::screen::settings {
         m_contentLayout->setSpacing(6);
 
         // 1. 页面主标题
-        m_titleLabel = new fluent::textfields::Label(tr("Settings"), m_viewport);
+        m_titleLabel = new fluent::textfields::Label(tr("设置"), m_viewport);
         m_titleLabel->setObjectName(QStringLiteral("settingsPageTitle"));
         m_titleLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
         m_titleLabel->setFluentTypography(Typography::FontRole::Title);
         m_contentLayout->addWidget(m_titleLabel);
         m_contentLayout->addSpacing(12);
 
-        // 2. 分组：外观与行为 (Appearance & behavior)
-        m_contentLayout->addWidget(createSectionHeader(tr("Appearance & behavior")));
-
-        // 动态加载所有注册在该分组下的 UI 组件
+        // 2. 动态分组与加载设置项
+        QMap<QString, QList<std::shared_ptr<ISettingsUIFactory> > > groupedFactories;
         auto factories = SettingsUIRegistry::instance().allFactories();
         for (const auto &factory: factories) {
             auto provider = core::settings::SettingsRegistry::instance().getProvider(factory->targetProviderId());
-            if (provider && provider->category() == "Appearance & behavior") {
+            if (provider) {
+                groupedFactories[provider->category()].append(factory);
+            }
+        }
+
+        for (auto it = groupedFactories.begin(); it != groupedFactories.end(); ++it) {
+            // 生成分组标题
+            m_contentLayout->addWidget(createSectionHeader(it.key()));
+
+            // 渲染该分组下的所有控制卡片
+            for (const auto &factory: it.value()) {
                 QWidget *control = factory->createControlWidget(m_viewport);
                 m_contentLayout->addWidget(createSettingsCard(
                     factory->iconGlyph(),
@@ -182,11 +200,13 @@ namespace ui::screen::settings {
                     control
                 ));
             }
+            m_contentLayout->addSpacing(12);
         }
 
         m_contentLayout->addStretch(1);
 
         scrollArea->setWidget(m_viewport);
+        m_viewport->setAutoFillBackground(false);
         rootLayout->addWidget(scrollArea);
 
         updateResponsiveLayout();
