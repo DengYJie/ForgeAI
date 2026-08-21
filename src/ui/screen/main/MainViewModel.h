@@ -9,7 +9,7 @@ namespace ui::navigation {
 
 namespace ui::screen::main {
     struct MainState {
-        QString currentRoute = QStringLiteral("home");
+        QString currentRoute = QStringLiteral("chat");
         bool canGoBack = false;
         bool canGoForward = false;
         bool isPaneOpen = true;

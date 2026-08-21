@@ -11,11 +11,11 @@ namespace ui::screen::settings {
     }
 
     QString CoreSettingsUIFactory::title() const {
-        return "App theme";
+        return "应用主题";
     }
 
     QString CoreSettingsUIFactory::subtitle() const {
-        return "Select which app theme to display";
+        return "选择要显示的应用主题";
     }
 
     QWidget *CoreSettingsUIFactory::createControlWidget(QWidget *parent) {
@@ -25,7 +25,7 @@ namespace ui::screen::settings {
         if (!provider) return new QWidget(parent);
 
         auto *themeCombo = new fluent::basicinput::ComboBox(parent);
-        themeCombo->addItems({"System", "Light", "Dark"});
+        themeCombo->addItems({"跟随系统", "浅色", "深色"});
         themeCombo->setMinimumWidth(130);
 
         // 读数据

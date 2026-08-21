@@ -22,13 +22,33 @@ namespace ui::screen::main {
         resize(1000, 680);
         setMinimumSize(640, 480);
 
-        // 1. 注册顶部主页面 (Home)
-        auto *homePage = new QWidget(this);
+        // 1. 注册顶部导航项：对话、工作、知识库
+        auto *chatPage = new QWidget(this);
         addSubInterface(
-            QStringLiteral("home"),
-            homePage,
-            Typography::Icons::Home,
-            tr("Home"),
+            QStringLiteral("chat"),
+            chatPage,
+            Typography::Icons::glyph(QStringLiteral("ic_fluent_chat_20_regular")),
+            tr("对话"),
+            QString(),
+            ui::navigation::NavigationItemPosition::Top
+        );
+
+        auto *workPage = new QWidget(this);
+        addSubInterface(
+            QStringLiteral("work"),
+            workPage,
+            Typography::Icons::glyph(QStringLiteral("ic_fluent_cursor_click_20_regular")),
+            tr("工作"),
+            QString(),
+            ui::navigation::NavigationItemPosition::Top
+        );
+
+        auto *knowledgePage = new QWidget(this);
+        addSubInterface(
+            QStringLiteral("knowledge"),
+            knowledgePage,
+            Typography::Icons::glyph(QStringLiteral("ic_fluent_document_search_20_regular")),
+            tr("知识库"),
             QString(),
             ui::navigation::NavigationItemPosition::Top
         );
@@ -39,7 +59,7 @@ namespace ui::screen::main {
             QStringLiteral("settings"),
             settingsPage,
             Typography::Icons::Settings,
-            tr("Settings"),
+            tr("设置"),
             QString(),
             ui::navigation::NavigationItemPosition::Bottom,
             true,

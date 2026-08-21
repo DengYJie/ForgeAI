@@ -19,7 +19,7 @@ namespace core::settings {
         explicit CoreSettingsProvider(QObject *parent = nullptr);
 
         QString id() const override { return "core"; }
-        QString category() const override { return "Appearance & behavior"; }
+        QString category() const override { return "外观与行为"; }
         bool useSeparateFile() const override { return false; }
         QString configFileName() const override { return ""; }
 
