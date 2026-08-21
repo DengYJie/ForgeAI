@@ -308,7 +308,7 @@ namespace ui::navigation {
         }, Qt::SingleShotConnection);
 
         if (animated) {
-            if (startRect.isValid()) {
+            if (!m_indicator->isFlying() && startRect.isValid()) {
                 m_indicator->setInitialPosition(startRect);
             }
             m_indicator->activateAt(targetRect, true);

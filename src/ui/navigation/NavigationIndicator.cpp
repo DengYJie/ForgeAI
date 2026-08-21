@@ -249,8 +249,12 @@ namespace ui::navigation {
         const bool samePos = isSamePosition(targetRect);
 
         if (samePos) {
-            // 位置未变，但仍需让 item 恢复常驻指示条（可能刚被清空）
+            // 位置未变，停止动画并隐藏悬浮指示条，让 item 恢复常驻指示条
             m_flightAnimation->stop();
+            m_startRect = targetRect;
+            m_targetRect = targetRect;
+            m_currentRect = targetRect;
+            hide();
             emit flightStarted();
             emit flightFinished();
             return;
@@ -269,7 +273,19 @@ namespace ui::navigation {
             return;
         }
 
-        m_startRect = m_currentRect;
+        // 如果之前动画正在飞行中被中断，按当前中心位置提取未畸变的标准几何作为起点
+        if (m_flightAnimation && m_flightAnimation->state() == QAbstractAnimation::Running) {
+            if (m_orientation == Qt::Vertical) {
+                const qreal cy = m_currentRect.center().y();
+                m_startRect = QRectF(targetRect.x(), cy - targetRect.height() / 2.0, targetRect.width(), targetRect.height());
+            } else {
+                const qreal cx = m_currentRect.center().x();
+                m_startRect = QRectF(cx - targetRect.width() / 2.0, targetRect.y(), targetRect.width(), targetRect.height());
+            }
+        } else {
+            m_startRect = m_currentRect.isValid() ? m_currentRect : targetRect;
+        }
+
         m_targetRect = targetRect;
         // 同轴平移（同 x 或同 y）用手动分段的 cubic-bezier 缓动，模拟 WinUI 的拉伸；
         // 跨轴 portal 保持平滑 decelerate 原样
@@ -281,7 +297,7 @@ namespace ui::navigation {
         } else {
             beginFlight(themeAnimation().decelerate);
         }
-        setGeometry(m_startRect.united(m_targetRect).toRect().adjusted(-5, -5, 5, 5));
+        setGeometry(m_startRect.united(m_targetRect).toRect().adjusted(-20, -20, 20, 20));
         show();
         emit flightStarted();
         m_flightAnimation->start();
