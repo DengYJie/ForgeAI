@@ -17,9 +17,8 @@ find_package(Qt${QT_VERSION_MAJOR}
 include(FetchContent)
 FetchContent_Declare(
         fluentqt
-        GIT_REPOSITORY https://github.com/calvinhxx/Fluent-Qt.git
-        GIT_TAG v1.7.0
-        GIT_SHALLOW TRUE
+        GIT_REPOSITORY https://github.com/L-1124/Fluent-Qt.git
+        GIT_TAG my
 )
 FetchContent_MakeAvailable(fluentqt)
 
@@ -35,7 +34,7 @@ qt_standard_project_setup()
 set(PROJECT_SOURCES
         src/main.cpp
 
-                
+
         src/ui/animation/AnimatedGlobalNavVisualSource.h
         src/ui/animation/AnimatedBackVisualSource.h
         src/ui/animation/AnimatedIcon.cpp
@@ -84,7 +83,7 @@ set(PROJECT_SOURCES
         src/ui/screen/main/MainWindow.h
         src/ui/screen/main/MainWindow.cpp
 
-                src/core/settings/SettingsRegistry.h
+        src/core/settings/SettingsRegistry.h
         src/core/settings/SettingsRegistry.cpp
         src/core/settings/ISettingsProvider.h
         src/core/settings/providers/CoreSettingsProvider.h
@@ -120,6 +119,16 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 if (WIN32)
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+                COMMAND_EXPAND_LISTS
+                COMMENT "Copying required third-party runtime DLLs..."
+        )
+    endif ()
+
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "Deploying Qt libraries..."
             COMMAND "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe"
