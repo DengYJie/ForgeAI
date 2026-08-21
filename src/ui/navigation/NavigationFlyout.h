@@ -177,7 +177,8 @@ namespace ui::navigation {
         /// 已完全关闭（退场动效结束，供销毁）
         void closed();
 
-        void expansionChanged(const QString &routeKey, bool expanded);
+    public:
+        void onThemeUpdated() override { update(); }
 
     protected:
         bool eventFilter(QObject *watched, QEvent *event) override;
@@ -191,8 +192,6 @@ namespace ui::navigation {
         void paintEvent(QPaintEvent *event) override;
 
         void keyPressEvent(QKeyEvent *event) override;
-
-        void onThemeUpdated() override { update(); }
 
     private:
         QVector<NavigationWidget *> visibleItems() const;

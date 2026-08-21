@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ForgeAI LANGUAGES CXX)
+project(ForgeAI LANGUAGES C CXX)
 
 include(qt.cmake)
 
@@ -29,6 +29,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(qwindowkit)
 
+FetchContent_Declare(
+        md4c
+        GIT_REPOSITORY https://github.com/mity/md4c.git
+        GIT_TAG release-0.5.2
+)
+set(MD4C_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(md4c)
+
+FetchContent_Declare(
+        litehtml
+        GIT_REPOSITORY https://github.com/litehtml/litehtml.git
+        GIT_TAG v0.10
+)
+set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(litehtml)
+
+add_subdirectory(third_party/qlitehtml)
+
 qt_standard_project_setup()
 
 set(PROJECT_SOURCES
@@ -37,6 +55,7 @@ set(PROJECT_SOURCES
 
         src/ui/animation/AnimatedGlobalNavVisualSource.h
         src/ui/animation/AnimatedBackVisualSource.h
+        src/ui/animation/AnimatedPanelLeftVisualSource.h
         src/ui/animation/AnimatedIcon.cpp
         src/ui/animation/AnimatedIcon.h
         src/ui/animation/AnimatedSettingsVisualSource.h
@@ -45,6 +64,9 @@ set(PROJECT_SOURCES
         src/ui/base/BaseViewModel.h
         src/ui/base/BasePage.h
         src/ui/base/BasePage.cpp
+
+        src/ui/widget/CollapsibleSplitView.h
+        src/ui/widget/CollapsibleSplitView.cpp
 
         src/ui/navigation/NavigationWidget.h
         src/ui/navigation/NavigationWidget.cpp
@@ -87,6 +109,18 @@ set(PROJECT_SOURCES
 
         src/ui/screen/chat/ChatViewModel.h
         src/ui/screen/chat/ChatViewModel.cpp
+        src/ui/screen/chat/ChatSessionListModel.h
+        src/ui/screen/chat/ChatSessionListModel.cpp
+        src/ui/screen/chat/ChatSessionDelegate.h
+        src/ui/screen/chat/ChatSessionDelegate.cpp
+        src/ui/screen/chat/ChatSidebar.h
+        src/ui/screen/chat/ChatSidebar.cpp
+        src/ui/screen/chat/ChatHeader.h
+        src/ui/screen/chat/ChatHeader.cpp
+        src/ui/screen/chat/ChatAnchorBar.h
+        src/ui/screen/chat/ChatAnchorBar.cpp
+        src/ui/screen/chat/ChatInputBox.h
+        src/ui/screen/chat/ChatInputBox.cpp
         src/ui/screen/chat/ChatPage.h
         src/ui/screen/chat/ChatPage.cpp
 
@@ -133,6 +167,8 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Widgets
         QWindowKit::Widgets
         FluentQt::FluentQt
+        qlitehtml
+        md4c
 )
 
 if (WIN32)

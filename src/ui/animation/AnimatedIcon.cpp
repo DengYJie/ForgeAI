@@ -72,8 +72,17 @@ namespace ui::animation {
 
     void AnimatedIcon::paintEvent(QPaintEvent *) {
         if (!m_source) return;
-        QPainter painter(this);
 
+        if (parentWidget() && m_currentState != IconState::Normal) {
+            const bool under = parentWidget()->rect().contains(parentWidget()->mapFromGlobal(QCursor::pos()));
+            if (!under) {
+                m_currentState = IconState::Normal;
+                m_previousState = IconState::Normal;
+                m_progress = 1.0;
+            }
+        }
+
+        QPainter painter(this);
         m_source->paint(painter, rect(), m_previousState, m_currentState, m_progress, themeColorsRef(), isEnabled());
     }
 
@@ -93,13 +102,20 @@ namespace ui::animation {
                     break;
                 case QEvent::MouseButtonRelease:
                     if (static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
-                        const bool under = (parentWidget() && parentWidget()->underMouse());
+                        const bool under = (parentWidget() && parentWidget()->rect().contains(parentWidget()->mapFromGlobal(QCursor::pos())));
                         setState(under ? IconState::PointerOver : IconState::Normal);
                     }
                     break;
+                case QEvent::Move:
                 case QEvent::Resize:
-                    if (parentWidget() && m_autoFillParent) {
-                        setGeometry(0, 0, parentWidget()->width(), parentWidget()->height());
+                    if (parentWidget()) {
+                        if (m_autoFillParent) {
+                            setGeometry(0, 0, parentWidget()->width(), parentWidget()->height());
+                        }
+                        const bool under = parentWidget()->rect().contains(parentWidget()->mapFromGlobal(QCursor::pos()));
+                        if (!under && (m_currentState == IconState::PointerOver || m_currentState == IconState::Pressed)) {
+                            setState(IconState::Normal);
+                        }
                     }
                     break;
                 case QEvent::Hide:

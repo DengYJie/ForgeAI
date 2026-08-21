@@ -253,20 +253,20 @@ namespace ui::navigation {
         /// 溢出菜单被请求（用户点击溢出按钮），携带锚点组件与溢出条目快照，供 panel 渲染
         void overflowMenuRequested(QWidget *anchorWidget, const QVector<NavigationOverflowEntry> &entries);
 
+    public:
+        void onThemeUpdated() override;
+
+        /**
+         * @brief 确保内置 ScrollView 及其视口保持透明底色，避免覆盖面板材质
+         */
+        void applyTransparentScrollView();
+
     protected:
         void paintEvent(QPaintEvent *event) override;
 
         void showEvent(QShowEvent *event) override;
 
         void resizeEvent(QResizeEvent *event) override;
-
-        void onThemeUpdated() override;
-
-    public:
-        /**
-         * @brief 确保内置 ScrollView 及其视口保持透明底色，避免覆盖面板材质
-         */
-        void applyTransparentScrollView();
 
     private:
         /// 展开态变化后统一调整指示条归属（折叠回退父级，展开交还子项）

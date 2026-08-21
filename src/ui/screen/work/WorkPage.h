@@ -8,6 +8,10 @@ namespace fluent::textfields {
     class Label;
 }
 
+namespace ui::widget {
+    class CollapsibleSplitView;
+}
+
 namespace ui::screen::work {
     class WorkViewModel;
     struct WorkState;
@@ -17,7 +21,6 @@ namespace ui::screen::work {
 
     public:
         explicit WorkPage(QWidget *parent = nullptr);
-
         ~WorkPage() override = default;
 
     private:
@@ -28,6 +31,11 @@ namespace ui::screen::work {
 
         WorkViewModel *m_viewModel = nullptr;
         QVBoxLayout *m_rootLayout = nullptr;
+
+        ui::widget::CollapsibleSplitView *m_splitView = nullptr;
+        QWidget *m_sidebarWidget = nullptr;
+        QWidget *m_workAreaWidget = nullptr;
+
         fluent::textfields::Label *m_titleLabel = nullptr;
         fluent::textfields::Label *m_subtitleLabel = nullptr;
     };

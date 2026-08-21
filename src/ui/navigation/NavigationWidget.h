@@ -77,14 +77,14 @@ namespace ui::navigation {
 
         void setAccessibleItemName(const QString &name);
 
+        void onThemeUpdated() override;
+
     protected:
         /// 首次或失效时沿父链解析一次并缓存
         fluent::FluentElement::Theme cachedEffectiveTheme() const;
 
         /// 绕开 themeColorsRef() 每次沿父链遍历 effectiveTheme() 的开销；引用归 ThemeRegistry 所有，仅单次 paint() 内使用
         const fluent::FluentElement::Colors &colorsRef() const;
-
-        void onThemeUpdated() override;
 
         signals:
 

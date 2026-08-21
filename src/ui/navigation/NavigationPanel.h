@@ -277,14 +277,15 @@ namespace ui::navigation {
 
         void indicatorOwnerChanged(NavigationTreeItem *item, bool isOwner);
 
+    public:
+        void onThemeUpdated() override { update(); }
+
     protected:
         void paintEvent(QPaintEvent *event) override;
 
         void showEvent(QShowEvent *event) override;
 
         bool event(QEvent *event) override;
-
-        void onThemeUpdated() override { update(); }
 
     private:
         void setupUi();

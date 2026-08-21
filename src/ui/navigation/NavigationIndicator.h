@@ -71,12 +71,13 @@ namespace ui::navigation {
         /// 飞行动画结束、指示条已到达目标位置时发出：宿主收到后让对应 item 绘制常驻指示条
         void flightFinished();
 
+    public:
+        void onThemeUpdated() override;
+
     protected:
         void paintEvent(QPaintEvent *event) override;
 
         void showEvent(QShowEvent *event) override;
-
-        void onThemeUpdated() override;
 
     private:
         /// 目标与当前几何几乎重合时短路，避免无谓动画

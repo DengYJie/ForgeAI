@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ui/navigation/NavigationMetrics.h"
 #include "WindowBase.h"

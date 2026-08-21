@@ -26,7 +26,11 @@ namespace ui::screen::chat {
 
         void stopGeneration();
 
-    Q_SIGNALS:
+        Q_SIGNALS:
+
+
+
+
         void stateChanged(const ui::screen::chat::ChatState &state);
 
     protected:
