@@ -7,15 +7,12 @@
 
 namespace ui::screen::work {
     WorkPage::WorkPage(QWidget *parent)
-        : QWidget(parent) {
+        : BasePage(parent) {
         setupUi();
         setupViewModel();
     }
 
     void WorkPage::setupUi() {
-        setAttribute(Qt::WA_OpaquePaintEvent, false);
-        setAutoFillBackground(false);
-
         m_rootLayout = new QVBoxLayout(this);
         m_rootLayout->setContentsMargins(36, 24, 36, 24);
         m_rootLayout->setSpacing(8);
@@ -42,9 +39,5 @@ namespace ui::screen::work {
 
     void WorkPage::render(const WorkState &state) {
         Q_UNUSED(state);
-    }
-
-    void WorkPage::onThemeUpdated() {
-        QWidget::update();
     }
 } // namespace ui::screen::work

@@ -141,9 +141,8 @@ namespace ui::screen::settings {
     };
 
     SettingsPage::SettingsPage(QWidget *parent)
-        : QWidget(parent) {
+        : BasePage(parent) {
         setObjectName(QStringLiteral("settingsPage"));
-        setAutoFillBackground(false);
 
         setupUi();
     }
@@ -209,7 +208,7 @@ namespace ui::screen::settings {
         m_viewport->setAutoFillBackground(false);
         rootLayout->addWidget(scrollArea);
 
-        updateResponsiveLayout();
+        SettingsPage::updateResponsiveLayout(width());
     }
 
     QWidget *SettingsPage::createSectionHeader(const QString &title) {
@@ -225,7 +224,7 @@ namespace ui::screen::settings {
                                               const QString &title,
                                               const QString &subtitle,
                                               QWidget *trailingWidget) {
-        auto *card = new SettingsCardItem(iconGlyph, title, subtitle, trailingWidget, m_viewport);
+        auto *card = new SettingsCardItem(iconGlyph, title, subtitle, trailingWidget, this);
         m_cards.append(card);
         return card;
     }
@@ -235,14 +234,10 @@ namespace ui::screen::settings {
         update();
     }
 
-    void SettingsPage::resizeEvent(QResizeEvent *event) {
-        QWidget::resizeEvent(event);
-        updateResponsiveLayout();
-    }
-
-    void SettingsPage::updateResponsiveLayout() {
+    void SettingsPage::updateResponsiveLayout(int availableWidth) {
         if (!m_contentLayout) return;
-        const bool narrow = width() > 0 && width() < kNarrowWidthThreshold;
+        const int w = availableWidth > 0 ? availableWidth : width();
+        const bool narrow = w > 0 && w < kNarrowWidthThreshold;
         const int marginH = narrow ? 20 : 36;
         m_contentLayout->setContentsMargins(marginH, 24, marginH, 36);
 

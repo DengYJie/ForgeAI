@@ -1,8 +1,6 @@
 #pragma once
 
-#include <QWidget>
-#include <FluentQt/Design.h>
-#include <FluentQt/Foundation.h>
+#include "ui/base/BasePage.h"
 
 class QVBoxLayout;
 
@@ -14,7 +12,7 @@ namespace ui::screen::knowledge {
     class KnowledgeViewModel;
     struct KnowledgeState;
 
-    class KnowledgePage : public QWidget, public fluent::FluentElement, public fluent::QMLPlus {
+    class KnowledgePage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
@@ -22,11 +20,8 @@ namespace ui::screen::knowledge {
 
         ~KnowledgePage() override = default;
 
-        void onThemeUpdated() override;
-
     private:
         void setupUi();
-
         void setupViewModel();
 
         void render(const KnowledgeState &state);

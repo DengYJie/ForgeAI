@@ -7,15 +7,12 @@
 
 namespace ui::screen::knowledge {
     KnowledgePage::KnowledgePage(QWidget *parent)
-        : QWidget(parent) {
+        : BasePage(parent) {
         setupUi();
         setupViewModel();
     }
 
     void KnowledgePage::setupUi() {
-        setAttribute(Qt::WA_OpaquePaintEvent, false);
-        setAutoFillBackground(false);
-
         m_rootLayout = new QVBoxLayout(this);
         m_rootLayout->setContentsMargins(36, 24, 36, 24);
         m_rootLayout->setSpacing(8);
@@ -42,9 +39,5 @@ namespace ui::screen::knowledge {
 
     void KnowledgePage::render(const KnowledgeState &state) {
         Q_UNUSED(state);
-    }
-
-    void KnowledgePage::onThemeUpdated() {
-        QWidget::update();
     }
 } // namespace ui::screen::knowledge

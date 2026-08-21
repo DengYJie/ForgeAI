@@ -43,6 +43,8 @@ set(PROJECT_SOURCES
         src/ui/animation/AnimatedVisualSource.h
 
         src/ui/base/BaseViewModel.h
+        src/ui/base/BasePage.h
+        src/ui/base/BasePage.cpp
 
         src/ui/navigation/NavigationWidget.h
         src/ui/navigation/NavigationWidget.cpp

@@ -1,8 +1,6 @@
 #pragma once
 
-#include <QWidget>
-#include <FluentQt/Design.h>
-#include <FluentQt/Foundation.h>
+#include "ui/base/BasePage.h"
 
 class QVBoxLayout;
 
@@ -14,7 +12,7 @@ namespace ui::screen::work {
     class WorkViewModel;
     struct WorkState;
 
-    class WorkPage : public QWidget, public fluent::FluentElement, public fluent::QMLPlus {
+    class WorkPage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
@@ -22,11 +20,8 @@ namespace ui::screen::work {
 
         ~WorkPage() override = default;
 
-        void onThemeUpdated() override;
-
     private:
         void setupUi();
-
         void setupViewModel();
 
         void render(const WorkState &state);

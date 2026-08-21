@@ -1,9 +1,6 @@
 #pragma once
-
-#include <QWidget>
 #include <QList>
-#include <FluentQt/Design.h>
-#include <FluentQt/Foundation.h>
+#include "ui/base/BasePage.h"
 
 class QVBoxLayout;
 
@@ -14,10 +11,7 @@ namespace fluent::textfields {
 namespace ui::screen::settings {
     class SettingsCardItem;
 
-    /**
-     * @brief 设置界面，遵循 WinUI 3 Gallery / Windows 11 设置页面规范
-     */
-    class SettingsPage : public QWidget, public fluent::FluentElement, public fluent::QMLPlus {
+    class SettingsPage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
@@ -28,12 +22,10 @@ namespace ui::screen::settings {
         void onThemeUpdated() override;
 
     protected:
-        void resizeEvent(QResizeEvent *event) override;
+        void updateResponsiveLayout(int availableWidth) override;
 
     private:
         void setupUi();
-
-        void updateResponsiveLayout();
 
         QWidget *createSectionHeader(const QString &title);
 
