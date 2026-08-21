@@ -28,17 +28,21 @@ namespace ui::screen::settings {
         themeCombo->addItems({"System", "Light", "Dark"});
         themeCombo->setMinimumWidth(130);
 
-        int currentMode = static_cast<int>(provider->themeMode());
+        // 读数据
+        int currentMode = static_cast<int>(provider->get(core::settings::CoreSettingsProvider::ThemeModeKey));
         themeCombo->setCurrentIndex(currentMode);
 
+        // 写数据
         QObject::connect(themeCombo, qOverload<int>(&fluent::basicinput::ComboBox::currentIndexChanged),
                          [provider](int idx) {
-                             provider->setThemeMode(static_cast<core::settings::CoreSettingsProvider::ThemeMode>(idx));
+                             provider->set(core::settings::CoreSettingsProvider::ThemeModeKey, 
+                                           static_cast<core::settings::ThemeMode>(idx));
                          });
 
-        QObject::connect(provider.get(), &core::settings::CoreSettingsProvider::themeModeChanged, themeCombo,
-                         [themeCombo](core::settings::CoreSettingsProvider::ThemeMode mode) {
-                             int index = static_cast<int>(mode);
+        // 监听全局数据变化并自动更新 UI
+        QObject::connect(provider.get(), &core::settings::ISettingsProvider::dataChanged, themeCombo,
+                         [themeCombo, provider]() {
+                             int index = static_cast<int>(provider->get(core::settings::CoreSettingsProvider::ThemeModeKey));
                              if (themeCombo->currentIndex() != index) {
                                  themeCombo->setCurrentIndex(index);
                              }

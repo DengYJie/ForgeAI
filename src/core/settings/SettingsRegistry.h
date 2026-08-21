@@ -7,6 +7,8 @@
 #include <memory>
 #include "ISettingsProvider.h"
 
+class QFileSystemWatcher;
+
 namespace core::settings {
     class SettingsRegistry : public QObject {
         Q_OBJECT
@@ -22,11 +24,14 @@ namespace core::settings {
 
         void saveAllSync();
 
-    private
-    slots:
+    private slots:
         void onProviderDataChanged();
 
         void flushDirtyProviders();
+
+        void onFileSystemChanged();
+
+        void doReload();
 
     private:
         SettingsRegistry(QObject *parent = nullptr);
@@ -42,5 +47,8 @@ namespace core::settings {
 
         QJsonObject m_cachedMainConfig;
         QTimer *m_saveTimer = nullptr;
+        QTimer *m_reloadTimer = nullptr;
+        QFileSystemWatcher *m_watcher = nullptr;
+        bool m_isSaving = false;
     };
 } // namespace core::settings

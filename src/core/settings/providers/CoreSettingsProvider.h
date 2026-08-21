@@ -1,19 +1,20 @@
 #pragma once
-#include "../ISettingsProvider.h"
-#include <components/foundation/FluentElement.h>
+#include <QObject>
+#include "core/settings/BaseSettingsProvider.h"
+#include <FluentQt/Foundation.h>
 
 namespace core::settings {
-    class CoreSettingsProvider : public ISettingsProvider {
+    enum class ThemeMode {
+        System = 0,
+        Light = 1,
+        Dark = 2
+    };
+
+    class CoreSettingsProvider : public BaseSettingsProvider {
         Q_OBJECT
 
     public:
-        enum class ThemeMode {
-            System = 0,
-            Light = 1,
-            Dark = 2
-        };
-
-        Q_ENUM(ThemeMode)
+        static inline const SettingKey<ThemeMode> ThemeModeKey{"themeMode", ThemeMode::System};
 
         explicit CoreSettingsProvider(QObject *parent = nullptr);
 
@@ -22,22 +23,14 @@ namespace core::settings {
         bool useSeparateFile() const override { return false; }
         QString configFileName() const override { return ""; }
 
-        void fromJson(const QJsonObject &json) override;
+    protected:
+        void onSettingChanged(const QString &key) override;
 
-        void saveToJson(QJsonObject &json) const override;
-
-        ThemeMode themeMode() const { return m_themeMode; }
-
-        void setThemeMode(ThemeMode mode);
-
-        void applyTheme();
-
-    signals:
-        void themeModeChanged(ThemeMode mode);
+        void onSettingsLoaded() override;
 
     private:
-        fluent::FluentElement::Theme resolveSystemTheme() const;
+        void applyTheme() const;
 
-        ThemeMode m_themeMode = ThemeMode::System;
+        static fluent::FluentElement::Theme resolveSystemTheme();
     };
 } // namespace core::settings

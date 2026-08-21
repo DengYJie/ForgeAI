@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QJsonDocument>
+#include <QFileSystemWatcher>
 
 namespace core::settings {
     SettingsRegistry &SettingsRegistry::instance() {
@@ -15,6 +16,14 @@ namespace core::settings {
         m_saveTimer = new QTimer(this);
         m_saveTimer->setSingleShot(true);
         connect(m_saveTimer, &QTimer::timeout, this, &SettingsRegistry::flushDirtyProviders);
+
+        m_reloadTimer = new QTimer(this);
+        m_reloadTimer->setSingleShot(true);
+        connect(m_reloadTimer, &QTimer::timeout, this, &SettingsRegistry::doReload);
+
+        m_watcher = new QFileSystemWatcher(this);
+        connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, &SettingsRegistry::onFileSystemChanged);
+        connect(m_watcher, &QFileSystemWatcher::fileChanged, this, &SettingsRegistry::onFileSystemChanged);
     }
 
     SettingsRegistry::~SettingsRegistry() {
@@ -48,6 +57,12 @@ namespace core::settings {
     }
 
     void SettingsRegistry::loadAll() {
+        QDir dir;
+        dir.mkpath(getConfigDirPath());
+        if (!m_watcher->directories().contains(getConfigDirPath())) {
+            m_watcher->addPath(getConfigDirPath());
+        }
+
         QString mainConfigPath = getMainConfigPath();
         QFile file(mainConfigPath);
         if (file.open(QIODevice::ReadOnly)) {
@@ -85,6 +100,8 @@ namespace core::settings {
 
     void SettingsRegistry::flushDirtyProviders() {
         if (m_dirtyProviders.isEmpty()) return;
+
+        m_isSaving = true;
 
         QDir dir;
         dir.mkpath(getConfigDirPath());
@@ -130,6 +147,47 @@ namespace core::settings {
         }
 
         m_dirtyProviders.clear();
+
+        QTimer::singleShot(200, this, [this]() {
+            m_isSaving = false;
+        });
+    }
+
+    void SettingsRegistry::onFileSystemChanged() {
+        if (m_isSaving) return;
+        m_reloadTimer->start(100);
+    }
+
+    void SettingsRegistry::doReload() {
+        if (m_isSaving) return;
+
+        QFile file(getMainConfigPath());
+        QJsonObject newMainConfig;
+
+        if (file.exists() && file.open(QIODevice::ReadOnly)) {
+            newMainConfig = QJsonDocument::fromJson(file.readAll()).object();
+            m_cachedMainConfig = newMainConfig;
+            file.close();
+        } else if (!file.exists()) {
+            m_cachedMainConfig = QJsonObject();
+            // newMainConfig is already empty
+        }
+
+        for (const auto &provider: m_providers) {
+            if (m_dirtyProviders.contains(provider.get())) {
+                continue;
+            }
+
+            if (provider->useSeparateFile()) {
+                QString path = getConfigDirPath() + "/" + provider->configFileName();
+                QFile sepFile(path);
+                if (sepFile.exists() && sepFile.open(QIODevice::ReadOnly)) {
+                    provider->fromJson(QJsonDocument::fromJson(sepFile.readAll()).object());
+                }
+            } else {
+                provider->fromJson(newMainConfig.value(provider->id()).toObject());
+            }
+        }
     }
 
     void SettingsRegistry::saveAllSync() {

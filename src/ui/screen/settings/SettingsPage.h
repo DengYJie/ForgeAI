@@ -11,17 +11,12 @@ namespace fluent::textfields {
     class Label;
 }
 
-namespace fluent::basicinput {
-    class ComboBox;
-    class Button;
-}
-
 namespace ui::screen::settings {
     class SettingsCardItem;
 
     /**
- * @brief 设置界面，遵循 WinUI 3 Gallery / Windows 11 设置页面规范
- */
+     * @brief 设置界面，遵循 WinUI 3 Gallery / Windows 11 设置页面规范
+     */
     class SettingsPage : public QWidget, public fluent::FluentElement, public fluent::QMLPlus {
         Q_OBJECT
 
@@ -37,8 +32,6 @@ namespace ui::screen::settings {
 
     private:
         void setupUi();
-
-        void setupConnections();
 
         void updateResponsiveLayout();
 

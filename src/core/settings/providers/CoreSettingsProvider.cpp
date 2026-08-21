@@ -1,21 +1,20 @@
 #include "CoreSettingsProvider.h"
 #include "core/settings/SettingsRegistry.h"
 #include <QGuiApplication>
-#include <QStyleHints>
 #include <QSettings>
 #include <QPalette>
 #include "compatibility/QtCompat.h"
 
 namespace core::settings {
-    CoreSettingsProvider::CoreSettingsProvider(QObject *parent) : ISettingsProvider(parent) {
+    CoreSettingsProvider::CoreSettingsProvider(QObject *parent) : BaseSettingsProvider(parent) {
         fluentConnectSystemColorSchemeChanged(this, [this]() {
-            if (m_themeMode == ThemeMode::System) {
+            if (get(ThemeModeKey) == ThemeMode::System) {
                 applyTheme();
             }
         });
     }
 
-    fluent::FluentElement::Theme CoreSettingsProvider::resolveSystemTheme() const {
+    fluent::FluentElement::Theme CoreSettingsProvider::resolveSystemTheme() {
         const FluentSystemColorScheme scheme = fluentSystemColorScheme();
         if (scheme == FluentSystemColorScheme::Dark)
             return fluent::FluentElement::Dark;
@@ -41,33 +40,22 @@ namespace core::settings {
         return fluent::FluentElement::Dark;
     }
 
-    void CoreSettingsProvider::fromJson(const QJsonObject &json) {
-        if (json.contains("themeMode")) {
-            int val = json.value("themeMode").toInt(static_cast<int>(ThemeMode::System));
-            m_themeMode = static_cast<ThemeMode>(val);
-        }
-        applyTheme();
-        emit themeModeChanged(m_themeMode);
-    }
-
-    void CoreSettingsProvider::saveToJson(QJsonObject &json) const {
-        json.insert("themeMode", static_cast<int>(m_themeMode));
-    }
-
-    void CoreSettingsProvider::setThemeMode(ThemeMode mode) {
-        if (m_themeMode != mode) {
-            m_themeMode = mode;
+    void CoreSettingsProvider::onSettingChanged(const QString &key) {
+        if (key == ThemeModeKey.name) {
             applyTheme();
-            emit themeModeChanged(m_themeMode);
-            emit dataChanged();
         }
     }
 
-    void CoreSettingsProvider::applyTheme() {
+    void CoreSettingsProvider::onSettingsLoaded() {
+        applyTheme();
+    }
+
+    void CoreSettingsProvider::applyTheme() const {
+        ThemeMode currentMode = get(ThemeModeKey);
         fluent::FluentElement::Theme effective = fluent::FluentElement::Dark;
-        if (m_themeMode == ThemeMode::System) {
+        if (currentMode == ThemeMode::System) {
             effective = resolveSystemTheme();
-        } else if (m_themeMode == ThemeMode::Light) {
+        } else if (currentMode == ThemeMode::Light) {
             effective = fluent::FluentElement::Light;
         } else {
             effective = fluent::FluentElement::Dark;

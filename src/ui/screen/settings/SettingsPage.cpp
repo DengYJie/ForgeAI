@@ -1,10 +1,7 @@
 #include "SettingsPage.h"
 
 #include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QGridLayout>
-#include <QResizeEvent>
-#include <QPainter>
 #include <QPalette>
 
 #include <FluentQt/Design.h>
@@ -12,7 +9,6 @@
 #include <FluentQt/Scrolling.h>
 #include <FluentQt/Layout.h>
 #include <FluentQt/TextFields.h>
-#include <FluentQt/BasicInput.h>
 
 #include "core/settings/SettingsRegistry.h"
 #include "ui/screen/settings/SettingsUIRegistry.h"
@@ -140,7 +136,6 @@ namespace ui::screen::settings {
         setAutoFillBackground(false);
 
         setupUi();
-        setupConnections();
     }
 
     void SettingsPage::setupUi() {
@@ -176,7 +171,7 @@ namespace ui::screen::settings {
 
         // 动态加载所有注册在该分组下的 UI 组件
         auto factories = SettingsUIRegistry::instance().allFactories();
-        for (auto factory: factories) {
+        for (const auto &factory: factories) {
             auto provider = core::settings::SettingsRegistry::instance().getProvider(factory->targetProviderId());
             if (provider && provider->category() == "Appearance & behavior") {
                 QWidget *control = factory->createControlWidget(m_viewport);
@@ -195,9 +190,6 @@ namespace ui::screen::settings {
         rootLayout->addWidget(scrollArea);
 
         updateResponsiveLayout();
-    }
-
-    void SettingsPage::setupConnections() {
     }
 
     QWidget *SettingsPage::createSectionHeader(const QString &title) {

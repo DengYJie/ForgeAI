@@ -1,0 +1,108 @@
+# ==============================================================================
+# ForgeAI .clang-tidy Configuration
+# Tailored for Modern C++23, Qt 6, and FluentQt Architecture
+# ==============================================================================
+
+---
+# 仅分析项目内部源代码，忽略 Qt、Windows SDK 以及第三方依赖库 (_deps/)
+HeaderFilterRegex: 'src/.*'
+
+# 检查规则配置
+Checks: >
+  -*,
+  # --- Bugprone: 潜在错误与危险行为检测 ---
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,     # 禁用：UI 坐标/尺寸 (x, y, w, h) 参数很多，容易误报
+  -bugprone-branch-clone,
+
+  # --- Performance: 性能与拷贝优化 ---
+  performance-*,
+  -performance-no-int-to-ptr,
+
+  # --- Modernize: 现代 C++ 规范 (C++20/C++23) ---
+  modernize-*,
+  -modernize-use-trailing-return-type,       # 禁用：Qt 习惯传统返回类型声明 (void func() 而非 auto func() -> void)
+  -modernize-avoid-c-arrays,
+
+  # --- Readability: 可读性与代码整洁 ---
+  readability-*,
+  -readability-magic-numbers,                # 禁用：UI 布局存在大量像素间距 (margin/padding/size)，常量化会降低可读性
+  -readability-isolate-declaration,
+  -readability-redundant-access-specifiers,
+
+  # --- CppCoreGuidelines: 核心指南精选 ---
+  cppcoreguidelines-interfaces-global-init,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-prefer-member-initializer,
+
+  # --- CERT: 安全规范 ---
+  cert-dcl21-cpp,
+  cert-dcl58-cpp,
+  cert-err34-c,
+  cert-err52-cpp,
+  cert-err60-cpp,
+  cert-flp30-c,
+  cert-msc50-cpp,
+  cert-msc51-cpp,
+  cert-str34-c,
+
+  # --- Misc: 杂项高质量检查 ---
+  misc-misplaced-const,
+  misc-new-delete-overloads,
+  misc-non-copyable-objects,
+  misc-throw-by-value-catch-by-reference,
+  misc-unconventional-assign-operator,
+  misc-uniqueptr-reset-release,
+  misc-unused-parameters,
+  misc-unused-using-decls
+
+# 详细规则参数微调
+CheckOptions:
+  # 1. auto 关键字启发：类型名称较长（>= 5 字符）或右侧已有显式类型时推荐 auto
+  - key: modernize-use-auto.MinTypeNameLength
+    value: '5'
+
+  # 2. 避免无意义的默认参数提示
+  - key: modernize-use-default-member-init.UseAssignment
+    value: 'true'
+
+  # 3. 命名规范约束 (匹配当前项目工程规范)
+  # 类与结构体: PascalCase
+  - key: readability-identifier-naming.ClassCase
+    value: 'CamelCase'
+  - key: readability-identifier-naming.StructCase
+    value: 'CamelCase'
+  - key: readability-identifier-naming.EnumCase
+    value: 'CamelCase'
+  - key: readability-identifier-naming.EnumConstantCase
+    value: 'CamelCase'
+
+  # 成员变量: m_camelCase
+  - key: readability-identifier-naming.MemberCase
+    value: 'camelCase'
+  - key: readability-identifier-naming.MemberPrefix
+    value: 'm_'
+
+  # 常量 / constexpr: kCamelCase / kPascalCase
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: 'CamelCase'
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: 'k'
+
+  # 函数与局部变量: camelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: 'camelCase'
+  - key: readability-identifier-naming.MethodCase
+    value: 'camelCase'
+  - key: readability-identifier-naming.VariableCase
+    value: 'camelCase'
+  - key: readability-identifier-naming.ParameterCase
+    value: 'camelCase'
+
+  # 命名空间: lower_case
+  - key: readability-identifier-naming.NamespaceCase
+    value: 'lower_case'
