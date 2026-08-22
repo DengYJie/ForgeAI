@@ -246,6 +246,8 @@ namespace data::repository {
                 modelQuery.bindValue(25, 0); // is_custom
                 modelQuery.exec();
             }
+        }
+
         return tx.commit();
     }
 

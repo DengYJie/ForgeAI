@@ -19,6 +19,7 @@ compile_commands.json
 CTestTestfile.cmake
 _deps/
 .fetchcontent/
+models.json
 
 # CMake Presets (User presets should not be checked into git)
 CMakeUserPresets.json

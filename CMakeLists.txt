@@ -13,6 +13,7 @@ find_package(Qt${QT_VERSION_MAJOR}
         Gui
         Widgets
         Network
+        Sql
 )
 
 include(FetchContent)
@@ -159,9 +160,50 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/factories/CoreSettingsUIFactory.cpp
         src/ui/screen/settings/SettingsPage.h
         src/ui/screen/settings/SettingsPage.cpp
+
+        src/domain/Types.h
+        src/domain/conversation/Conversation.h
+        src/domain/conversation/Turn.h
+        src/domain/conversation/MessageBlock.h
+        src/domain/conversation/Message.h
+        src/domain/agent/Agent.h
+        src/domain/agent/ToolDefinition.h
+        src/domain/agent/ToolExecution.h
+        src/domain/agent/RuntimeCheckpoint.h
+        src/domain/project/Project.h
+        src/domain/model/ModelCapabilities.h
+        src/domain/model/ModelParameters.h
+        src/domain/model/Model.h
+        src/domain/model/ModelProvider.h
+        src/domain/repository/IConversationRepository.h
+        src/domain/repository/IMessageTranscriptRepository.h
+        src/domain/repository/IProjectRepository.h
+        src/domain/repository/IModelRepository.h
+
+        src/data/sqlite/SqlTransaction.h
+        src/data/sqlite/SqlTransaction.cpp
+        src/data/sqlite/SqlHelper.h
+        src/data/sqlite/SqlHelper.cpp
+        src/data/sqlite/DatabaseManager.h
+        src/data/sqlite/DatabaseManager.cpp
+        src/data/repository/SqliteConversationRepository.h
+        src/data/repository/SqliteProjectRepository.h
+        src/data/repository/SqliteModelRepository.h
+        src/data/repository/SqliteModelRepository.cpp
+        src/data/repository/JsonlMessageRepository.h
+        src/data/repository/JsonlMessageRepository.cpp
+
+        src/core/context/ContextManager.h
+        src/core/context/ContextManager.cpp
+        src/core/context/PromptBuilder.h
+        src/core/context/PromptBuilder.cpp
+        src/core/model/ModelRegistry.h
+        src/core/model/ModelRegistry.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+
+add_subdirectory(res)
 
 set_target_properties(${PROJECT_NAME}
         PROPERTIES
@@ -179,6 +221,8 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Core
         Qt::Gui
         Qt::Widgets
+        Qt::Network
+        Qt::Sql
         QWindowKit::Widgets
         FluentQt::FluentQt
         qlitehtml
