@@ -3,7 +3,7 @@ project(qlitehtml)
 
 add_library(qlitehtml STATIC
     src/container/container_qpainter.cpp
-    src/container/container_painting.cpp
+    src/container/litehtml_renderer.cpp
     src/container/container_selection.cpp
     src/container/container_serializer.cpp
     src/elements/form_control_element.cpp

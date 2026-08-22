@@ -1271,3 +1271,105 @@ void DocumentContainerContext::setMasterStyleSheet(const QString &css)
 {
     d->masterStyleSheet = css;
 }
+void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
+                                         const char *text,
+                                         litehtml::uint_ptr hFont,
+                                         litehtml::web_color color,
+                                         const litehtml::position &pos)
+{
+    const QRect placementRect = toQRect(pos).translated(m_scrollPosition);
+    const auto segIt = m_selection.segmentMap.constFind(placementRect);
+    
+    // Convert segIt to pointer
+    const qlitehtml::internal::SelectionSegmentInfo* segInfo = nullptr;
+    qlitehtml::internal::SelectionSegmentInfo localSeg;
+    if (segIt != m_selection.segmentMap.constEnd() && m_paletteCallback) {
+        localSeg.charStart = segIt.value().charStart;
+        localSeg.charEnd = segIt.value().charEnd;
+        localSeg.pixelStart = segIt.value().pixelStart;
+        localSeg.pixelEnd = segIt.value().pixelEnd;
+        segInfo = &localSeg;
+    }
+    
+    m_renderer.draw_text(toQPainter(hdc),
+                         QString::fromUtf8(text),
+                         toQFont(hFont),
+                         toQColor(color),
+                         toQRect(pos),
+                         segInfo,
+                         m_paletteCallback ? m_paletteCallback() : QPalette());
+}
+
+void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc, const litehtml::list_marker &marker)
+{
+    QPixmap pixmap;
+    if (!marker.image.empty()) {
+        pixmap = getPixmap(QString::fromUtf8(marker.image.data(), int(marker.image.size())),
+                           QString::fromUtf8(marker.baseurl));
+    }
+    m_renderer.draw_list_marker(toQPainter(hdc), marker, pixmap);
+}
+
+void DocumentContainerPrivate::draw_solid_fill(litehtml::uint_ptr hdc,
+                                               const litehtml::background_layer &layer,
+                                               const litehtml::web_color &color)
+{
+    if (layer.is_root) {
+        // We still need root fill in the router because it uses m_clientRect
+        auto painter = toQPainter(hdc);
+        painter->save();
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(toQColor(color));
+        painter->drawRect(m_clientRect);
+        painter->restore();
+        return;
+    }
+    m_renderer.draw_solid_fill(toQPainter(hdc), layer, toQColor(color));
+}
+
+void DocumentContainerPrivate::draw_linear_gradient(litehtml::uint_ptr hdc,
+                                                    const litehtml::background_layer &layer,
+                                                    const litehtml::background_layer::linear_gradient &gradient)
+{
+    m_renderer.draw_linear_gradient(toQPainter(hdc), layer, gradient);
+}
+
+void DocumentContainerPrivate::draw_radial_gradient(litehtml::uint_ptr hdc,
+                                                    const litehtml::background_layer &layer,
+                                                    const litehtml::background_layer::radial_gradient &gradient)
+{
+    m_renderer.draw_radial_gradient(toQPainter(hdc), layer, gradient);
+}
+
+void DocumentContainerPrivate::draw_conic_gradient(litehtml::uint_ptr hdc,
+                                                   const litehtml::background_layer &layer,
+                                                   const litehtml::background_layer::conic_gradient &gradient)
+{
+    m_renderer.draw_conic_gradient(toQPainter(hdc), layer, gradient);
+}
+
+void DocumentContainerPrivate::draw_borders(litehtml::uint_ptr hdc,
+                                            const litehtml::borders &borders,
+                                            const litehtml::position &draw_pos,
+                                            bool root)
+{
+    m_renderer.draw_borders(toQPainter(hdc), borders, draw_pos, root);
+}
+
+void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
+                                          const litehtml::background_layer &layer,
+                                          const std::string &url,
+                                          const std::string &base_url)
+{
+    if (url.empty()) return;
+    QPixmap pixmap = getPixmap(QString::fromUtf8(url.data(), int(url.size())),
+                               QString::fromUtf8(base_url.data(), int(base_url.size())));
+    m_renderer.draw_image(toQPainter(hdc), layer, pixmap);
+}
+
+
+void DocumentContainerPrivate::drawSelection(QPainter *painter, const QRect &clip) const
+{
+    m_renderer.draw_selection(painter, m_selection.selection, m_scrollPosition, clip, m_paletteCallback ? m_paletteCallback() : QPalette());
+}
+

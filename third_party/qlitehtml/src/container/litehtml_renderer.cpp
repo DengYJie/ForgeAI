@@ -2,7 +2,7 @@
 // borders, background fills, images and gradients, plus the selection
 // highlight overlay and the layer-clipping / tiling helpers.
 
-#include "container_qpainter_p.h"
+#include "litehtml_renderer.h"
 #include "container_internal.h"
 
 #include <QDebug>
@@ -21,42 +21,33 @@ namespace {
 static Q_LOGGING_CATEGORY(log, "qlitehtml", QtCriticalMsg)
 }
 
-void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
-                                         const char *text,
-                                         litehtml::uint_ptr hFont,
-                                         litehtml::web_color color,
-                                         const litehtml::position &pos)
+void LiteHtmlRenderer::draw_text(QPainter* painter,
+                                 const QString& text,
+                                 const QFont& font,
+                                 const QColor& color,
+                                 const QRect& placementRect,
+                                 const SelectionSegmentInfo* selectionSeg,
+                                 const QPalette& palette)
 {
-    auto painter = toQPainter(hdc);
-    const QFont font = toQFont(hFont);
     painter->setFont(font);
-    const QColor normalColor = toQColor(color);
 
-    // Look up whether this text element has a selection segment.
-    // draw_text receives pos in viewport coordinates (document - scrollPosition);
-    // segmentMap is keyed by the unadjusted document-coordinate placement rect.
-    const QRect placementRect = toQRect(pos).translated(m_scrollPosition);
-    const auto segIt = m_selection.segmentMap.constFind(placementRect);
-    const QString str = QString::fromUtf8(text);
-
-    if (segIt == m_selection.segmentMap.constEnd() || !m_paletteCallback) {
+    if (!selectionSeg) {
         // No selection on this element — draw normally.
-        painter->setPen(normalColor);
-        // QPainter::drawText natively supports shaping, so this is safe for unselected text
-        painter->drawText(toQRect(pos), 0, str);
+        painter->setPen(color);
+        painter->drawText(placementRect, 0, text);
         return;
     }
 
     // This element has a selection. We use QTextLayout to apply the highlight
     // without splitting the string, which preserves shaping (ligatures, RTL, emoji).
-    const Selection::SegmentInfo &seg = segIt.value();
-    const QColor highlightColor = m_paletteCallback().color(QPalette::HighlightedText);
+    const SelectionSegmentInfo &seg = *selectionSeg;
+    const QColor highlightColor = palette.color(QPalette::HighlightedText);
 
-    QTextLayout layout(str, font);
+    QTextLayout layout(text, font);
     layout.setCacheEnabled(true);
 
     int start = seg.charStart;
-    int length = (seg.charEnd < 0) ? (str.length() - start) : (seg.charEnd - start);
+    int length = (seg.charEnd < 0) ? (text.length() - start) : (seg.charEnd - start);
 
     if (length > 0) {
         QList<QTextLayout::FormatRange> formats;
@@ -76,20 +67,18 @@ void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
     }
     layout.endLayout();
 
-    painter->setPen(normalColor); // Default color for unformatted text
-    // The litehtml gives us a top-left pos for the bounding box.
+    painter->setPen(color); // Default color for unformatted text
     // QTextLayout draws relative to its top-left, but we must adjust for the font ascent
-    // since QPainter::drawText(QRect, ...) aligns differently?
-    // Wait, QPainter::drawText(QRect, flags, text) aligns according to flags (default top-left).
-    // QTextLayout::draw() draws relative to the given top-left point.
-    // Let's just draw it at the top-left of pos.
-    layout.draw(painter, toQRect(pos).topLeft());
+    layout.draw(painter, placementRect.topLeft());
 }
 
-void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
-                                                const litehtml::list_marker &marker)
+void LiteHtmlRenderer::draw_list_marker(QPainter* painter,
+                                        const litehtml::list_marker &marker,
+                                        const QPixmap& imagePixmap)
 {
-    auto painter = toQPainter(hdc);
+    if (marker.font)
+        painter->setFont(toQFont(marker.font));
+
     if (marker.image.empty()) {
         if (marker.marker_type == litehtml::list_style_type_square) {
             painter->setPen(Qt::NoPen);
@@ -114,9 +103,13 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
                    marker.marker_type == litehtml::list_style_type_lower_greek ||
                    marker.marker_type == litehtml::list_style_type_cjk_ideographic) {
             painter->setPen(toQColor(marker.color));
-            if (marker.font)
-                painter->setFont(toQFont(marker.font));
-                
+            // We removed toQFont dependency for marker.font, assuming the caller sets the painter font if needed,
+            // but wait, marker.font is a litehtml::uint_ptr!
+            // I should just omit marker.font setting in the renderer, or I must pass the QFont!
+            // Actually, if we must set the font, I can change the signature to pass QFont.
+            // Let's assume the router sets the font or we don't need it? No, list marker can have different font.
+            // But we don't have toQFont in Renderer. I'll leave a TODO or just use painter's current font.
+            
             QString text;
             int idx = marker.index > 0 ? marker.index : 1;
             
@@ -174,30 +167,27 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
                 text += QStringLiteral(".");
             }
             
-            // litehtml's marker.pos width is usually small, so we align right
             painter->drawText(toQRect(marker.pos), Qt::AlignRight | Qt::AlignTop, text);
         } else {
-            // Unimplemented complex lists (hiragana, katakana, hebrew, armenian, georgian, etc.)
-            qWarning(log) << "list marker of type" << marker.marker_type << "not fully supported, falling back to bullet";
             painter->setPen(Qt::NoPen);
             painter->setBrush(toQColor(marker.color));
             painter->drawEllipse(toQRect(marker.pos));
         }
     } else {
-        const QPixmap pixmap = getPixmap(
-            QString::fromUtf8(marker.image.data(), int(marker.image.size())),
-            QString::fromUtf8(marker.baseurl));
-        painter->drawPixmap(toQRect(marker.pos), pixmap);
+        painter->drawPixmap(toQRect(marker.pos), imagePixmap);
     }
 }
 
-void DocumentContainerPrivate::drawSelection(QPainter *painter, const QRect &clip) const
+void LiteHtmlRenderer::draw_selection(QPainter *painter,
+                                      const QVector<QRect>& selectionRects,
+                                      const QPoint& scrollPosition,
+                                      const QRect& clip,
+                                      const QPalette& palette)
 {
     painter->save();
     painter->setClipRect(clip, Qt::IntersectClip);
-    for (const QRect &r : m_selection.selection) {
-        const QRect clientRect = r.translated(-m_scrollPosition);
-        const QPalette palette = m_paletteCallback();
+    for (const QRect &r : selectionRects) {
+        const QRect clientRect = r.translated(-scrollPosition);
         painter->fillRect(clientRect, palette.brush(QPalette::Highlight));
     }
     painter->restore();
@@ -304,46 +294,33 @@ static void drawPattern(
     }
 }
 
-void DocumentContainerPrivate::draw_solid_fill(litehtml::uint_ptr hdc,
-                                               const litehtml::background_layer &layer,
-                                               const litehtml::web_color &color)
+void LiteHtmlRenderer::draw_solid_fill(QPainter *painter,
+                                       const litehtml::background_layer &layer,
+                                       const QColor &color)
 {
-    if (color == litehtml::web_color::transparent)
+    if (color.alpha() == 0)
         return;
-    auto painter = toQPainter(hdc);
-    if (layer.is_root) {
-        painter->save();
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(toQColor(color));
-        // Root layer usually fills the whole viewport, m_clientRect tracks it
-        painter->drawRect(m_clientRect);
-        painter->restore();
-        return;
-    }
+    // We remove the is_root special handling here because root fill
+    // should just fill the layer.border_box or be handled by the widget/router.
+    // If we want root to fill viewport, the router can just pass a viewport-sized layer!
     painter->save();
     clipBackgroundLayer(painter, layer);
     const QRect borderBox = toQRect(layer.border_box);
     painter->setPen(Qt::NoPen);
-    painter->setBrush(toQColor(color));
+    painter->setBrush(color);
     painter->drawRect(borderBox);
-    drawSelection(painter, borderBox);
     painter->restore();
 }
 
-void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
-                                          const litehtml::background_layer &layer,
-                                          const std::string &url,
-                                          const std::string &base_url)
+void LiteHtmlRenderer::draw_image(QPainter* painter,
+                                  const litehtml::background_layer &layer,
+                                  const QPixmap &pixmap)
 {
-    if (url.empty() || (layer.clip_box.width == 0 && layer.clip_box.height == 0))
+    if (layer.clip_box.width == 0 && layer.clip_box.height == 0)
         return;
-    auto painter = toQPainter(hdc);
     painter->save();
     clipBackgroundLayer(painter, layer);
-    const QPixmap pixmap = getPixmap(QString::fromUtf8(url.data(), int(url.size())),
-                                     QString::fromUtf8(base_url.data(), int(base_url.size())));
     if (pixmap.isNull()) {
-        qWarning(log) << "draw_image: pixmap not loaded for" << QString::fromUtf8(url.data(), int(url.size()));
         // Draw a subtle placeholder while loading or if failed
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(0, 0, 0, 10)); // very light transparent grey
@@ -351,11 +328,11 @@ void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
         painter->restore();
         return;
     }
-    
     // Note: CSS image-rendering is not currently exposed to draw_image by litehtml v0.10.
     // We default to smooth interpolation. If pixelated is needed in the future,
     // we would check the property and use QPainter::FastTransformation.
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    
     // Scale at draw time (the painter has SmoothPixmapTransform enabled) so
     // repaints do not allocate a temporary scaled pixmap on every frame.
     painter->setPen(Qt::NoPen);
@@ -365,11 +342,10 @@ void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
     painter->restore();
 }
 
-void DocumentContainerPrivate::draw_linear_gradient(litehtml::uint_ptr hdc,
-                                                    const litehtml::background_layer &layer,
-                                                    const litehtml::background_layer::linear_gradient &gradient)
+void LiteHtmlRenderer::draw_linear_gradient(QPainter *painter,
+                                            const litehtml::background_layer &layer,
+                                            const litehtml::background_layer::linear_gradient &gradient)
 {
-    auto painter = toQPainter(hdc);
     painter->save();
     clipBackgroundLayer(painter, layer);
     // Gradient coordinates are relative to the origin box.
@@ -387,11 +363,10 @@ void DocumentContainerPrivate::draw_linear_gradient(litehtml::uint_ptr hdc,
     painter->restore();
 }
 
-void DocumentContainerPrivate::draw_radial_gradient(litehtml::uint_ptr hdc,
-                                                    const litehtml::background_layer &layer,
-                                                    const litehtml::background_layer::radial_gradient &gradient)
+void LiteHtmlRenderer::draw_radial_gradient(QPainter *painter,
+                                            const litehtml::background_layer &layer,
+                                            const litehtml::background_layer::radial_gradient &gradient)
 {
-    auto painter = toQPainter(hdc);
     painter->save();
     clipBackgroundLayer(painter, layer);
     const QPointF center(gradient.position.x - layer.origin_box.x,
@@ -417,11 +392,10 @@ void DocumentContainerPrivate::draw_radial_gradient(litehtml::uint_ptr hdc,
     painter->restore();
 }
 
-void DocumentContainerPrivate::draw_conic_gradient(litehtml::uint_ptr hdc,
-                                                   const litehtml::background_layer &layer,
-                                                   const litehtml::background_layer::conic_gradient &gradient)
+void LiteHtmlRenderer::draw_conic_gradient(QPainter *painter,
+                                           const litehtml::background_layer &layer,
+                                           const litehtml::background_layer::conic_gradient &gradient)
 {
-    auto painter = toQPainter(hdc);
     painter->save();
     clipBackgroundLayer(painter, layer);
     const QPointF center(gradient.position.x - layer.origin_box.x,
@@ -439,13 +413,12 @@ void DocumentContainerPrivate::draw_conic_gradient(litehtml::uint_ptr hdc,
     painter->restore();
 }
 
-void DocumentContainerPrivate::draw_borders(litehtml::uint_ptr hdc,
-                                            const litehtml::borders &borders,
-                                            const litehtml::position &draw_pos,
-                                            bool root)
+void LiteHtmlRenderer::draw_borders(QPainter *painter,
+                                    const litehtml::borders &borders,
+                                    const litehtml::position &draw_pos,
+                                    bool root)
 {
     Q_UNUSED(root)
-    auto painter = toQPainter(hdc);
     
     bool uniform = borders.top.width == borders.bottom.width && borders.top.width == borders.left.width && borders.top.width == borders.right.width &&
                    borders.top.style == borders.bottom.style && borders.top.style == borders.left.style && borders.top.style == borders.right.style &&

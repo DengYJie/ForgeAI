@@ -2,6 +2,7 @@
 
 #include "container_qpainter.h"
 #include "elements/details_element.h"
+#include "litehtml_renderer.h"
 
 #include <litehtml.h>
 
@@ -177,6 +178,7 @@ public: // document_container API
     QPoint m_scrollPosition;
     QString m_caption;
     QFont m_defaultFont = QFont(sansSerifFont(), 16);
+    mutable qlitehtml::internal::LiteHtmlRenderer m_renderer;
     QByteArray m_defaultFontFamilyName = m_defaultFont.family().toUtf8();
     // LRU image cache, costed by decoded size (1 unit = 1 KiB), capped at
     // 64 MiB so long documents cannot grow memory without bound.
