@@ -39,7 +39,12 @@ public:
 
     void scrollToAnchor(const QString &name);
 
-    using ResourceHandler = std::function<QByteArray(QUrl)>;
+    enum class ResourceType {
+        Image,
+        StyleSheet,
+        Font
+    };
+    using ResourceHandler = std::function<QByteArray(const QUrl &url, ResourceType type)>;
     void setResourceHandler(const ResourceHandler &handler);
 
     // declaring this Q_INVOKABLE to make it Squish-testable

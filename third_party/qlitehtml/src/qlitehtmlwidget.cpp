@@ -190,7 +190,27 @@ void QLiteHtmlWidget::scrollToAnchor(const QString &name)
 
 void QLiteHtmlWidget::setResourceHandler(const QLiteHtmlWidget::ResourceHandler &handler)
 {
-    d->documentContainer.setDataCallback(handler);
+    // Re-wrap the high-level ResourceType enum to the internal DocumentContainer enum
+    d->documentContainer.setResourceHandler(
+        [handler](const QUrl &url, DocumentContainer::ResourceType type) -> QByteArray {
+            if (!handler)
+                return {};
+            QLiteHtmlWidget::ResourceType widgetType;
+            switch (type) {
+            case DocumentContainer::ResourceType::Image:
+                widgetType = QLiteHtmlWidget::ResourceType::Image;
+                break;
+            case DocumentContainer::ResourceType::StyleSheet:
+                widgetType = QLiteHtmlWidget::ResourceType::StyleSheet;
+                break;
+            case DocumentContainer::ResourceType::Font:
+                widgetType = QLiteHtmlWidget::ResourceType::Font;
+                break;
+            default:
+                return {};
+            }
+            return handler(url, widgetType);
+        });
 }
 
 QString QLiteHtmlWidget::selectedText() const

@@ -194,7 +194,7 @@ void DocumentContainerPrivate::load_image(const char *src,
 
     // Without a resource handler there is nothing to fetch; remember the
     // miss so get_image_size()/draw_image() do not retry.
-    if (!m_dataCallback) {
+    if (!m_resourceHandler) {
         m_pixmaps.insert(url, new QPixmap());
         return;
     }
@@ -210,7 +210,7 @@ void DocumentContainerPrivate::load_image(const char *src,
         const std::shared_ptr<DocumentContainerPrivate> self = weak.lock();
         if (!self)
             return;
-        const QByteArray data = self->m_dataCallback(url);
+        const QByteArray data = self->m_resourceHandler(url, DocumentContainer::ResourceType::Image);
         QMetaObject::invokeMethod(
             QCoreApplication::instance(),
             [weak, url, data] {
@@ -421,7 +421,7 @@ void DocumentContainerPrivate::import_css(litehtml::string &text,
     // Without a resource handler we cannot fetch the stylesheet; leave text
     // empty so litehtml skips the import instead of crashing on an empty
     // std::function call.
-    if (!m_dataCallback) {
+    if (!m_resourceHandler) {
         text.clear();
         return;
     }
@@ -430,7 +430,7 @@ void DocumentContainerPrivate::import_css(litehtml::string &text,
     const QString urlString = actualUrl.toString(QUrl::None);
     const int lastSlash = urlString.lastIndexOf('/');
     baseurl = urlString.left(lastSlash).toUtf8().constData();
-    text = m_dataCallback(actualUrl).constData();
+    text = m_resourceHandler(actualUrl, DocumentContainer::ResourceType::StyleSheet).constData();
 }
 
 void DocumentContainerPrivate::set_clip(const litehtml::position &pos,
@@ -1002,9 +1002,9 @@ QFont DocumentContainer::defaultFont() const
     return d->m_defaultFont;
 }
 
-void DocumentContainer::setDataCallback(const DocumentContainer::DataCallback &callback)
+void DocumentContainer::setResourceHandler(const DocumentContainer::ResourceHandler &handler)
 {
-    d->m_dataCallback = callback;
+    d->m_resourceHandler = handler;
 }
 
 void DocumentContainer::setCursorCallback(const DocumentContainer::CursorCallback &callback)

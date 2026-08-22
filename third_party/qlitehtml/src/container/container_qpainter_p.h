@@ -183,7 +183,7 @@ public: // document_container API
     // the widget can repaint the (re-laid-out) viewport.
     DocumentContainer::RepaintCallback m_repaintCallback;
     Selection m_selection;
-    DocumentContainer::DataCallback m_dataCallback;
+    DocumentContainer::ResourceHandler m_resourceHandler;
     DocumentContainer::CursorCallback m_cursorCallback;
     DocumentContainer::LinkCallback m_linkCallback;
     DocumentContainer::PaletteCallback m_paletteCallback;

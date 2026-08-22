@@ -91,7 +91,13 @@ public: // outside API
     void setDefaultFont(const QFont &font);
     QFont defaultFont() const;
 
-    using DataCallback = std::function<QByteArray(QUrl)>;
+    enum class ResourceType {
+        Image,
+        StyleSheet,
+        Font
+    };
+    using ResourceHandler = std::function<QByteArray(const QUrl &url, ResourceType type)>;
+    void setResourceHandler(const ResourceHandler &handler);
     // Custom element factory: called from create_element for the registered
     // tag; return nullptr to fall through to the default (no element).
     // The checkbox factory for "input[type=checkbox]" is registered by default.
@@ -116,8 +122,6 @@ public: // outside API
 
     // Document-coordinate rects of the current selection highlight.
     QVector<QRect> selectionRects() const;
-
-    void setDataCallback(const DataCallback &callback);
 
     using CursorCallback = std::function<void(QCursor)>;
     void setCursorCallback(const CursorCallback &callback);
