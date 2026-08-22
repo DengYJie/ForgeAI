@@ -87,11 +87,12 @@ namespace ui::screen::chat {
 
         chatAreaLayout->addWidget(middleRow, 1);
 
-        // 2.3 底部输入框容器（带悬浮安全边距）
+        // 2.3 底部输入框容器（带悬浮安全边距与水平居中）
         auto *inputContainer = new QWidget(m_chatAreaWidget);
         auto *inputLayout = new QHBoxLayout(inputContainer);
         inputLayout->setContentsMargins(20, 0, 20, 0);
         inputLayout->setSpacing(0);
+        inputLayout->setAlignment(Qt::AlignHCenter);
 
         m_inputBox = new ChatInputBox(inputContainer);
         inputLayout->addWidget(m_inputBox);

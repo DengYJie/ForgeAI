@@ -1,7 +1,6 @@
 #include "ChatInputBox.h"
 
 #include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QTextEdit>
 #include <QKeyEvent>
 #include <QPainter>
@@ -10,21 +9,31 @@
 
 namespace ui::screen::chat {
     namespace {
-        constexpr int kMinInputHeight = 36;
+        constexpr int kMinInputHeight = 48;
         constexpr int kMaxInputHeight = 140;
+        constexpr int kMinBoxWidth = 400;
+        constexpr int kMaxBoxWidth = 660;
+        constexpr int kShadowMargin = 8;
+        constexpr int kShadowLayers = 8;
+        constexpr qreal kShadowIntensity = 0.18;
+        constexpr int kShadowVerticalOffset = 2;
+        constexpr qreal kBoxCornerRadius = 8.0;
     } // namespace
 
     ChatInputBox::ChatInputBox(QWidget *parent)
         : QWidget(parent) {
+        setAttribute(Qt::WA_TranslucentBackground);
+        setMinimumWidth(kMinBoxWidth);
+        setMaximumWidth(kMaxBoxWidth);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         setupUi();
     }
 
     void ChatInputBox::setupUi() {
         auto *mainLayout = new QVBoxLayout(this);
-        mainLayout->setContentsMargins(12, 10, 12, 8);
+        mainLayout->setContentsMargins(12 + kShadowMargin, 10 + kShadowMargin, 12 + kShadowMargin, 8 + kShadowMargin);
         mainLayout->setSpacing(6);
 
-        // 1. 多行自适应输入框
         m_textEdit = new QTextEdit(this);
         m_textEdit->setFrameShape(QFrame::NoFrame);
         m_textEdit->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -42,12 +51,10 @@ namespace ui::screen::chat {
 
         mainLayout->addWidget(m_textEdit);
 
-        // 2. 底部控制栏
         auto *bottomLayout = new QHBoxLayout();
         bottomLayout->setContentsMargins(0, 0, 0, 0);
         bottomLayout->setSpacing(4);
 
-        // 2.1 底部左侧：Icon 工具区域
         m_attachButton = new fluent::basicinput::Button(this);
         m_attachButton->setFluentStyle(fluent::basicinput::Button::Subtle);
         m_attachButton->setFluentLayout(fluent::basicinput::Button::IconOnly);
@@ -73,7 +80,8 @@ namespace ui::screen::chat {
         m_deepThinkButton->setCheckable(true);
         m_deepThinkButton->setFluentStyle(fluent::basicinput::Button::Subtle);
         m_deepThinkButton->setFluentLayout(fluent::basicinput::Button::IconOnly);
-        m_deepThinkButton->setIconGlyph(Typography::Icons::glyph(QStringLiteral("ic_fluent_brain_circuit_20_regular")), 13);
+        m_deepThinkButton->setIconGlyph(Typography::Icons::glyph(QStringLiteral("ic_fluent_brain_circuit_20_regular")),
+                                        13);
         m_deepThinkButton->setFixedSize(28, 28);
         m_deepThinkButton->setToolTip(tr("深度思考模式"));
         m_deepThinkButton->setCursor(Qt::PointingHandCursor);
@@ -82,7 +90,6 @@ namespace ui::screen::chat {
 
         bottomLayout->addStretch(1);
 
-        // 2.2 底部右侧：模型选择 + 发送状态按钮
         m_modelButton = new fluent::basicinput::Button(this);
         m_modelButton->setFluentStyle(fluent::basicinput::Button::Subtle);
         m_modelButton->setFluentLayout(fluent::basicinput::Button::TextOnly);
@@ -125,7 +132,7 @@ namespace ui::screen::chat {
         updateSendButtonVisual();
     }
 
-    void ChatInputBox::setModelName(const QString &name) {
+    void ChatInputBox::setModelName(const QString &name) const {
         if (m_modelButton) {
             m_modelButton->setText(QStringLiteral("%1  ▾").arg(name));
         }
@@ -142,13 +149,13 @@ namespace ui::screen::chat {
         return m_textEdit ? m_textEdit->toPlainText() : QString();
     }
 
-    void ChatInputBox::setText(const QString &text) {
+    void ChatInputBox::setText(const QString &text) const {
         if (m_textEdit) {
             m_textEdit->setPlainText(text);
         }
     }
 
-    void ChatInputBox::clearText() {
+    void ChatInputBox::clearText() const {
         if (m_textEdit) {
             m_textEdit->clear();
         }
@@ -161,7 +168,7 @@ namespace ui::screen::chat {
         update();
     }
 
-    void ChatInputBox::updateInputHeight() {
+    void ChatInputBox::updateInputHeight() const {
         if (!m_textEdit) return;
 
         const int docHeight = qRound(m_textEdit->document()->documentLayout()->documentSize().height());
@@ -199,7 +206,7 @@ namespace ui::screen::chat {
 
     bool ChatInputBox::eventFilter(QObject *watched, QEvent *event) {
         if (watched == m_textEdit && event->type() == QEvent::KeyPress) {
-            auto *keyEvent = static_cast<QKeyEvent *>(event);
+            auto *keyEvent = dynamic_cast<QKeyEvent *>(event);
             if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
                 if (keyEvent->modifiers() & Qt::ShiftModifier) {
                     return false; // Shift+Enter 正常换行
@@ -229,10 +236,30 @@ namespace ui::screen::chat {
         painter.setRenderHint(QPainter::Antialiasing, true);
 
         const auto &colors = themeColorsRef();
-        const QRectF boxRect = rect().adjusted(0.5, 0.5, -0.5, -0.5);
+        const QRectF boxRect = QRectF(rect()).adjusted(
+            kShadowMargin + 0.5,
+            kShadowMargin + 0.5,
+            -kShadowMargin - 0.5,
+            -kShadowMargin - 0.5
+        );
+
+        const auto shadow = themeShadow(Elevation::Low);
+        painter.setPen(Qt::NoPen);
+        for (int i = 0; i < kShadowLayers; ++i) {
+            const qreal ratio = 1.0 - static_cast<qreal>(i) / kShadowLayers;
+            const qreal smoothRatio = ratio * ratio;
+            QColor layerColor = shadow.color;
+            layerColor.setAlphaF(static_cast<float>(shadow.opacity * smoothRatio * kShadowIntensity));
+            painter.setBrush(layerColor);
+            painter.drawRoundedRect(
+                boxRect.adjusted(-i, -i, i, i).translated(0, kShadowVerticalOffset),
+                kBoxCornerRadius + i,
+                kBoxCornerRadius + i
+            );
+        }
 
         painter.setPen(QPen(colors.strokeDefault, 1.0));
         painter.setBrush(colors.bgLayer);
-        painter.drawRoundedRect(boxRect, 8, 8);
+        painter.drawRoundedRect(boxRect, kBoxCornerRadius, kBoxCornerRadius);
     }
 } // namespace ui::screen::chat

@@ -36,23 +36,19 @@ namespace ui::screen::chat {
 
         SendState sendState() const { return m_sendState; }
 
-        void setModelName(const QString &name);
+        void setModelName(const QString &name) const;
 
         QString modelName() const;
 
         QString text() const;
 
-        void setText(const QString &text);
+        void setText(const QString &text) const;
 
-        void clearText();
+        void clearText() const;
 
         void onThemeUpdated() override;
 
-        Q_SIGNALS:
-
-
-
-
+    Q_SIGNALS:
         void sendRequested(const QString &text);
 
         void stopRequested();
@@ -73,7 +69,7 @@ namespace ui::screen::chat {
     private:
         void setupUi();
 
-        void updateInputHeight();
+        void updateInputHeight() const;
 
         void updateSendButtonVisual();
 
