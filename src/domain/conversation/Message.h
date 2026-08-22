@@ -13,8 +13,8 @@ namespace domain::conversation {
         QUuid id; ///< 消息全局唯一标识符
         QUuid turnId; ///< 所属的交互回合 (Turn) ID
 
-        domain::MessageRole role; ///< 发送者角色 (System, User, Assistant, Tool)
-        domain::MessageStatus status; ///< 当前消息的传输/生成状态
+        domain::MessageRole role = domain::MessageRole::User; ///< 发送者角色 (System, User, Assistant, Tool)
+        domain::MessageStatus status = domain::MessageStatus::Sent; ///< 当前消息的传输/生成状态
 
         QList<MessageBlock> blocks; ///< 消息包含的内容块列表（支持文本、思考流、多模态附件、工具调用）
 

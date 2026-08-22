@@ -47,10 +47,13 @@ namespace domain::conversation {
      * @brief 消息块组合结构（采用 std::variant 实现类型安全的多态载荷）
      */
     struct MessageBlock {
-        domain::BlockType type; ///< 消息块类型枚举
-
         using Payload = std::variant<TextBlock, ThoughtBlock, ImageBlock, ToolCallBlock, ToolResultBlock>;
-        Payload payload; ///< 具体载荷内容
+
+        domain::BlockType type = domain::BlockType::Text; ///< 消息块类型枚举
+        Payload payload = TextBlock{}; ///< 具体载荷内容
+
+        MessageBlock() = default;
+        MessageBlock(domain::BlockType t, Payload p) : type(t), payload(std::move(p)) {}
 
         bool isText() const { return std::holds_alternative<TextBlock>(payload); }
         bool isThought() const { return std::holds_alternative<ThoughtBlock>(payload); }

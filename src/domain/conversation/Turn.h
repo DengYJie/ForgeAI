@@ -12,7 +12,7 @@ namespace domain::conversation {
         QUuid id; ///< 回合全局唯一标识符
         QUuid conversationId; ///< 所属会话 ID
 
-        domain::TurnStatus status; ///< 当前回合的执行状态
+        domain::TurnStatus status = domain::TurnStatus::Completed; ///< 当前回合的执行状态
         QString errorMessage; ///< 失败时的详细错误日志（成功时为空）
 
         QDateTime createdAt; ///< 回合开始时间

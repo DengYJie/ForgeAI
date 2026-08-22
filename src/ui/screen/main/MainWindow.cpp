@@ -25,7 +25,9 @@ namespace ui::screen::main {
         resize(1000, 680);
         setMinimumSize(640, 480);
         navigationView()->setExpandedPaneWidth(240);
-
+        navigationView()->setDisplayMode(fluent::navigation::NavigationView::DisplayMode::Left);
+        navigationView()->setPaneOpen(false);
+        
         // 1. 注册顶部导航项：对话、工作、知识库
         auto *chatPage = new ui::screen::chat::ChatPage(this);
         addSubInterface(
@@ -57,7 +59,7 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        // 2. 注册底部设置项 (Settings)，采用 Fluent SettingsPage 并绑定旋转矢量动画
+        // 2. 注册底部设置项 (Settings)
         auto *settingsPage = new ui::screen::settings::SettingsPage(this);
         addSubInterface(
             QStringLiteral("settings"),
@@ -79,7 +81,6 @@ namespace ui::screen::main {
     void MainWindow::setupConnections() {
         if (!m_viewModel) return;
 
-        // 导航面板项选择 -> 同步通知 ViewModel
         if (m_panel) {
             connect(m_panel, &ui::navigation::NavigationPanel::itemSelected,
                     m_viewModel, &MainViewModel::navigateTo);
