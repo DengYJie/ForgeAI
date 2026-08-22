@@ -3,13 +3,13 @@
 #include "domain/repository/IProjectRepository.h"
 
 namespace data::repository {
-
     /**
      * @brief 基于 SQLite 的项目元数据仓储实现
      */
     class SqliteProjectRepository : public domain::repository::IProjectRepository {
     public:
         explicit SqliteProjectRepository(const QString &connectionName = "forgeai_db");
+
         ~SqliteProjectRepository() override = default;
 
         /**
@@ -17,15 +17,17 @@ namespace data::repository {
          */
         bool initializeDatabase();
 
-        // --- IProjectRepository 接口实现 ---
         QList<domain::project::Project> getAllProjects() override;
+
         std::optional<domain::project::Project> getProject(const QUuid &id) override;
+
         std::optional<domain::project::Project> getProjectByPath(const QString &rootPath) override;
+
         void saveProject(const domain::project::Project &project) override;
+
         void deleteProject(const QUuid &id) override;
 
     private:
         QString m_connectionName;
     };
-
 } // namespace data::repository

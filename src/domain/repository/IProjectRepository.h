@@ -5,7 +5,6 @@
 #include "domain/project/Project.h"
 
 namespace domain::repository {
-
     /**
      * @brief 项目/工作区仓储接口
      */
@@ -38,5 +37,4 @@ namespace domain::repository {
          */
         virtual void deleteProject(const QUuid &id) = 0;
     };
-
 } // namespace domain::repository

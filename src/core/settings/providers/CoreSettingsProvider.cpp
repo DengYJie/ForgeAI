@@ -64,4 +64,4 @@ namespace core::settings {
     }
 } // namespace core::settings
 
-REGISTER_SETTINGS_PROVIDER(core::settings::CoreSettingsProvider)
+REGISTER_SETTINGS_PROVIDER (core::settings::CoreSettingsProvider)
