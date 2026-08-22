@@ -385,10 +385,33 @@ void DocumentContainerPrivate::set_cursor(const char *cursor)
 
 void DocumentContainerPrivate::transform_text(litehtml::string &text, litehtml::text_transform tt)
 {
-    // TODO
-    qDebug(log) << "transform_text";
-    Q_UNUSED(text)
-    Q_UNUSED(tt)
+    if (text.empty())
+        return;
+    QString str = QString::fromUtf8(text.data(), int(text.length()));
+    switch (tt) {
+    case litehtml::text_transform_uppercase:
+        str = str.toUpper();
+        break;
+    case litehtml::text_transform_lowercase:
+        str = str.toLower();
+        break;
+    case litehtml::text_transform_capitalize: {
+        bool capitalizeNext = true;
+        for (int i = 0; i < str.length(); ++i) {
+            if (str.at(i).isSpace()) {
+                capitalizeNext = true;
+            } else if (capitalizeNext) {
+                str[i] = str[i].toUpper();
+                capitalizeNext = false;
+            }
+        }
+        break;
+    }
+    default:
+        return;
+    }
+    const QByteArray utf8 = str.toUtf8();
+    text.assign(utf8.constData(), size_t(utf8.size()));
 }
 
 void DocumentContainerPrivate::import_css(litehtml::string &text,
@@ -512,10 +535,17 @@ void DocumentContainerPrivate::get_media_features(litehtml::media_features &medi
 void DocumentContainerPrivate::get_language(litehtml::string &language,
                                             litehtml::string &culture) const
 {
-    // TODO
-    qDebug(log) << "get_language";
-    Q_UNUSED(language)
-    Q_UNUSED(culture)
+    const QLocale locale = QLocale::system();
+    const QString name = locale.name(); // e.g. "zh_CN"
+    const QStringList parts = name.split(QLatin1Char('_'));
+    if (!parts.isEmpty()) {
+        const QByteArray lang = parts.at(0).toUtf8();
+        language.assign(lang.constData(), size_t(lang.size()));
+        if (parts.size() > 1) {
+            const QByteArray cult = parts.at(1).toUtf8();
+            culture.assign(cult.constData(), size_t(cult.size()));
+        }
+    }
 }
 
 void DocumentContainer::setPaintDevice(QPaintDevice *paintDevice)

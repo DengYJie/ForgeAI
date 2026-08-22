@@ -88,16 +88,12 @@ inline QPen borderPen(const litehtml::border &border)
 
 inline QCursor toQCursor(const QString &c)
 {
-    if (c == "alias")
-        return {Qt::PointingHandCursor}; // ???
     if (c == "all-scroll")
         return {Qt::SizeAllCursor};
     if (c == "auto")
-        return {Qt::ArrowCursor}; // ???
-    if (c == "cell")
-        return {Qt::UpArrowCursor};
+        return {Qt::ArrowCursor};
     if (c == "context-menu")
-        return {Qt::ArrowCursor}; // ???
+        return {Qt::WhatsThisCursor}; // ??? or ArrowCursor
     if (c == "col-resize")
         return {Qt::SplitHCursor};
     if (c == "copy")
@@ -139,25 +135,34 @@ inline QCursor toQCursor(const QString &c)
     if (c == "pointer")
         return {Qt::PointingHandCursor};
     if (c == "progress")
-        return {Qt::BusyCursor};
+        return {Qt::BusyCursor}; // or WaitCursor
     if (c == "row-resize")
         return {Qt::SplitVCursor};
     if (c == "s-resize")
-        return {Qt::SizeVerCursor}; // ???
+        return {Qt::SizeVerCursor};
     if (c == "se-resize")
-        return {Qt::SizeFDiagCursor}; // ???
+        return {Qt::SizeFDiagCursor};
     if (c == "sw-resize")
-        return {Qt::SizeBDiagCursor}; // ???
+        return {Qt::SizeBDiagCursor};
     if (c == "text")
         return {Qt::IBeamCursor};
+    if (c == "vertical-text")
+        return {Qt::IBeamCursor}; // Qt lacks vertical I-Beam, fallback to normal I-Beam
     if (c == "url")
-        return {Qt::ArrowCursor}; // ???
+        return {Qt::ArrowCursor};
     if (c == "w-resize")
-        return {Qt::SizeHorCursor}; // ???
+        return {Qt::SizeHorCursor};
     if (c == "wait")
-        return {Qt::BusyCursor};
+        return {Qt::WaitCursor};
     if (c == "zoom-in")
-        return {Qt::ArrowCursor}; // ???
+        return {Qt::CrossCursor}; // fallback for zoom
+    if (c == "zoom-out")
+        return {Qt::CrossCursor}; // fallback for zoom
+    if (c == "alias")
+        return {Qt::DragLinkCursor};
+    if (c == "cell")
+        return {Qt::CrossCursor}; // cell is usually a thick cross
+    
     return {Qt::ArrowCursor};
 }
 
