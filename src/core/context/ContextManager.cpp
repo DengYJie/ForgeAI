@@ -58,6 +58,7 @@ namespace core::context {
 
     AssembledContext ContextManager::assemble(
         const domain::conversation::Conversation &conversation,
+        const std::optional<domain::project::Project> &project,
         const std::optional<domain::agent::Agent> &agent,
         const QList<domain::conversation::Message> &fullHistory,
         const QList<domain::agent::ToolDefinition> &availableTools,
@@ -68,12 +69,23 @@ namespace core::context {
         AssembledContext result;
         result.tools = availableTools;
 
-        // 1. 组装 System Prompt (参考 oh-my-pi：人设 + 紧凑的 Skill 索引)
+        // 1. 组装 System Prompt (人设 + 项目工作区约束 + 规则 + 紧凑的 Skill 索引)
         QStringList systemParts;
         if (agent.has_value() && !agent->systemPrompt.isEmpty()) {
             systemParts.append(agent->systemPrompt);
         } else {
             systemParts.append("You are a helpful and versatile AI assistant.");
+        }
+
+        // 如果绑定了 Project，注入工作区根目录与专属规则
+        if (project.has_value()) {
+            QString workspaceInfo = QString("## Current Workspace:\n- Name: %1\n- Root Path: %2")
+                .arg(project->name, project->rootPath);
+            
+            if (!project->customRules.isEmpty()) {
+                workspaceInfo += "\n\n## Project Rules:\n" + project->customRules;
+            }
+            systemParts.append(workspaceInfo);
         }
 
         if (!availableSkillSummaries.isEmpty()) {

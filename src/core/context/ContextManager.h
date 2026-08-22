@@ -7,16 +7,17 @@
 #include "domain/conversation/Message.h"
 #include "domain/agent/Agent.h"
 #include "domain/agent/ToolDefinition.h"
+#include "domain/project/Project.h"
 
 namespace core::context {
     /**
      * @brief 装配完成后的上下文载荷（直接提供给 ModelProvider 进行 API 请求）
      */
     struct AssembledContext {
-        QString systemPrompt; ///< 组装好人设、基础环境约束与按需 Skill 索引的系统提示词
+        QString systemPrompt;                         ///< 组装好人设、项目工作区约束、规则与按需 Skill 索引的系统提示词
         QList<domain::conversation::Message> history; ///< 经过严格 Token 预算与原子 Turn 裁剪后的历史消息流
-        QList<domain::agent::ToolDefinition> tools; ///< 当前激活的内置 C++ 工具与外部 MCP 工具列表
-        int estimatedTokens = 0; ///< 本次请求预估消耗的总 Token 数
+        QList<domain::agent::ToolDefinition> tools;   ///< 当前激活的内置 C++ 工具与外部 MCP 工具列表
+        int estimatedTokens = 0;                      ///< 本次请求预估消耗的总 Token 数
     };
 
     /**
@@ -30,6 +31,7 @@ namespace core::context {
         /**
          * @brief 根据预算动态装配发送给大模型的完整上下文
          * @param conversation 当前会话元数据
+         * @param project 当前关联的项目/工作区（可选）
          * @param agent 智能体配置（可选）
          * @param fullHistory 从仓储读取的完整消息列表
          * @param availableTools 当前可用的工具定义列表
@@ -40,6 +42,7 @@ namespace core::context {
          */
         AssembledContext assemble(
             const domain::conversation::Conversation &conversation,
+            const std::optional<domain::project::Project> &project,
             const std::optional<domain::agent::Agent> &agent,
             const QList<domain::conversation::Message> &fullHistory,
             const QList<domain::agent::ToolDefinition> &availableTools,
