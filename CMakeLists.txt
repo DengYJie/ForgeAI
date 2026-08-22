@@ -12,9 +12,11 @@ find_package(Qt${QT_VERSION_MAJOR}
         Core
         Gui
         Widgets
+        Network
 )
 
 include(FetchContent)
+find_package(Git REQUIRED)
 FetchContent_Declare(
         fluentqt
         GIT_REPOSITORY https://github.com/L-1124/Fluent-Qt.git
@@ -41,6 +43,9 @@ FetchContent_Declare(
         litehtml
         GIT_REPOSITORY https://github.com/litehtml/litehtml.git
         GIT_TAG v0.10
+        PATCH_COMMAND
+        ${GIT_EXECUTABLE} apply --whitespace=nowarn
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/litehtml-patches/0001-add-document-rebuild-render-tree.patch
 )
 set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(litehtml)
