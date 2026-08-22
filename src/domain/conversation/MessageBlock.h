@@ -14,7 +14,7 @@ namespace domain::conversation {
     };
 
     /**
-     * @brief 思考链载荷（用于承载 DeepSeek R1 / OpenAI o1 等模型的推理思维流）
+     * @brief 思考链载荷（用于承载大语言模型的推理思维流）
      */
     struct ThoughtBlock {
         QString thought; ///< 思考过程正文

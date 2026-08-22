@@ -47,7 +47,7 @@ namespace domain {
      */
     enum class BlockType {
         Text, ///< 纯文本或 Markdown 内容
-        Thought, ///< 深度思考链（如 DeepSeek R1 / o1）
+        Thought,    ///< 深度思考与推理过程链
         Image, ///< 图片附件
         File, ///< 文档附件
         ToolCall, ///< 模型发起的工具调用请求
