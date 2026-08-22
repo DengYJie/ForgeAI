@@ -13,6 +13,7 @@
 #include <QPainterPath>
 #include <QPalette>
 #include <QRegion>
+#include <QTextLayout>
 
 using namespace qlitehtml::internal;
 
@@ -36,49 +37,53 @@ void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
     // segmentMap is keyed by the unadjusted document-coordinate placement rect.
     const QRect placementRect = toQRect(pos).translated(m_scrollPosition);
     const auto segIt = m_selection.segmentMap.constFind(placementRect);
+    const QString str = QString::fromUtf8(text);
 
     if (segIt == m_selection.segmentMap.constEnd() || !m_paletteCallback) {
         // No selection on this element — draw normally.
         painter->setPen(normalColor);
-        painter->drawText(toQRect(pos), 0, QString::fromUtf8(text));
+        // QPainter::drawText natively supports shaping, so this is safe for unselected text
+        painter->drawText(toQRect(pos), 0, str);
         return;
     }
 
-    // This element has a selection. Split into up to three segments:
-    //   [0, charStart)        — pre-selection  (normal color)
-    //   [charStart, charEnd)  — selected        (highlighted color)
-    //   [charEnd, end)        — post-selection  (normal color)
+    // This element has a selection. We use QTextLayout to apply the highlight
+    // without splitting the string, which preserves shaping (ligatures, RTL, emoji).
     const Selection::SegmentInfo &seg = segIt.value();
-    const QString str = QString::fromUtf8(text);
     const QColor highlightColor = m_paletteCallback().color(QPalette::HighlightedText);
-    const QRect drawRect = toQRect(pos);
-    const QFontMetrics fm(font);
 
-    // Helper: draw a substring starting at a given pixel x-offset within drawRect.
-    const auto drawSegment = [&](const QString &sub, int xOffset, const QColor &col) {
-        if (sub.isEmpty())
-            return;
-        QRect r = drawRect;
-        r.setLeft(drawRect.left() + xOffset);
-        painter->setPen(col);
-        painter->drawText(r, 0, sub);
-    };
+    QTextLayout layout(str, font);
+    layout.setCacheEnabled(true);
 
-    // Pre-selection segment
-    if (seg.charStart > 0) {
-        drawSegment(str.left(seg.charStart), 0, normalColor);
+    int start = seg.charStart;
+    int length = (seg.charEnd < 0) ? (str.length() - start) : (seg.charEnd - start);
+
+    if (length > 0) {
+        QList<QTextLayout::FormatRange> formats;
+        QTextLayout::FormatRange selectionFormat;
+        selectionFormat.start = start;
+        selectionFormat.length = length;
+        selectionFormat.format.setForeground(highlightColor);
+        // Background is drawn separately by container_selection.cpp
+        formats.append(selectionFormat);
+        layout.setFormats(formats);
     }
 
-    // Selected segment
-    const QString selectedStr = (seg.charEnd < 0)
-                                    ? str.mid(seg.charStart)
-                                    : str.mid(seg.charStart, seg.charEnd - seg.charStart);
-    drawSegment(selectedStr, seg.pixelStart, highlightColor);
-
-    // Post-selection segment
-    if (seg.charEnd >= 0 && seg.charEnd < str.size()) {
-        drawSegment(str.mid(seg.charEnd), seg.pixelEnd, normalColor);
+    layout.beginLayout();
+    QTextLine line = layout.createLine();
+    if (line.isValid()) {
+        line.setLineWidth(1000000); // effectively infinite, litehtml already handles word wrap
     }
+    layout.endLayout();
+
+    painter->setPen(normalColor); // Default color for unformatted text
+    // The litehtml gives us a top-left pos for the bounding box.
+    // QTextLayout draws relative to its top-left, but we must adjust for the font ascent
+    // since QPainter::drawText(QRect, ...) aligns differently?
+    // Wait, QPainter::drawText(QRect, flags, text) aligns according to flags (default top-left).
+    // QTextLayout::draw() draws relative to the given top-left point.
+    // Let's just draw it at the top-left of pos.
+    layout.draw(painter, toQRect(pos).topLeft());
 }
 
 void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
@@ -100,7 +105,9 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
             painter->drawEllipse(toQRect(marker.pos));
         } else if (marker.marker_type == litehtml::list_style_type_decimal ||
                    marker.marker_type == litehtml::list_style_type_lower_alpha ||
-                   marker.marker_type == litehtml::list_style_type_upper_alpha) {
+                   marker.marker_type == litehtml::list_style_type_upper_alpha ||
+                   marker.marker_type == litehtml::list_style_type_lower_roman ||
+                   marker.marker_type == litehtml::list_style_type_upper_roman) {
             painter->setPen(toQColor(marker.color));
             if (marker.font)
                 painter->setFont(toQFont(marker.font));
@@ -108,6 +115,24 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
             QString text;
             if (marker.marker_type == litehtml::list_style_type_decimal) {
                 text = QString::number(marker.index) + QStringLiteral(".");
+            } else if (marker.marker_type == litehtml::list_style_type_lower_roman ||
+                       marker.marker_type == litehtml::list_style_type_upper_roman) {
+                int num = marker.index > 0 ? marker.index : 1;
+                struct Roman { int val; const char *str; };
+                const Roman romans[] = {
+                    {1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
+                    {100, "C"}, {90, "XC"}, {50, "L"}, {40, "XL"},
+                    {10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"}
+                };
+                for (const auto &r : romans) {
+                    while (num >= r.val) {
+                        text += QString::fromLatin1(r.str);
+                        num -= r.val;
+                    }
+                }
+                if (marker.marker_type == litehtml::list_style_type_lower_roman)
+                    text = text.toLower();
+                text += QStringLiteral(".");
             } else {
                 int idx = marker.index > 0 ? marker.index : 1;
                 bool upper = (marker.marker_type == litehtml::list_style_type_upper_alpha);
@@ -122,7 +147,7 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
             // litehtml's marker.pos width is usually small, so we align right
             painter->drawText(toQRect(marker.pos), Qt::AlignRight | Qt::AlignTop, text);
         } else {
-            // TODO: Implement other list types (roman, alpha, etc.)
+            // TODO: Implement other list types (cjk, etc.)
             // For now, fallback to bullet
             painter->setPen(Qt::NoPen);
             painter->setBrush(toQColor(marker.color));
@@ -258,7 +283,12 @@ void DocumentContainerPrivate::draw_solid_fill(litehtml::uint_ptr hdc,
         return;
     auto painter = toQPainter(hdc);
     if (layer.is_root) {
-        // TODO ?
+        painter->save();
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(toQColor(color));
+        // Root layer usually fills the whole viewport, m_clientRect tracks it
+        painter->drawRect(m_clientRect);
+        painter->restore();
         return;
     }
     painter->save();
@@ -283,8 +313,18 @@ void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
     clipBackgroundLayer(painter, layer);
     const QPixmap pixmap = getPixmap(QString::fromUtf8(url.data(), int(url.size())),
                                      QString::fromUtf8(base_url.data(), int(base_url.size())));
-    if (pixmap.isNull())
+    if (pixmap.isNull()) {
         qWarning(log) << "draw_image: pixmap not loaded for" << QString::fromUtf8(url.data(), int(url.size()));
+        // Draw a subtle placeholder while loading or if failed
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 10)); // very light transparent grey
+        painter->drawRect(toQRect(layer.border_box));
+        painter->restore();
+        return;
+    }
+    
+    // Check CSS image-rendering or default to smooth
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
     // Scale at draw time (the painter has SmoothPixmapTransform enabled) so
     // repaints do not allocate a temporary scaled pixmap on every frame.
     painter->setPen(Qt::NoPen);
@@ -329,7 +369,17 @@ void DocumentContainerPrivate::draw_radial_gradient(litehtml::uint_ptr hdc,
     for (const auto &stop : gradient.color_points)
         g.setColorAt(stop.offset, toQColor(stop.color));
     painter->setPen(Qt::NoPen);
-    painter->setBrush(g);
+    
+    QBrush brush(g);
+    if (gradient.radius.x > 0 && gradient.radius.y > 0 && std::abs(gradient.radius.x - gradient.radius.y) > 0.1f) {
+        QTransform transform;
+        transform.translate(center.x(), center.y());
+        transform.scale(1.0, gradient.radius.y / gradient.radius.x);
+        transform.translate(-center.x(), -center.y());
+        brush.setTransform(transform);
+    }
+    painter->setBrush(brush);
+    
     drawPattern(painter, layer, [](QPainter *p, int x, int y, int w, int h) {
         p->fillRect(x, y, w, h, p->brush());
     });
@@ -364,8 +414,57 @@ void DocumentContainerPrivate::draw_borders(litehtml::uint_ptr hdc,
                                             bool root)
 {
     Q_UNUSED(root)
-    // TODO: special border styles
     auto painter = toQPainter(hdc);
+    
+    bool uniform = borders.top.width == borders.bottom.width && borders.top.width == borders.left.width && borders.top.width == borders.right.width &&
+                   borders.top.style == borders.bottom.style && borders.top.style == borders.left.style && borders.top.style == borders.right.style &&
+                   borders.top.color == borders.bottom.color && borders.top.color == borders.left.color && borders.top.color == borders.right.color;
+
+    if (uniform && borders.top.style != litehtml::border_style_none && borders.top.style != litehtml::border_style_hidden) {
+        painter->save();
+        painter->setPen(borderPen(borders.top));
+        painter->setBrush(Qt::NoBrush);
+        
+        QPainterPath path;
+        const QRectF borderBox = toQRect(draw_pos);
+        const auto &r = borders.radius;
+        
+        if (r.top_left_x == r.top_right_x && r.top_left_x == r.bottom_left_x && r.top_left_x == r.bottom_right_x &&
+            r.top_left_y == r.top_right_y && r.top_left_y == r.bottom_left_y && r.top_left_y == r.bottom_right_y) {
+            path.addRoundedRect(borderBox, r.top_left_x, r.top_left_y);
+        } else {
+            path.setFillRule(Qt::WindingFill);
+            qreal tlx = r.top_left_x, tly = r.top_left_y;
+            qreal trx = r.top_right_x, try_ = r.top_right_y;
+            qreal blx = r.bottom_left_x, bly = r.bottom_left_y;
+            qreal brx = r.bottom_right_x, bry = r.bottom_right_y;
+            
+            path.moveTo(borderBox.left() + tlx, borderBox.top());
+            path.lineTo(borderBox.right() - trx, borderBox.top());
+            if (trx > 0 && try_ > 0)
+                path.arcTo(borderBox.right() - 2*trx, borderBox.top(), 2*trx, 2*try_, 90, -90);
+            
+            path.lineTo(borderBox.right(), borderBox.bottom() - bry);
+            if (brx > 0 && bry > 0)
+                path.arcTo(borderBox.right() - 2*brx, borderBox.bottom() - 2*bry, 2*brx, 2*bry, 0, -90);
+            
+            path.lineTo(borderBox.left() + blx, borderBox.bottom());
+            if (blx > 0 && bly > 0)
+                path.arcTo(borderBox.left(), borderBox.bottom() - 2*bly, 2*blx, 2*bly, 270, -90);
+            
+            path.lineTo(borderBox.left(), borderBox.top() + tly);
+            if (tlx > 0 && tly > 0)
+                path.arcTo(borderBox.left(), borderBox.top(), 2*tlx, 2*tly, 180, -90);
+                
+            path.closeSubpath();
+        }
+        
+        painter->drawPath(path);
+        painter->restore();
+        return;
+    }
+
+    // TODO: special (non-uniform) border styles
     if (borders.top.style != litehtml::border_style_none
         && borders.top.style != litehtml::border_style_hidden) {
         painter->setPen(borderPen(borders.top));

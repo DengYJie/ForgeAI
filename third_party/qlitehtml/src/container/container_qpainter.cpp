@@ -13,6 +13,7 @@
 #include <QGuiApplication>
 #include <QLoggingCategory>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPalette>
 #include <QRegularExpression>
 #include <QScreen>
@@ -412,16 +413,56 @@ void DocumentContainerPrivate::import_css(litehtml::string &text,
 void DocumentContainerPrivate::set_clip(const litehtml::position &pos,
                                         const litehtml::border_radiuses &bdr_radius)
 {
-    // TODO
-    qDebug(log) << "set_clip";
-    Q_UNUSED(pos)
-    Q_UNUSED(bdr_radius)
+    if (m_painter) {
+        m_painter->save();
+        m_painter->setClipRect(toQRect(pos), Qt::IntersectClip);
+        // Note: We could also apply bdr_radius via QPainterPath here if needed
+        // for rounded corner clipping of child elements.
+        if (bdr_radius.top_left_x > 0 || bdr_radius.top_right_x > 0 ||
+            bdr_radius.bottom_left_x > 0 || bdr_radius.bottom_right_x > 0) {
+            QPainterPath path;
+            const QRectF borderBox = toQRect(pos);
+            const auto &r = bdr_radius;
+            
+            if (r.top_left_x == r.top_right_x && r.top_left_x == r.bottom_left_x && r.top_left_x == r.bottom_right_x &&
+                r.top_left_y == r.top_right_y && r.top_left_y == r.bottom_left_y && r.top_left_y == r.bottom_right_y) {
+                path.addRoundedRect(borderBox, r.top_left_x, r.top_left_y);
+            } else {
+                path.setFillRule(Qt::WindingFill);
+                qreal tlx = r.top_left_x, tly = r.top_left_y;
+                qreal trx = r.top_right_x, try_ = r.top_right_y;
+                qreal blx = r.bottom_left_x, bly = r.bottom_left_y;
+                qreal brx = r.bottom_right_x, bry = r.bottom_right_y;
+                
+                path.moveTo(borderBox.left() + tlx, borderBox.top());
+                path.lineTo(borderBox.right() - trx, borderBox.top());
+                if (trx > 0 && try_ > 0)
+                    path.arcTo(borderBox.right() - 2*trx, borderBox.top(), 2*trx, 2*try_, 90, -90);
+                
+                path.lineTo(borderBox.right(), borderBox.bottom() - bry);
+                if (brx > 0 && bry > 0)
+                    path.arcTo(borderBox.right() - 2*brx, borderBox.bottom() - 2*bry, 2*brx, 2*bry, 0, -90);
+                
+                path.lineTo(borderBox.left() + blx, borderBox.bottom());
+                if (blx > 0 && bly > 0)
+                    path.arcTo(borderBox.left(), borderBox.bottom() - 2*bly, 2*blx, 2*bly, 270, -90);
+                
+                path.lineTo(borderBox.left(), borderBox.top() + tly);
+                if (tlx > 0 && tly > 0)
+                    path.arcTo(borderBox.left(), borderBox.top(), 2*tlx, 2*tly, 180, -90);
+                    
+                path.closeSubpath();
+            }
+            m_painter->setClipPath(path, Qt::IntersectClip);
+        }
+    }
 }
 
 void DocumentContainerPrivate::del_clip()
 {
-    // TODO
-    qDebug(log) << "del_clip";
+    if (m_painter) {
+        m_painter->restore();
+    }
 }
 
 void DocumentContainerPrivate::get_viewport(litehtml::position &viewport) const
@@ -571,21 +612,23 @@ void DocumentContainer::render(int width, int height)
         return;
     if (layoutChanged) {
         d->m_needRelayout = false;
-        // render() returns the content's best width; re-render at that width
-        // so fractional-width truncation cannot wrap trailing elements.
-        const litehtml::pixel_t bestWidth = d->m_document->render(width);
-        if (bestWidth > 0 && bestWidth < width)
-            d->m_document->render(bestWidth);
+        // Removed re-rendering at bestWidth because it incorrectly collapses
+        // block-level elements (like blockquotes and backgrounds) to their intrinsic content width.
+        d->m_document->render(width);
     }
     d->updateSelection();
 }
 
 void DocumentContainer::draw(QPainter *painter, const QRect &clip)
 {
+    d->m_paintDevice = painter->device();
+    d->m_painter = painter;
     d->drawSelection(painter, clip);
     const QPoint pos = -d->m_scrollPosition;
     const litehtml::position clipRect(clip.x(), clip.y(), clip.width(), clip.height());
     d->m_document->draw(reinterpret_cast<litehtml::uint_ptr>(painter), pos.x(), pos.y(), &clipRect);
+    d->m_painter = nullptr;
+    d->m_paintDevice = nullptr;
 }
 
 int DocumentContainer::documentWidth() const

@@ -153,6 +153,7 @@ public: // document_container API
     void clearSelection();
 
     QPaintDevice *m_paintDevice = nullptr;
+    QPainter *m_painter = nullptr;
     // The owning public container; used by async image completion to trigger
     // a re-layout through DocumentContainer::render(). The weak_ptr guard in
     // load_image() guarantees this is alive when the callback runs.
