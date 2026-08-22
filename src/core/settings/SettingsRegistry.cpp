@@ -35,11 +35,7 @@ namespace core::settings {
     }
 
     QString SettingsRegistry::getConfigDirPath() const {
-#ifdef QT_DEBUG
-        return QCoreApplication::applicationDirPath();
-#else
-        return QDir::homePath() + "/.config/forgeai";
-#endif
+        return QDir::homePath() + "/.forgeai";
     }
 
     QString SettingsRegistry::getMainConfigPath() const {
