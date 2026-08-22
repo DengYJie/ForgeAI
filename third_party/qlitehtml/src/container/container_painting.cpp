@@ -10,6 +10,7 @@
 #include <QGradient>
 #include <QLoggingCategory>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPalette>
 #include <QRegion>
 
@@ -97,13 +98,36 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
             painter->setPen(toQColor(marker.color));
             painter->setBrush(Qt::NoBrush);
             painter->drawEllipse(toQRect(marker.pos));
+        } else if (marker.marker_type == litehtml::list_style_type_decimal ||
+                   marker.marker_type == litehtml::list_style_type_lower_alpha ||
+                   marker.marker_type == litehtml::list_style_type_upper_alpha) {
+            painter->setPen(toQColor(marker.color));
+            if (marker.font)
+                painter->setFont(toQFont(marker.font));
+                
+            QString text;
+            if (marker.marker_type == litehtml::list_style_type_decimal) {
+                text = QString::number(marker.index) + QStringLiteral(".");
+            } else {
+                int idx = marker.index > 0 ? marker.index : 1;
+                bool upper = (marker.marker_type == litehtml::list_style_type_upper_alpha);
+                while (idx > 0) {
+                    int rem = (idx - 1) % 26;
+                    text.prepend(QChar((upper ? 'A' : 'a') + rem));
+                    idx = (idx - 1) / 26;
+                }
+                text += QStringLiteral(".");
+            }
+            
+            // litehtml's marker.pos width is usually small, so we align right
+            painter->drawText(toQRect(marker.pos), Qt::AlignRight | Qt::AlignTop, text);
         } else {
-            // TODO we do not get information about index and font for e.g. decimal / roman
-            // at least draw a bullet
+            // TODO: Implement other list types (roman, alpha, etc.)
+            // For now, fallback to bullet
             painter->setPen(Qt::NoPen);
             painter->setBrush(toQColor(marker.color));
             painter->drawEllipse(toQRect(marker.pos));
-            qWarning(log) << "list marker of type" << marker.marker_type << "not supported";
+            qWarning(log) << "list marker of type" << marker.marker_type << "not fully supported, falling back to bullet";
         }
     } else {
         const QPixmap pixmap = getPixmap(
@@ -131,52 +155,44 @@ static void clipBackgroundLayer(QPainter *painter, const litehtml::background_la
 {
     if (layer.is_root)
         return;
-    painter->save();
+        
     painter->setClipRect(toQRect(layer.clip_box), Qt::IntersectClip);
-    const QRect borderBox = toQRect(layer.border_box);
+    
+    const QRectF borderBox(layer.border_box.x, layer.border_box.y, layer.border_box.width, layer.border_box.height);
     const litehtml::border_radiuses &r = layer.border_radius;
-    const QRegion horizontalMiddle(
-        QRect(borderBox.x(),
-              borderBox.y() + qRound(r.top_left_y),
-              borderBox.width(),
-              borderBox.height() - qRound(r.top_left_y) - qRound(r.bottom_left_y)));
-    const QRegion horizontalTop(
-        QRect(borderBox.x() + qRound(r.top_left_x),
-              borderBox.y(),
-              borderBox.width() - qRound(r.top_left_x) - qRound(r.top_right_x),
-              qRound(r.top_left_y)));
-    const QRegion horizontalBottom(QRect(borderBox.x() + qRound(r.bottom_left_x),
-                                         borderBox.bottom() - qRound(r.bottom_left_y),
-                                         borderBox.width() - qRound(r.bottom_left_x)
-                                             - qRound(r.bottom_right_x),
-                                         qRound(r.bottom_left_y)));
-    const QRegion topLeft(QRect(borderBox.left(),
-                                borderBox.top(),
-                                2 * qRound(r.top_left_x),
-                                2 * qRound(r.top_left_y)),
-                          QRegion::Ellipse);
-    const QRegion topRight(QRect(borderBox.right() - 2 * qRound(r.top_right_x),
-                                 borderBox.top(),
-                                 2 * qRound(r.top_right_x),
-                                 2 * qRound(r.top_right_y)),
-                           QRegion::Ellipse);
-    const QRegion bottomLeft(QRect(borderBox.left(),
-                                   borderBox.bottom() - 2 * qRound(r.bottom_left_y),
-                                   2 * qRound(r.bottom_left_x),
-                                   2 * qRound(r.bottom_left_y)),
-                             QRegion::Ellipse);
-    const QRegion bottomRight(QRect(borderBox.right() - 2 * qRound(r.bottom_right_x),
-                                    borderBox.bottom() - 2 * qRound(r.bottom_right_y),
-                                    2 * qRound(r.bottom_right_x),
-                                    2 * qRound(r.bottom_right_y)),
-                              QRegion::Ellipse);
-    const QRegion clipRegion = horizontalMiddle.united(horizontalTop)
-                                  .united(horizontalBottom)
-                                  .united(topLeft)
-                                  .united(topRight)
-                                  .united(bottomLeft)
-                                  .united(bottomRight);
-    painter->setClipRegion(clipRegion, Qt::IntersectClip);
+    
+    QPainterPath path;
+    if (r.top_left_x == r.top_right_x && r.top_left_x == r.bottom_left_x && r.top_left_x == r.bottom_right_x &&
+        r.top_left_y == r.top_right_y && r.top_left_y == r.bottom_left_y && r.top_left_y == r.bottom_right_y) {
+        path.addRoundedRect(borderBox, r.top_left_x, r.top_left_y);
+    } else {
+        path.setFillRule(Qt::WindingFill);
+        qreal tlx = r.top_left_x, tly = r.top_left_y;
+        qreal trx = r.top_right_x, try_ = r.top_right_y;
+        qreal blx = r.bottom_left_x, bly = r.bottom_left_y;
+        qreal brx = r.bottom_right_x, bry = r.bottom_right_y;
+        
+        path.moveTo(borderBox.left() + tlx, borderBox.top());
+        path.lineTo(borderBox.right() - trx, borderBox.top());
+        if (trx > 0 && try_ > 0)
+            path.arcTo(borderBox.right() - 2*trx, borderBox.top(), 2*trx, 2*try_, 90, -90);
+        
+        path.lineTo(borderBox.right(), borderBox.bottom() - bry);
+        if (brx > 0 && bry > 0)
+            path.arcTo(borderBox.right() - 2*brx, borderBox.bottom() - 2*bry, 2*brx, 2*bry, 0, -90);
+        
+        path.lineTo(borderBox.left() + blx, borderBox.bottom());
+        if (blx > 0 && bly > 0)
+            path.arcTo(borderBox.left(), borderBox.bottom() - 2*bly, 2*blx, 2*bly, 270, -90);
+        
+        path.lineTo(borderBox.left(), borderBox.top() + tly);
+        if (tlx > 0 && tly > 0)
+            path.arcTo(borderBox.left(), borderBox.top(), 2*tlx, 2*tly, 180, -90);
+            
+        path.closeSubpath();
+    }
+    
+    painter->setClipPath(path, Qt::IntersectClip);
 }
 
 // Tiles the given fill callback across the layer's clip_box, one origin_box-sized
