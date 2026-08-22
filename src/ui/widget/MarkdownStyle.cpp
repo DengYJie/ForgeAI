@@ -24,6 +24,9 @@ QString MarkdownStyleSheet::build() const
         .markdown-body { box-sizing: border-box; display: block; width: 100%%; max-width: none; padding: %3px %4px; font-family: '%5'; font-size: %6px; line-height: %7; }
         .markdown-body > * { margin-top: 0; margin-bottom: %8px; }
         .markdown-body > :last-child { margin-bottom: 0; }
+        .markdown-body > .markdown-stream-content, .markdown-body > .markdown-stream-pending { margin: 0; padding: 0; }
+        .markdown-stream-content > *, .markdown-stream-pending > * { margin-top: 0; margin-bottom: %8px; }
+        .markdown-stream-sentinel { display: block; width: 0; height: 0; min-height: 0; margin: 0; padding: 0; overflow: hidden; font-size: 0; line-height: 0; }
         .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { color: %2; font-weight: 600; line-height: 1.25; margin-top: %9px; margin-bottom: %10px; }
         .markdown-body h1 { font-size: 1.75em; border-bottom: none; padding-bottom: 0; }
         .markdown-body h2 { font-size: 1.45em; border-bottom: none; padding-bottom: 0; }

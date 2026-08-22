@@ -38,6 +38,7 @@ FetchContent_Declare(
 )
 set(MD4C_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(md4c)
+FetchContent_GetProperties(md4c SOURCE_DIR md4c_SOURCE_DIR)
 
 FetchContent_Declare(
         litehtml
@@ -72,6 +73,13 @@ set(PROJECT_SOURCES
 
         src/ui/widget/CollapsibleSplitView.h
         src/ui/widget/CollapsibleSplitView.cpp
+        src/ui/widget/MarkdownStyle.h
+        src/ui/widget/MarkdownStyle.cpp
+        src/ui/widget/MarkdownView.h
+        src/ui/widget/MarkdownView.cpp
+
+        src/core/markdown/MarkdownRenderer.h
+        src/core/markdown/MarkdownRenderer.cpp
 
         src/ui/navigation/NavigationWidget.h
         src/ui/navigation/NavigationWidget.cpp
@@ -163,6 +171,7 @@ set_target_properties(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME}
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${md4c_SOURCE_DIR}/src
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -174,6 +183,7 @@ target_link_libraries(${PROJECT_NAME}
         FluentQt::FluentQt
         qlitehtml
         md4c
+        md4c-html
 )
 
 if (WIN32)
