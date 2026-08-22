@@ -104,20 +104,29 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
             painter->setBrush(Qt::NoBrush);
             painter->drawEllipse(toQRect(marker.pos));
         } else if (marker.marker_type == litehtml::list_style_type_decimal ||
+                   marker.marker_type == litehtml::list_style_type_decimal_leading_zero ||
                    marker.marker_type == litehtml::list_style_type_lower_alpha ||
                    marker.marker_type == litehtml::list_style_type_upper_alpha ||
+                   marker.marker_type == litehtml::list_style_type_lower_latin ||
+                   marker.marker_type == litehtml::list_style_type_upper_latin ||
                    marker.marker_type == litehtml::list_style_type_lower_roman ||
-                   marker.marker_type == litehtml::list_style_type_upper_roman) {
+                   marker.marker_type == litehtml::list_style_type_upper_roman ||
+                   marker.marker_type == litehtml::list_style_type_lower_greek ||
+                   marker.marker_type == litehtml::list_style_type_cjk_ideographic) {
             painter->setPen(toQColor(marker.color));
             if (marker.font)
                 painter->setFont(toQFont(marker.font));
                 
             QString text;
+            int idx = marker.index > 0 ? marker.index : 1;
+            
             if (marker.marker_type == litehtml::list_style_type_decimal) {
-                text = QString::number(marker.index) + QStringLiteral(".");
+                text = QString::number(idx) + QStringLiteral(".");
+            } else if (marker.marker_type == litehtml::list_style_type_decimal_leading_zero) {
+                text = QString("%1.").arg(idx, 2, 10, QLatin1Char('0'));
             } else if (marker.marker_type == litehtml::list_style_type_lower_roman ||
                        marker.marker_type == litehtml::list_style_type_upper_roman) {
-                int num = marker.index > 0 ? marker.index : 1;
+                int num = idx;
                 struct Roman { int val; const char *str; };
                 const Roman romans[] = {
                     {1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
@@ -133,13 +142,34 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
                 if (marker.marker_type == litehtml::list_style_type_lower_roman)
                     text = text.toLower();
                 text += QStringLiteral(".");
+            } else if (marker.marker_type == litehtml::list_style_type_lower_greek) {
+                if (idx <= 24) {
+                    int code = 0x03B0 + idx;
+                    if (code >= 0x03C2) code++; // skip final sigma
+                    text = QString(QChar(code)) + QStringLiteral(".");
+                } else {
+                    text = QString::number(idx) + QStringLiteral(".");
+                }
+            } else if (marker.marker_type == litehtml::list_style_type_cjk_ideographic) {
+                if (idx <= 99) {
+                    const QString digits[] = {"", "一", "二", "三", "四", "五", "六", "七", "八", "九"};
+                    if (idx < 10) text = digits[idx];
+                    else if (idx == 10) text = "十";
+                    else if (idx < 20) text = "十" + digits[idx % 10];
+                    else if (idx % 10 == 0) text = digits[idx / 10] + "十";
+                    else text = digits[idx / 10] + "十" + digits[idx % 10];
+                    text += QStringLiteral("、");
+                } else {
+                    text = QString::number(idx) + QStringLiteral(".");
+                }
             } else {
-                int idx = marker.index > 0 ? marker.index : 1;
-                bool upper = (marker.marker_type == litehtml::list_style_type_upper_alpha);
-                while (idx > 0) {
-                    int rem = (idx - 1) % 26;
+                bool upper = (marker.marker_type == litehtml::list_style_type_upper_alpha || 
+                              marker.marker_type == litehtml::list_style_type_upper_latin);
+                int tempIdx = idx;
+                while (tempIdx > 0) {
+                    int rem = (tempIdx - 1) % 26;
                     text.prepend(QChar((upper ? 'A' : 'a') + rem));
-                    idx = (idx - 1) / 26;
+                    tempIdx = (tempIdx - 1) / 26;
                 }
                 text += QStringLiteral(".");
             }
@@ -147,12 +177,11 @@ void DocumentContainerPrivate::draw_list_marker(litehtml::uint_ptr hdc,
             // litehtml's marker.pos width is usually small, so we align right
             painter->drawText(toQRect(marker.pos), Qt::AlignRight | Qt::AlignTop, text);
         } else {
-            // TODO: Implement other list types (cjk, etc.)
-            // For now, fallback to bullet
+            // Unimplemented complex lists (hiragana, katakana, hebrew, armenian, georgian, etc.)
+            qWarning(log) << "list marker of type" << marker.marker_type << "not fully supported, falling back to bullet";
             painter->setPen(Qt::NoPen);
             painter->setBrush(toQColor(marker.color));
             painter->drawEllipse(toQRect(marker.pos));
-            qWarning(log) << "list marker of type" << marker.marker_type << "not fully supported, falling back to bullet";
         }
     } else {
         const QPixmap pixmap = getPixmap(
@@ -323,7 +352,9 @@ void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
         return;
     }
     
-    // Check CSS image-rendering or default to smooth
+    // Note: CSS image-rendering is not currently exposed to draw_image by litehtml v0.10.
+    // We default to smooth interpolation. If pixelated is needed in the future,
+    // we would check the property and use QPainter::FastTransformation.
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
     // Scale at draw time (the painter has SmoothPixmapTransform enabled) so
     // repaints do not allocate a temporary scaled pixmap on every frame.
