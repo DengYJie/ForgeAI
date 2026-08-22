@@ -95,8 +95,8 @@ void LiteHtmlResourceManager::cancelUrl(const QUrl &url)
         const auto &task = it.value();
         if (task) {
             task->cancelToken->store(true);
-            if (auto *reply = task->reply.data()) {
-                QMetaObject::invokeMethod(reply, &QNetworkReply::abort, Qt::QueuedConnection);
+            if (task->reply) {
+                QMetaObject::invokeMethod(task->reply.data(), &QNetworkReply::abort, Qt::QueuedConnection);
             }
         }
         m_activeTasks.erase(it);
@@ -109,8 +109,8 @@ void LiteHtmlResourceManager::cancelAll()
     for (const auto &task : m_activeTasks) {
         if (task) {
             task->cancelToken->store(true);
-            if (auto *reply = task->reply.data()) {
-                QMetaObject::invokeMethod(reply, &QNetworkReply::abort, Qt::QueuedConnection);
+            if (task->reply) {
+                QMetaObject::invokeMethod(task->reply.data(), &QNetworkReply::abort, Qt::QueuedConnection);
             }
         }
     }
@@ -202,24 +202,25 @@ void LiteHtmlResourceManager::load_image(const char *src,
         reader.setAutoTransform(true);
         const QSize imgSize = reader.size();
 
+        QImage img;
         // Protection against decompression bombs
         if (imgSize.isValid()) {
             if (imgSize.width() <= kMaxImageDimension &&
                 imgSize.height() <= kMaxImageDimension &&
                 qint64(imgSize.width()) * imgSize.height() <= kMaxImagePixelCount) {
-                return reader.read();
+                img = reader.read();
             }
         } else {
-            QImage img = reader.read();
+            img = reader.read();
             if (!img.isNull()) {
-                if (img.width() <= kMaxImageDimension &&
-                    img.height() <= kMaxImageDimension &&
-                    qint64(img.width()) * img.height() <= kMaxImagePixelCount) {
-                    return img;
+                if (img.width() > kMaxImageDimension ||
+                    img.height() > kMaxImageDimension ||
+                    qint64(img.width()) * img.height() > kMaxImagePixelCount) {
+                    img = QImage();
                 }
             }
         }
-        return {};
+        return img;
     };
 
     // Phase 3: Completion Callback (GUI thread)

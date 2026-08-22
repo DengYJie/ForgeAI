@@ -109,10 +109,13 @@ public: // document_container API
     mutable qlitehtml::internal::LiteHtmlRenderer m_renderer;
     qlitehtml::internal::LiteHtmlInteractor m_interactor;
     std::shared_ptr<qlitehtml::internal::LiteHtmlResourceManager> m_resourceManager;
+    // Cached named append targets; cleared whenever the document is rebuilt.
+    QHash<QByteArray, litehtml::element::ptr> m_appendTargets;
     QByteArray m_defaultFontFamilyName = m_defaultFont.family().toUtf8();
     // Invoked on the main thread after an async image finished loading, so
     // the widget can repaint the (re-laid-out) viewport.
     DocumentContainer::RepaintCallback m_repaintCallback;
+    DocumentContainer::RelayoutCallback m_relayoutCallback;
     DocumentContainer::PaletteCallback m_paletteCallback;
 
     void rebuildRenderTree();

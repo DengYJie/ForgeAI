@@ -5,6 +5,7 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QMetaObject>
+#include <QNetworkReply>
 #include <QPointer>
 #include <QRunnable>
 #include <QUrl>
@@ -13,8 +14,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-
-class QNetworkReply;
 
 namespace qlitehtml::internal {
 

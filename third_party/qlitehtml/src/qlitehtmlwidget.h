@@ -21,9 +21,22 @@ public:
     void setUrl(const QUrl &url);
     Q_INVOKABLE QUrl url() const;
     void setHtml(const QString &content);
-    // Appends HTML to the current document (for streaming/chat content) and
-    // re-renders. Incrementally updates the search index.
-    void appendHtml(const QString &content);
+    // Appends HTML to body. Layout is coalesced into the next render pass.
+    void appendHtml(const QString &content, bool followEnd = false);
+    bool appendHtmlToElement(const QString &content,
+                             const QString &elementId,
+                             bool followEnd = false,
+                             bool updateIndex = true,
+                             bool rebuildRenderTree = false);
+    bool replaceElementHtml(const QString &content,
+                            const QString &elementId,
+                            bool followEnd = false,
+                            bool updateIndex = true,
+                            bool rebuildRenderTree = false,
+                            bool rebuildRenderSubtree = false);
+    // The last complete document passed to setHtml(). Stream fragments are
+    // intentionally not concatenated because that would not represent the
+    // current DOM when they target named elements.
     Q_INVOKABLE QString html() const;
     Q_INVOKABLE QString title() const;
 

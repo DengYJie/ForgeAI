@@ -62,6 +62,8 @@ DocumentContainer::DocumentContainer()
             priv->m_needRelayout = true;
             if (priv->m_owner)
                 priv->m_owner->render(priv->m_clientRect.width(), priv->m_clientRect.height());
+            if (priv->m_relayoutCallback)
+                priv->m_relayoutCallback();
         }
     });
     d->m_resourceManager->setRepaintCallback([weakPriv]() {
@@ -454,6 +456,7 @@ void DocumentContainer::setPaintDevice(QPaintDevice *paintDevice)
 void DocumentContainer::setDocument(const QByteArray &data, DocumentContainerContext *context)
 {
     d->m_interactor.clear();
+    d->m_appendTargets.clear();
     // Cache the root elements (they do not change often, and selecting them each render is costly)
     d->m_document = litehtml::document::createFromString(
         data.constData(),
@@ -488,6 +491,63 @@ void DocumentContainer::registerElementFactory(const QByteArray &tagName,
     d->m_elementFactories.insert(tagName, factory);
 }
 
+namespace {
+litehtml::element::ptr appendTarget(DocumentContainerPrivate &container, const QByteArray &elementId)
+{
+    if (elementId.isEmpty() || !container.m_document)
+        return {};
+
+    const auto cached = container.m_appendTargets.constFind(elementId);
+    if (cached != container.m_appendTargets.cend())
+        return cached.value();
+
+    const QByteArray selector = '#' + elementId;
+    const litehtml::element::ptr target = container.m_document->root()->select_one(selector.constData());
+    if (target)
+        container.m_appendTargets.insert(elementId, target);
+    return target;
+}
+
+void updateAfterHtmlMutation(DocumentContainerPrivate &container, bool updateIndex = true)
+{
+    container.m_needRelayout = true;
+    if (updateIndex)
+        container.m_interactor.updateIndex();
+    if (container.m_relayoutCallback) {
+        container.m_relayoutCallback();
+    } else if (container.m_owner) {
+        // Preserve the standalone DocumentContainer contract for hosts that
+        // do not provide a coalescing layout callback.
+        container.m_owner->render(container.m_clientRect.width(), container.m_clientRect.height());
+    }
+}
+
+bool rebuildElementRenderSubtree(const litehtml::element::ptr &element)
+{
+    if (!element)
+        return false;
+
+    const std::shared_ptr<litehtml::render_item> oldRender = element->get_render_item();
+    const std::shared_ptr<litehtml::render_item> parentRender = oldRender ? oldRender->parent() : nullptr;
+    if (!oldRender || !parentRender)
+        return false;
+
+    std::shared_ptr<litehtml::render_item> replacement = element->create_render_item(parentRender);
+    if (!replacement)
+        return false;
+    replacement = replacement->init();
+
+    auto &siblings = parentRender->children();
+    const auto oldPosition = std::find(siblings.begin(), siblings.end(), oldRender);
+    if (oldPosition == siblings.end())
+        return false;
+
+    replacement->parent(parentRender);
+    *oldPosition = replacement;
+    return true;
+}
+} // namespace
+
 void DocumentContainer::appendHtml(const QByteArray &html)
 {
     if (html.isEmpty())
@@ -497,12 +557,47 @@ void DocumentContainer::appendHtml(const QByteArray &html)
         return;
     }
 
-    litehtml::element::ptr body = d->m_document->root()->select_one("body");
-    const litehtml::element::ptr parent = body ? body : d->m_document->root();
+    litehtml::element::ptr parent = d->m_document->root()->select_one("body");
+    if (!parent)
+        parent = d->m_document->root();
     d->m_document->append_children_from_string(*parent, html.constData(), false);
-    d->m_needRelayout = true;
-    render(d->m_clientRect.width(), d->m_clientRect.height());
-    d->m_interactor.updateIndex();
+    updateAfterHtmlMutation(*d);
+}
+
+bool DocumentContainer::appendHtmlToElement(const QByteArray &html,
+                                            const QByteArray &elementId,
+                                            bool updateIndex,
+                                            bool rebuildRenderTree)
+{
+    if (html.isEmpty())
+        return true;
+    const litehtml::element::ptr parent = appendTarget(*d, elementId);
+    if (!parent)
+        return false;
+    d->m_document->append_children_from_string(*parent, html.constData(), false);
+    if (rebuildRenderTree)
+        d->rebuildRenderTree();
+    updateAfterHtmlMutation(*d, updateIndex);
+    return true;
+}
+
+bool DocumentContainer::replaceElementHtml(const QByteArray &html,
+                                           const QByteArray &elementId,
+                                           bool updateIndex,
+                                           bool rebuildRenderTree,
+                                           bool rebuildRenderSubtree)
+{
+    const litehtml::element::ptr parent = appendTarget(*d, elementId);
+    if (!parent)
+        return false;
+    d->m_document->append_children_from_string(*parent, html.constData(), true);
+    if (rebuildRenderTree && !html.isEmpty())
+        d->rebuildRenderTree();
+    else if (rebuildRenderSubtree && !html.isEmpty()
+             && !rebuildElementRenderSubtree(parent))
+        d->rebuildRenderTree();
+    updateAfterHtmlMutation(*d, updateIndex);
+    return true;
 }
 
 QVector<QRect> DocumentContainer::fixedBoxes() const
@@ -732,6 +827,11 @@ void DocumentContainer::setRepaintCallback(const DocumentContainer::RepaintCallb
     d->m_repaintCallback = callback;
     if (d->m_resourceManager)
         d->m_resourceManager->setRepaintCallback(callback);
+}
+
+void DocumentContainer::setRelayoutCallback(const DocumentContainer::RelayoutCallback &callback)
+{
+    d->m_relayoutCallback = callback;
 }
 
 static litehtml::element::ptr elementForY(int y, const litehtml::document::ptr &document)

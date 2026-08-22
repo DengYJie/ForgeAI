@@ -1,35 +1,71 @@
 diff --git a/include/litehtml/document.h b/include/litehtml/document.h
-index e01f5b49..847f4376 100644
 --- a/include/litehtml/document.h
 +++ b/include/litehtml/document.h
-@@ -78,6 +78,7 @@ namespace litehtml
+@@ -70,6 +70,7 @@ namespace litehtml
+ 		string								m_culture;
+ 		string								m_text;
+ 		document_mode						m_mode = no_quirks_mode;
++		bool								m_rebuilding_render_tree = false;
+ 	public:
+ 		document(document_container* objContainer);
+ 		virtual ~document();
+@@ -78,6 +79,7 @@ namespace litehtml
  		document_mode					mode() const { return m_mode; }
  		uint_ptr						get_font(const font_description& descr, font_metrics* fm);
- 		pixel_t							render(pixel_t max_width, render_type rt = render_all);
+ 		pixel_t						render(pixel_t max_width, render_type rt = render_all);
 +		void							rebuild_render_tree();
  		void							draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip);
  		web_color						get_def_color()	{ return m_def_color; }
  		void 							cvt_units(css_length& val, const font_metrics& metrics, pixel_t size) const;
+diff --git a/include/litehtml/element.h b/include/litehtml/element.h
+--- a/include/litehtml/element.h
++++ b/include/litehtml/element.h
+@@ -38,6 +38,7 @@ namespace litehtml
+ 
+ 	private:
+ 		std::map<string_id, int>	m_counter_values;
++		void clear_renders_recursive();
+ 
+ 	public:
+ 		explicit element(const std::shared_ptr<document>& doc);
+@@ -230,6 +231,10 @@ namespace litehtml
+ 
+ 	inline std::shared_ptr<render_item> element::get_render_item()
+ 	{
++		while(!m_renders.empty() && m_renders.front().expired())
++		{
++			m_renders.pop_front();
++		}
+ 		if(m_renders.empty())
+ 		{
+ 			return nullptr;
 diff --git a/src/document.cpp b/src/document.cpp
-index abf39872..5f896b1d 100644
 --- a/src/document.cpp
 +++ b/src/document.cpp
-@@ -833,24 +833,34 @@ void document::add_fixed_box( const position& pos )
+@@ -833,24 +833,42 @@ void document::add_fixed_box( const position& pos )
  	m_fixed_boxes.push_back(pos);
  }
  
 +void document::rebuild_render_tree()
 +{
-+	if(!m_root)
++	if(!m_root || m_rebuilding_render_tree)
 +	{
 +		return;
 +	}
++	m_rebuilding_render_tree = true;
++	struct reset_rebuild_flag
++	{
++		bool& flag;
++		~reset_rebuild_flag() { flag = false; }
++	} reset_flag{m_rebuilding_render_tree};
 +
 +	// A display change can add or remove boxes. Rebuild the whole render tree
 +	// so nodes which were display:none at initial document creation can later
 +	// participate in layout (for example, a closed <details> being opened).
 +	m_tabular_elements.clear();
 +	m_fixed_boxes.clear();
++	m_root_render.reset();
++	m_root->clear_renders_recursive();
 +	m_root->refresh_styles();
 +	m_root->compute_styles();
 +	m_root_render = m_root->create_render_item(nullptr);
@@ -62,3 +98,22 @@ index abf39872..5f896b1d 100644
  		return true;
  	}
  	return false;
+diff --git a/src/element.cpp b/src/element.cpp
+--- a/src/element.cpp
++++ b/src/element.cpp
+@@ -209,6 +209,15 @@ void element::add_render(const std::shared_ptr<render_item>& ri)
+ 	m_renders.push_back(ri);
+ }
+ 
++void element::clear_renders_recursive()
++{
++	m_renders.clear();
++	for(const auto& child : children())
++	{
++		child->clear_renders_recursive();
++	}
++}
++
+ bool element::find_styles_changes( position::vector& redraw_boxes)
+ {
+ 	if(css().get_display() == display_inline_text)

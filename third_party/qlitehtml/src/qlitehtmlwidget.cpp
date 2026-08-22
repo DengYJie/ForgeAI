@@ -5,7 +5,6 @@
 #include <litehtml/master_css.h>
 
 #include <QClipboard>
-#include <QDebug>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QPainter>
@@ -41,6 +40,7 @@ public:
 
     bool isRendering = false;
     bool ignoreScrollbarWheel = false;
+    bool followEndOnNextRender = false;
 };
 
 QLiteHtmlWidget::QLiteHtmlWidget(QWidget* parent)
@@ -97,6 +97,13 @@ QLiteHtmlWidget::QLiteHtmlWidget(QWidget* parent)
     d->renderTimer.setInterval(16);
     d->renderTimer.setSingleShot(true);
     connect(&d->renderTimer, &QTimer::timeout, this, &QLiteHtmlWidget::render);
+    d->documentContainer.setRelayoutCallback([this] {
+        // Image metadata and decoded pixels can alter document height outside
+        // a QWidget paint event. Coalesce requests and refresh the scrollbar
+        // ranges through QLiteHtmlWidget::render().
+        if (!d->renderTimer.isActive())
+            d->renderTimer.start();
+    });
 
     // Default to litehtml v0.10's built-in master stylesheet, plus form control and details UA styles
     QString customMasterCss = QString::fromUtf8(litehtml::master_css) + R"(
@@ -163,6 +170,8 @@ QUrl QLiteHtmlWidget::url() const
 
 void QLiteHtmlWidget::setHtml(const QString& content)
 {
+    d->renderTimer.stop();
+    d->followEndOnNextRender = false;
     d->html = content;
     d->documentContainer.setPaintDevice(viewport());
     d->documentContainer.setDocument(content.toUtf8(), &d->context);
@@ -172,14 +181,54 @@ void QLiteHtmlWidget::setHtml(const QString& content)
     QMetaObject::invokeMethod(this, [this] { updateHightlightedLink(); }, Qt::QueuedConnection);
 }
 
-void QLiteHtmlWidget::appendHtml(const QString& content)
+void QLiteHtmlWidget::appendHtml(const QString& content, bool followEnd)
 {
-    d->html += content;
     d->documentContainer.setPaintDevice(viewport());
     d->documentContainer.appendHtml(content.toUtf8());
+    d->followEndOnNextRender = d->followEndOnNextRender || followEnd;
     if (!d->renderTimer.isActive()) {
         d->renderTimer.start();
     }
+}
+
+bool QLiteHtmlWidget::appendHtmlToElement(const QString& content,
+                                          const QString& elementId,
+                                          bool followEnd,
+                                          bool updateIndex,
+                                          bool rebuildRenderTree)
+{
+    d->documentContainer.setPaintDevice(viewport());
+    const bool appended = d->documentContainer.appendHtmlToElement(content.toUtf8(),
+                                                                    elementId.toUtf8(),
+                                                                    updateIndex,
+                                                                    rebuildRenderTree);
+    if (!appended)
+        return false;
+    d->followEndOnNextRender = d->followEndOnNextRender || followEnd;
+    if (!d->renderTimer.isActive())
+        d->renderTimer.start();
+    return true;
+}
+
+bool QLiteHtmlWidget::replaceElementHtml(const QString& content,
+                                         const QString& elementId,
+                                         bool followEnd,
+                                         bool updateIndex,
+                                         bool rebuildRenderTree,
+                                         bool rebuildRenderSubtree)
+{
+    d->documentContainer.setPaintDevice(viewport());
+    const bool replaced = d->documentContainer.replaceElementHtml(content.toUtf8(),
+                                                                   elementId.toUtf8(),
+                                                                   updateIndex,
+                                                                   rebuildRenderTree,
+                                                                   rebuildRenderSubtree);
+    if (!replaced)
+        return false;
+    d->followEndOnNextRender = d->followEndOnNextRender || followEnd;
+    if (!d->renderTimer.isActive())
+        d->renderTimer.start();
+    return true;
 }
 
 QString QLiteHtmlWidget::html() const
@@ -706,6 +755,11 @@ void QLiteHtmlWidget::render()
         horizontalScrollBar()->setRange(0, std::max(0, d->documentContainer.documentWidth() - w));
         verticalScrollBar()->setPageStep(h);
         verticalScrollBar()->setRange(0, std::max(0, d->documentContainer.documentHeight() - h));
+    }
+
+    if (d->followEndOnNextRender) {
+        verticalScrollBar()->setValue(verticalScrollBar()->maximum());
+        d->followEndOnNextRender = false;
     }
 
     viewport()->update();

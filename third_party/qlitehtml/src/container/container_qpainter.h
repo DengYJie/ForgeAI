@@ -107,9 +107,18 @@ public: // outside API
         const std::shared_ptr<litehtml::document> &doc)>;
     void registerElementFactory(const QByteArray &tagName, const ElementFactory &factory);
 
-    // Appends HTML to the end of the current document (body), re-renders and
-    // incrementally updates the search index. Creates the document if needed.
+    // Appends HTML to body, marks the document dirty, and updates the search
+    // index. Hosts may coalesce the subsequent layout with their own timer.
     void appendHtml(const QByteArray &html);
+    bool appendHtmlToElement(const QByteArray &html,
+                             const QByteArray &elementId,
+                             bool updateIndex = true,
+                             bool rebuildRenderTree = false);
+    bool replaceElementHtml(const QByteArray &html,
+                            const QByteArray &elementId,
+                            bool updateIndex = true,
+                            bool rebuildRenderTree = false,
+                            bool rebuildRenderSubtree = false);
 
     // Drops all decoded images from the cache. The cache survives setDocument()
     // by default so streaming re-renders reuse decoded pixmaps; call this to
@@ -146,6 +155,11 @@ public: // outside API
     // The DataCallback is invoked on a worker thread.
     using RepaintCallback = qlitehtml::RepaintCallback;
     void setRepaintCallback(const RepaintCallback &callback);
+
+    // Called after asynchronous resource metadata changes document geometry.
+    // Hosts use it to refresh their scrollable viewport and scrollbar ranges.
+    using RelayoutCallback = std::function<void()>;
+    void setRelayoutCallback(const RelayoutCallback &callback);
 
     int withFixedElementPosition(int y, const std::function<void()> &action);
 
