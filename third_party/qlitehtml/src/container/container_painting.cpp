@@ -269,15 +269,11 @@ void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
                                      QString::fromUtf8(base_url.data(), int(base_url.size())));
     if (pixmap.isNull())
         qWarning(log) << "draw_image: pixmap not loaded for" << QString::fromUtf8(url.data(), int(url.size()));
-    const QRect origin = toQRect(layer.origin_box);
-    const QPixmap scaled = origin.size() != pixmap.size() && !pixmap.isNull()
-                               ? pixmap.scaled(origin.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                               : pixmap;
+    // Scale at draw time (the painter has SmoothPixmapTransform enabled) so
+    // repaints do not allocate a temporary scaled pixmap on every frame.
     painter->setPen(Qt::NoPen);
-    drawPattern(painter, layer, [&scaled](QPainter *p, int x, int y, int w, int h) {
-        Q_UNUSED(w)
-        Q_UNUSED(h)
-        p->drawPixmap(x, y, scaled);
+    drawPattern(painter, layer, [&pixmap](QPainter *p, int x, int y, int w, int h) {
+        p->drawPixmap(QRect(x, y, w, h), pixmap, pixmap.rect());
     });
     painter->restore();
 }

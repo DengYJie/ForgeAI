@@ -105,6 +105,11 @@ public: // outside API
     // incrementally updates the search index. Creates the document if needed.
     void appendHtml(const QByteArray &html);
 
+    // Drops all decoded images from the cache. The cache survives setDocument()
+    // by default so streaming re-renders reuse decoded pixmaps; call this to
+    // force resources to be fetched again (e.g. explicit refresh).
+    void clearResourceCache();
+
     // Document-coordinate rects of position:fixed elements, used by the
     // widget to repaint them after scrolling.
     QVector<QRect> fixedBoxes() const;

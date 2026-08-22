@@ -489,7 +489,10 @@ void DocumentContainer::setScrollPosition(const QPoint &pos)
 
 void DocumentContainer::setDocument(const QByteArray &data, DocumentContainerContext *context)
 {
-    d->m_pixmaps.clear();
+    // The image cache is keyed by resolved QUrl and intentionally preserved
+    // across setDocument() calls: streaming renderers (e.g. chat markdown at
+    // 30 Hz) would otherwise re-decode the same images on every refresh. Call
+    // clearResourceCache() when a hard resource reload is required.
     d->clearSelection();
     const std::string masterCss
         = context && !context->d->masterStyleSheet.isEmpty()
@@ -511,6 +514,11 @@ bool DocumentContainer::hasDocument() const
 void DocumentContainer::setBaseUrl(const QString &url)
 {
     d->set_base_url(url.toUtf8().constData());
+}
+
+void DocumentContainer::clearResourceCache()
+{
+    d->m_pixmaps.clear();
 }
 
 void DocumentContainer::registerElementFactory(const QByteArray &tagName,
