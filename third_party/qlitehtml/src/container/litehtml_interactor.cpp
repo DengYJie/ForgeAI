@@ -351,23 +351,7 @@ Index::Entry Index::findElement(int index) const
 
 QUrl LiteHtmlInteractor::resolveUrl(const QString &url, const QString &baseUrl) const
 {
-    const QUrl qurl(url);
-    if (qurl.scheme().isEmpty()) {
-        if (url.startsWith('#'))
-            return qurl;
-        const QUrl pageBaseUrl = QUrl(baseUrl.isEmpty() ? m_baseUrl : baseUrl);
-        if (url.startsWith("//"))
-            return QUrl(pageBaseUrl.scheme() + ":" + url);
-        QUrl serverUrl = QUrl(pageBaseUrl);
-        serverUrl.setPath("");
-        const QString actualBaseUrl = url.startsWith('/')
-                                          ? serverUrl.toString(QUrl::FullyEncoded)
-                                          : pageBaseUrl.toString(QUrl::FullyEncoded);
-        QUrl resolvedUrl(actualBaseUrl + '/' + url);
-        resolvedUrl.setPath(QDir::cleanPath(resolvedUrl.path(QUrl::FullyEncoded)));
-        return resolvedUrl;
-    }
-    return qurl;
+    return qlitehtml::internal::resolveUrl(url, baseUrl.isEmpty() ? m_baseUrl : baseUrl);
 }
 
 void LiteHtmlInteractor::on_anchor_click(const char *url, const litehtml::element::ptr &el)
@@ -486,6 +470,16 @@ void LiteHtmlInteractor::clearSelection()
 
     if (!oldText.isEmpty())
         m_clipboardCallback(false);
+}
+
+void LiteHtmlInteractor::clear()
+{
+    clearSelection();
+    m_index.elementToIndex.clear();
+    m_index.indexToElement.clear();
+    m_index.text.clear();
+    m_lastIndexedElement = nullptr;
+    m_document = nullptr;
 }
 
 const Selection::SegmentInfo* LiteHtmlInteractor::getSelectionSegmentInfo(const QRect &placementRect, Selection::SegmentInfo &localSeg) const

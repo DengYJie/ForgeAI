@@ -286,6 +286,16 @@ void QLiteHtmlWidget::setResourceHandler(const QLiteHtmlWidget::ResourceHandler 
         });
 }
 
+void QLiteHtmlWidget::setAllowNetworkAccess(bool allow)
+{
+    d->documentContainer.setAllowNetworkAccess(allow);
+}
+
+bool QLiteHtmlWidget::allowNetworkAccess() const
+{
+    return d->documentContainer.allowNetworkAccess();
+}
+
 QString QLiteHtmlWidget::selectedText() const
 {
     return d->documentContainer.selectedText();

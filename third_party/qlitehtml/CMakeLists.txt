@@ -5,6 +5,7 @@ add_library(qlitehtml STATIC
     src/container/container_qpainter.cpp
     src/container/litehtml_renderer.cpp
     src/container/litehtml_interactor.cpp
+    src/container/litehtml_resource_manager.cpp
     src/container/container_serializer.cpp
     src/elements/form_control_element.cpp
     src/elements/button_element.cpp
@@ -21,11 +22,13 @@ target_sources(qlitehtml PRIVATE
     src/container/container_qpainter_p.h
     src/container/litehtml_renderer.h
     src/container/litehtml_interactor.h
+    src/container/litehtml_resource_manager.h
     src/elements/form_control_element.h
     src/elements/button_element.h
     src/elements/details_element.h
     src/elements/summary_element.h
     src/qlitehtml_global.h
+    src/qlitehtml_types.h
     src/qlitehtmlwidget.h
     src/qlitehtmlsearchwidget.h
 )
@@ -44,6 +47,7 @@ target_compile_definitions(qlitehtml
 target_link_libraries(qlitehtml
     PUBLIC
         Qt::Widgets
+        Qt::Network
         litehtml
 )
 

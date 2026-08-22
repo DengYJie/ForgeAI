@@ -46,6 +46,8 @@ public:
     };
     using ResourceHandler = std::function<QByteArray(const QUrl &url, ResourceType type)>;
     void setResourceHandler(const ResourceHandler &handler);
+    void setAllowNetworkAccess(bool allow);
+    bool allowNetworkAccess() const;
 
     // declaring this Q_INVOKABLE to make it Squish-testable
     Q_INVOKABLE QString selectedText() const;

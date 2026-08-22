@@ -1,5 +1,7 @@
 #pragma once
 
+#include "litehtml_renderer.h"
+
 #include <litehtml.h>
 #include <QPoint>
 #include <QRect>
@@ -47,13 +49,7 @@ public:
         int x = -1;
     };
 
-    struct SegmentInfo
-    {
-        int charStart = 0;  
-        int charEnd = -1;   
-        int pixelStart = 0; 
-        int pixelEnd = -1;  
-    };
+    using SegmentInfo = SelectionSegmentInfo;
 
     enum class Mode { Free, Word };
 
@@ -84,6 +80,8 @@ public:
 
     LiteHtmlInteractor() = default;
     ~LiteHtmlInteractor() = default;
+
+    void clear();
 
     void setBaseUrl(const QString &url) { m_baseUrl = url; }
     void setDocument(const litehtml::document::ptr &doc) { m_document = doc; }

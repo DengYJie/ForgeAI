@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include "litehtml_interactor.h"
+#include "litehtml_resource_manager.h"
 
 class DocumentContainerPrivate final
     : public litehtml::document_container
@@ -97,8 +98,7 @@ public: // document_container API
     QPaintDevice *m_paintDevice = nullptr;
     QPainter *m_painter = nullptr;
     // The owning public container; used by async image completion to trigger
-    // a re-layout through DocumentContainer::render(). The weak_ptr guard in
-    // load_image() guarantees this is alive when the callback runs.
+    // a re-layout through DocumentContainer::render().
     DocumentContainer *m_owner = nullptr;
     litehtml::document::ptr m_document;
     QHash<QByteArray, DocumentContainer::ElementFactory> m_elementFactories;
@@ -112,16 +112,11 @@ public: // document_container API
     QFont m_defaultFont = QFont(sansSerifFont(), 16);
     mutable qlitehtml::internal::LiteHtmlRenderer m_renderer;
     qlitehtml::internal::LiteHtmlInteractor m_interactor;
+    std::shared_ptr<qlitehtml::internal::LiteHtmlResourceManager> m_resourceManager;
     QByteArray m_defaultFontFamilyName = m_defaultFont.family().toUtf8();
-    // LRU image cache, costed by decoded size (1 unit = 1 KiB), capped at
-    // 64 MiB so long documents cannot grow memory without bound.
-    QCache<QUrl, QPixmap> m_pixmaps{64 * 1024};
-    // URLs currently being fetched on a worker thread (dedup).
-    QSet<QUrl> m_loadingImages;
     // Invoked on the main thread after an async image finished loading, so
     // the widget can repaint the (re-laid-out) viewport.
     DocumentContainer::RepaintCallback m_repaintCallback;
-    DocumentContainer::ResourceHandler m_resourceHandler;
     DocumentContainer::PaletteCallback m_paletteCallback;
 
     void rebuildRenderTree();

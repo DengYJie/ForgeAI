@@ -1,16 +1,40 @@
 // Internal helpers shared between the container implementation files
-// (container_qpainter.cpp, container_selection.cpp, container_painting.cpp,
-// container_serializer.cpp). Not part of the public API.
+// (container_qpainter.cpp, litehtml_renderer.cpp, litehtml_interactor.cpp,
+// litehtml_resource_manager.cpp, container_serializer.cpp). Not part of the public API.
 
 #pragma once
 
 #include "container_qpainter_p.h"
+#include "qlitehtml_types.h"
 
 #include <QCursor>
+#include <QDir>
 #include <QFont>
 #include <QPainter>
+#include <QUrl>
 
 namespace qlitehtml::internal {
+
+inline QUrl resolveUrl(const QString &url, const QString &baseUrl)
+{
+    const QUrl qurl(url);
+    if (qurl.scheme().isEmpty()) {
+        if (url.startsWith('#'))
+            return qurl;
+        const QUrl pageBaseUrl = QUrl(baseUrl);
+        if (url.startsWith("//"))
+            return QUrl(pageBaseUrl.scheme() + ":" + url);
+        QUrl serverUrl = QUrl(pageBaseUrl);
+        serverUrl.setPath("");
+        const QString actualBaseUrl = url.startsWith('/')
+                                          ? serverUrl.toString(QUrl::FullyEncoded)
+                                          : pageBaseUrl.toString(QUrl::FullyEncoded);
+        QUrl resolvedUrl(actualBaseUrl + '/' + url);
+        resolvedUrl.setPath(QDir::cleanPath(resolvedUrl.path(QUrl::FullyEncoded)));
+        return resolvedUrl;
+    }
+    return qurl;
+}
 
 using Font = QFont;
 using Context = QPainter;

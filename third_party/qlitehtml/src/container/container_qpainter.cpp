@@ -2,6 +2,7 @@
 #include "container_qpainter_p.h"
 #include "container_internal.h"
 #include "elements/button_element.h"
+#include "elements/details_element.h"
 #include "elements/form_control_element.h"
 #include "elements/summary_element.h"
 
@@ -45,10 +46,29 @@ DocumentContainer::DocumentContainer()
     : d(std::make_shared<DocumentContainerPrivate>())
 {
     d->m_owner = this;
-    d->m_interactor.setRelayoutCallback([this]() {
-        d->rebuildRenderTree();
-        d->m_needRelayout = true;
-        render(d->m_clientRect.width(), d->m_clientRect.height());
+    d->m_resourceManager = std::make_shared<LiteHtmlResourceManager>();
+
+    const std::weak_ptr<DocumentContainerPrivate> weakPriv = d;
+    d->m_interactor.setRelayoutCallback([weakPriv]() {
+        if (const auto priv = weakPriv.lock()) {
+            priv->rebuildRenderTree();
+            priv->m_needRelayout = true;
+            if (priv->m_owner)
+                priv->m_owner->render(priv->m_clientRect.width(), priv->m_clientRect.height());
+        }
+    });
+    d->m_resourceManager->setRelayoutCallback([weakPriv]() {
+        if (const auto priv = weakPriv.lock()) {
+            priv->m_needRelayout = true;
+            if (priv->m_owner)
+                priv->m_owner->render(priv->m_clientRect.width(), priv->m_clientRect.height());
+        }
+    });
+    d->m_resourceManager->setRepaintCallback([weakPriv]() {
+        if (const auto priv = weakPriv.lock()) {
+            if (priv->m_repaintCallback)
+                priv->m_repaintCallback();
+        }
     });
 
     // Register custom elements for form controls
@@ -96,7 +116,12 @@ DocumentContainer::DocumentContainer()
                            });
 }
 
-DocumentContainer::~DocumentContainer() = default;
+DocumentContainer::~DocumentContainer()
+{
+    if (d) {
+        d->m_owner = nullptr;
+    }
+}
 
 litehtml::uint_ptr DocumentContainerPrivate::create_font(const litehtml::font_description &descr,
                                                          const litehtml::document *doc,
@@ -182,32 +207,13 @@ litehtml::pixel_t DocumentContainerPrivate::text_width(const char *text, litehtm
 
 litehtml::pixel_t DocumentContainerPrivate::pt_to_px(float pt) const
 {
-    // Use Qt's logical widget DPI consistently. On Windows GetDeviceCaps(LOGPIXELSY)
-    // includes the desktop scale factor and made the preview too large on HiDPI screens.
-    const qreal dpi = m_paintDevice->logicalDpiY();
+    const qreal dpi = m_paintDevice ? m_paintDevice->logicalDpiY() : 96.0;
     return qreal(pt) * dpi / 72.0;
-
-#if 0
-// magic factor of 11/12 to account for differences to webengine/webkit
-// return m_paintDevice->physicalDpiY() * pt * 11 / m_paintDevice->logicalDpiY() / 12;
-#endif
 }
 
 litehtml::pixel_t DocumentContainerPrivate::get_default_font_size() const
 {
-    int pointSize = m_defaultFont.pointSize();
-    if (pointSize <= 0) {
-        int pixelSize = m_defaultFont.pixelSize();
-        if (pixelSize > 0 && m_paintDevice) {
-            // Convert pixel size back to point size: pt = px * 72 / DPI
-            // (for [#3539](https://github.com/pbek/QOwnNotes/issues/3539))
-            pointSize = qRound(pixelSize * 72.0 / m_paintDevice->logicalDpiY());
-        }
-    }
-    if (pointSize <= 0) {
-        pointSize = 16;
-    }
-    return pointSize;
+    return m_resourceManager ? m_resourceManager->defaultFontSize(m_defaultFont, m_paintDevice) : 16;
 }
 
 const char *DocumentContainerPrivate::get_default_font_name() const
@@ -219,75 +225,16 @@ void DocumentContainerPrivate::load_image(const char *src,
                                           const char *baseurl,
                                           bool redraw_on_ready)
 {
-    Q_UNUSED(redraw_on_ready)
-    const auto qtSrc = QString::fromUtf8(src);
-    const auto qtBaseUrl = QString::fromUtf8(baseurl);
-    const QUrl url = resolveUrl(qtSrc, qtBaseUrl);
-    if (m_pixmaps.contains(url) || m_loadingImages.contains(url))
-        return;
-
-    // Without a resource handler there is nothing to fetch; remember the
-    // miss so get_image_size()/draw_image() do not retry.
-    if (!m_resourceHandler) {
-        m_pixmaps.insert(url, new QPixmap());
-        return;
-    }
-
-    // Fetch on a worker thread; the data callback must be thread-safe. The
-    // pixmap cache and layout are only touched on the main thread: decode,
-    // re-layout (image size may change the flow) and repaint there.
-    // The weak reference guards against the container being destroyed while
-    // the fetch or the queued completion is still pending.
-    m_loadingImages.insert(url);
-    const std::weak_ptr<DocumentContainerPrivate> weak = shared_from_this();
-    auto *task = QRunnable::create([weak, url] {
-        const std::shared_ptr<DocumentContainerPrivate> self = weak.lock();
-        if (!self)
-            return;
-        const QByteArray data = self->m_resourceHandler(url, DocumentContainer::ResourceType::Image);
-        QMetaObject::invokeMethod(
-            QCoreApplication::instance(),
-            [weak, url, data] {
-                const std::shared_ptr<DocumentContainerPrivate> self = weak.lock();
-                if (!self)
-                    return;
-                self->m_loadingImages.remove(url);
-                QPixmap pixmap;
-                pixmap.loadFromData(data);
-                if (!pixmap.isNull()) {
-                    // Cost in KiB, approximated as 4 bytes per pixel.
-                    const int cost = qMax(1, (pixmap.width() * pixmap.height() * 4) / 1024);
-                    self->m_pixmaps.insert(url, new QPixmap(pixmap), cost);
-                } else {
-                    // Remember the failure so we do not refetch on every draw.
-                    self->m_pixmaps.insert(url, new QPixmap());
-                }
-                if (!pixmap.isNull() && self->m_owner) {
-                    self->m_needRelayout = true;
-                    self->m_owner->render(self->m_clientRect.width(), self->m_clientRect.height());
-                }
-                if (self->m_repaintCallback)
-                    self->m_repaintCallback();
-            },
-            Qt::QueuedConnection);
-    });
-    QThreadPool::globalInstance()->start(task);
+    if (m_resourceManager)
+        m_resourceManager->load_image(src, baseurl, redraw_on_ready);
 }
 
 void DocumentContainerPrivate::get_image_size(const char *src,
                                               const char *baseurl,
                                               litehtml::size &sz)
 {
-    const auto qtSrc = QString::fromUtf8(src);
-    const auto qtBaseUrl = QString::fromUtf8(baseurl);
-    if (qtSrc.isEmpty()) // for some reason that happens
-        return;
-    qDebug(log) << "get_image_size:"
-                << QStringLiteral("src = \"%1\";").arg(qtSrc).toUtf8().constData()
-                << QStringLiteral("base = \"%1\"").arg(qtBaseUrl).toUtf8().constData();
-    const QPixmap pm = getPixmap(qtSrc, qtBaseUrl);
-    sz.width = pm.width();
-    sz.height = pm.height();
+    if (m_resourceManager)
+        m_resourceManager->get_image_size(src, baseurl, sz);
 }
 
 void DocumentContainerPrivate::set_caption(const char *caption)
@@ -299,6 +246,8 @@ void DocumentContainerPrivate::set_base_url(const char *base_url)
 {
     m_baseUrl = QString::fromUtf8(base_url);
     m_interactor.setBaseUrl(m_baseUrl);
+    if (m_resourceManager)
+        m_resourceManager->setBaseUrl(m_baseUrl);
 }
 
 void DocumentContainerPrivate::link(const std::shared_ptr<litehtml::document> &doc,
@@ -367,19 +316,10 @@ void DocumentContainerPrivate::import_css(litehtml::string &text,
                                           const litehtml::string &url,
                                           litehtml::string &baseurl)
 {
-    // Without a resource handler we cannot fetch the stylesheet; leave text
-    // empty so litehtml skips the import instead of crashing on an empty
-    // std::function call.
-    if (!m_resourceHandler) {
+    if (m_resourceManager)
+        m_resourceManager->import_css(text, url, baseurl);
+    else
         text.clear();
-        return;
-    }
-    const QUrl actualUrl = resolveUrl(QString::fromUtf8(url.data(), int(url.size())),
-                                      QString::fromUtf8(baseurl.data(), int(baseurl.size())));
-    const QString urlString = actualUrl.toString(QUrl::None);
-    const int lastSlash = urlString.lastIndexOf('/');
-    baseurl = urlString.left(lastSlash).toUtf8().constData();
-    text = m_resourceHandler(actualUrl, DocumentContainer::ResourceType::StyleSheet).constData();
 }
 
 void DocumentContainerPrivate::set_clip(const litehtml::position &pos,
@@ -447,7 +387,7 @@ void DocumentContainerPrivate::get_viewport(litehtml::position &viewport) const
 
 std::shared_ptr<litehtml::element> DocumentContainerPrivate::create_element(
     const char *tag_name,
-const litehtml::string_map &attributes,
+    const litehtml::string_map &attributes,
     const std::shared_ptr<litehtml::document> &doc)
 {
     const auto it = m_elementFactories.constFind(
@@ -511,26 +451,16 @@ void DocumentContainer::setPaintDevice(QPaintDevice *paintDevice)
     d->m_paintDevice = paintDevice;
 }
 
-void DocumentContainer::setScrollPosition(const QPoint &pos)
-{
-    d->m_scrollPosition = pos;
-}
-
 void DocumentContainer::setDocument(const QByteArray &data, DocumentContainerContext *context)
 {
-    // The image cache is keyed by resolved QUrl and intentionally preserved
-    // across setDocument() calls: streaming renderers (e.g. chat markdown at
-    // 30 Hz) would otherwise re-decode the same images on every refresh. Call
-    // clearResourceCache() when a hard resource reload is required.
-    d->m_interactor.clearSelection();
-    const std::string masterCss
-        = context && !context->d->masterStyleSheet.isEmpty()
-              ? context->d->masterStyleSheet.toUtf8().constData()
-              : litehtml::master_css;
-    d->m_document = litehtml::document::createFromString(litehtml::estring(data.constData()),
-                                                         d.get(),
-                                                         masterCss,
-                                                         std::string());
+    d->m_interactor.clear();
+    // Cache the root elements (they do not change often, and selecting them each render is costly)
+    d->m_document = litehtml::document::createFromString(
+        data.constData(),
+        d.get(),
+        context && !context->d->masterStyleSheet.isEmpty()
+            ? context->d->masterStyleSheet.toUtf8().constData()
+            : nullptr);
     d->m_interactor.setDocument(d->m_document);
     d->m_needRelayout = true;
     d->m_interactor.buildIndex();
@@ -548,7 +478,8 @@ void DocumentContainer::setBaseUrl(const QString &url)
 
 void DocumentContainer::clearResourceCache()
 {
-    d->m_pixmaps.clear();
+    if (d->m_resourceManager)
+        d->m_resourceManager->clearCache();
 }
 
 void DocumentContainer::registerElementFactory(const QByteArray &tagName,
@@ -565,6 +496,7 @@ void DocumentContainer::appendHtml(const QByteArray &html)
         setDocument(html, nullptr);
         return;
     }
+
     litehtml::element::ptr body = d->m_document->root()->select_one("body");
     const litehtml::element::ptr parent = body ? body : d->m_document->root();
     d->m_document->append_children_from_string(*parent, html.constData(), false);
@@ -575,20 +507,22 @@ void DocumentContainer::appendHtml(const QByteArray &html)
 
 QVector<QRect> DocumentContainer::fixedBoxes() const
 {
-    QVector<QRect> result;
     if (!d->m_document)
-        return result;
+        return {};
+
     litehtml::position::vector boxes;
     d->m_document->get_fixed_boxes(boxes);
+
+    QVector<QRect> result;
     result.reserve(int(boxes.size()));
     for (const litehtml::position &box : boxes)
         result.append(toQRect(box));
     return result;
 }
 
-QVector<QRect> DocumentContainer::selectionRects() const
+void DocumentContainer::setScrollPosition(const QPoint &pos)
 {
-    return d->m_interactor.selectionRects();
+    d->m_scrollPosition = pos;
 }
 
 void DocumentContainer::render(int width, int height)
@@ -623,25 +557,35 @@ void DocumentContainer::draw(QPainter *painter, const QRect &clip)
 
 int DocumentContainer::documentWidth() const
 {
+    if (!d->m_document)
+        return 0;
     return d->m_document->width();
 }
 
 int DocumentContainer::documentHeight() const
 {
+    if (!d->m_document)
+        return 0;
     return d->m_document->height();
 }
 
 int DocumentContainer::anchorY(const QString &anchorName) const
 {
+    if (!d->m_document)
+        return -1;
     litehtml::element::ptr element = d->m_document->root()->select_one(
-        QStringLiteral("#%1").arg(anchorName).toUtf8().constData());
-    if (!element) {
+        QStringLiteral("a[name=\"%1\"]").arg(anchorName).toUtf8().constData());
+    if (!element)
         element = d->m_document->root()->select_one(
-            QStringLiteral("[name=%1]").arg(anchorName).toUtf8().constData());
-    }
+            QStringLiteral("#%1").arg(anchorName).toUtf8().constData());
     if (element)
         return element->get_placement().y;
     return -1;
+}
+
+QVector<QRect> DocumentContainer::selectionRects() const
+{
+    return d->m_interactor.selectionRects();
 }
 
 QVector<QRect> DocumentContainer::mousePressEvent(const QPoint &documentPos,
@@ -659,15 +603,15 @@ QVector<QRect> DocumentContainer::mouseMoveEvent(const QPoint &documentPos,
 }
 
 QVector<QRect> DocumentContainer::mouseReleaseEvent(const QPoint &documentPos,
-                                                    const QPoint &viewportPos,
-                                                    Qt::MouseButton button)
+                                                   const QPoint &viewportPos,
+                                                   Qt::MouseButton button)
 {
     return d->m_interactor.mouseReleaseEvent(documentPos, viewportPos, button);
 }
 
 QVector<QRect> DocumentContainer::mouseDoubleClickEvent(const QPoint &documentPos,
-                                                        const QPoint &viewportPos,
-                                                        Qt::MouseButton button)
+                                                       const QPoint &viewportPos,
+                                                       Qt::MouseButton button)
 {
     return d->m_interactor.mouseDoubleClickEvent(documentPos, viewportPos, button);
 }
@@ -733,7 +677,19 @@ QFont DocumentContainer::defaultFont() const
 
 void DocumentContainer::setResourceHandler(const DocumentContainer::ResourceHandler &handler)
 {
-    d->m_resourceHandler = handler;
+    if (d->m_resourceManager)
+        d->m_resourceManager->setResourceHandler(handler);
+}
+
+void DocumentContainer::setAllowNetworkAccess(bool allow)
+{
+    if (d->m_resourceManager)
+        d->m_resourceManager->setAllowNetworkAccess(allow);
+}
+
+bool DocumentContainer::allowNetworkAccess() const
+{
+    return d->m_resourceManager ? d->m_resourceManager->allowNetworkAccess() : false;
 }
 
 void DocumentContainer::setCursorCallback(const DocumentContainer::CursorCallback &callback)
@@ -769,6 +725,8 @@ void DocumentContainer::setClipboardCallback(const ClipboardCallback &callback)
 void DocumentContainer::setRepaintCallback(const DocumentContainer::RepaintCallback &callback)
 {
     d->m_repaintCallback = callback;
+    if (d->m_resourceManager)
+        d->m_resourceManager->setRepaintCallback(callback);
 }
 
 static litehtml::element::ptr elementForY(int y, const litehtml::document::ptr &document)
@@ -778,15 +736,14 @@ static litehtml::element::ptr elementForY(int y, const litehtml::document::ptr &
 
     const std::function<litehtml::element::ptr(int, const litehtml::element::ptr &)> recursion =
         [&recursion](int y, const litehtml::element::ptr &element) {
-            const int subY = y - qRound(element->get_placement().y);
-            if (subY <= 0)
-                return element;
-            for (const litehtml::element::ptr &child : element->children()) {
-                const litehtml::element::ptr result = recursion(subY, child);
-                if (result)
-                    return result;
+            for (const auto &child : element->children()) {
+                if (child->get_placement().y > y)
+                    return child;
+                const litehtml::element::ptr found = recursion(y, child);
+                if (found)
+                    return found;
             }
-            return litehtml::element::ptr{};
+            return litehtml::element::ptr();
         };
 
     return recursion(y, document->root());
@@ -803,57 +760,27 @@ int DocumentContainer::withFixedElementPosition(int y, const std::function<void(
 
 QPixmap DocumentContainerPrivate::getPixmap(const QString &imageUrl, const QString &baseUrl)
 {
-    const QUrl url = resolveUrl(imageUrl, baseUrl);
-    // object() refreshes the LRU position on access.
-    if (const QPixmap *pixmap = m_pixmaps.object(url))
-        return *pixmap;
-    qWarning(log) << "draw_background: pixmap not loaded for" << url;
-    return {};
+    return m_resourceManager ? m_resourceManager->getPixmap(imageUrl, baseUrl) : QPixmap();
 }
 
 QString DocumentContainerPrivate::serifFont() const
 {
-    // TODO make configurable
-    return {"Times New Roman"};
+    return m_resourceManager ? m_resourceManager->serifFont() : QStringLiteral("Times New Roman");
 }
 
 QString DocumentContainerPrivate::sansSerifFont() const
 {
-    // Preferred modern system sans-serif font for CJK and Western text
-    return {"Microsoft YaHei"};
+    return m_resourceManager ? m_resourceManager->sansSerifFont() : QStringLiteral("Microsoft YaHei");
 }
 
 QString DocumentContainerPrivate::monospaceFont() const
 {
-    // TODO make configurable
-    return {"Courier"};
+    return m_resourceManager ? m_resourceManager->monospaceFont() : QStringLiteral("Courier");
 }
 
 QUrl DocumentContainerPrivate::resolveUrl(const QString &url, const QString &baseUrl) const
 {
-    // several cases:
-    // full url: "https://foo.bar/blah.css"
-    // relative path: "foo/bar.css"
-    // server relative path: "/foo/bar.css"
-    // net path: "//foo.bar/blah.css"
-    // fragment only: "#foo-fragment"
-    const QUrl qurl(url);
-    if (qurl.scheme().isEmpty()) {
-        if (url.startsWith('#')) // leave alone if just a fragment
-            return qurl;
-        const QUrl pageBaseUrl = QUrl(baseUrl.isEmpty() ? m_baseUrl : baseUrl);
-        if (url.startsWith("//")) // net path
-            return QUrl(pageBaseUrl.scheme() + ":" + url);
-        QUrl serverUrl = QUrl(pageBaseUrl);
-        serverUrl.setPath("");
-        const QString actualBaseUrl = url.startsWith('/')
-                                          ? serverUrl.toString(QUrl::FullyEncoded)
-                                          : pageBaseUrl.toString(QUrl::FullyEncoded);
-        QUrl resolvedUrl(actualBaseUrl + '/' + url);
-        resolvedUrl.setPath(QDir::cleanPath(resolvedUrl.path(QUrl::FullyEncoded)));
-        return resolvedUrl;
-    }
-    return qurl;
+    return m_resourceManager ? m_resourceManager->resolveUrl(url, baseUrl) : QUrl(url);
 }
 
 DocumentContainerContext::DocumentContainerContext()
@@ -873,27 +800,16 @@ void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
                                          litehtml::web_color color,
                                          const litehtml::position &pos)
 {
-    const QRect placementRect = toQRect(pos).translated(m_scrollPosition);
-    qlitehtml::internal::Selection::SegmentInfo localSeg;
-    const qlitehtml::internal::Selection::SegmentInfo* segInfo = 
-        m_interactor.getSelectionSegmentInfo(placementRect, localSeg);
-    
-    qlitehtml::internal::SelectionSegmentInfo convertedSeg;
-    const qlitehtml::internal::SelectionSegmentInfo* pConvertedSeg = nullptr;
-    if (segInfo && m_paletteCallback) {
-        convertedSeg.charStart = segInfo->charStart;
-        convertedSeg.charEnd = segInfo->charEnd;
-        convertedSeg.pixelStart = segInfo->pixelStart;
-        convertedSeg.pixelEnd = segInfo->pixelEnd;
-        pConvertedSeg = &convertedSeg;
-    }
-    
+    const QRect placementRect = toQRect(pos);
+    SelectionSegmentInfo localSeg;
+    const SelectionSegmentInfo *pSeg = m_interactor.getSelectionSegmentInfo(placementRect, localSeg);
+
     m_renderer.draw_text(toQPainter(hdc),
                          QString::fromUtf8(text),
                          toQFont(hFont),
                          toQColor(color),
-                         toQRect(pos),
-                         pConvertedSeg,
+                         placementRect,
+                         pSeg,
                          m_paletteCallback ? m_paletteCallback() : QPalette());
 }
 

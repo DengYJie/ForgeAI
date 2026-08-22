@@ -1,6 +1,7 @@
 #pragma once
 
 #include "qlitehtml_global.h"
+#include "qlitehtml_types.h"
 
 #include <QByteArray>
 #include <QPaintDevice>
@@ -92,13 +93,11 @@ public: // outside API
     void setDefaultFont(const QFont &font);
     QFont defaultFont() const;
 
-    enum class ResourceType {
-        Image,
-        StyleSheet,
-        Font
-    };
-    using ResourceHandler = std::function<QByteArray(const QUrl &url, ResourceType type)>;
+    using ResourceType = qlitehtml::ResourceType;
+    using ResourceHandler = qlitehtml::ResourceHandler;
     void setResourceHandler(const ResourceHandler &handler);
+    void setAllowNetworkAccess(bool allow);
+    bool allowNetworkAccess() const;
     // Custom element factory: called from create_element for the registered
     // tag; return nullptr to fall through to the default (no element).
     // The checkbox factory for "input[type=checkbox]" is registered by default.
@@ -145,7 +144,7 @@ public: // outside API
     // Called (main thread) when an asynchronously loaded image finished and
     // the document was re-laid-out; the widget should repaint the viewport.
     // The DataCallback is invoked on a worker thread.
-    using RepaintCallback = std::function<void()>;
+    using RepaintCallback = qlitehtml::RepaintCallback;
     void setRepaintCallback(const RepaintCallback &callback);
 
     int withFixedElementPosition(int y, const std::function<void()> &action);
