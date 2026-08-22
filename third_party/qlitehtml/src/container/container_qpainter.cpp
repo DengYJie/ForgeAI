@@ -545,6 +545,11 @@ void DocumentContainer::render(int width, int height)
 
 void DocumentContainer::draw(QPainter *painter, const QRect &clip)
 {
+    // Keep the configured paint device available between paint events.  Input
+    // handlers can rebuild the litehtml render tree outside draw(), where it
+    // is still needed to convert the widget's pixel-sized default font into
+    // CSS points.  Clearing it here made that conversion fall back to 16pt.
+    QPaintDevice *const configuredPaintDevice = d->m_paintDevice;
     d->m_paintDevice = painter->device();
     d->m_painter = painter;
     d->drawSelection(painter, clip);
@@ -552,7 +557,7 @@ void DocumentContainer::draw(QPainter *painter, const QRect &clip)
     const litehtml::position clipRect(clip.x(), clip.y(), clip.width(), clip.height());
     d->m_document->draw(reinterpret_cast<litehtml::uint_ptr>(painter), pos.x(), pos.y(), &clipRect);
     d->m_painter = nullptr;
-    d->m_paintDevice = nullptr;
+    d->m_paintDevice = configuredPaintDevice;
 }
 
 int DocumentContainer::documentWidth() const
