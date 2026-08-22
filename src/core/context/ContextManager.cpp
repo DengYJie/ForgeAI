@@ -1,4 +1,5 @@
 #include "ContextManager.h"
+#include "PromptBuilder.h"
 #include <algorithm>
 
 namespace core::context {
@@ -69,30 +70,33 @@ namespace core::context {
         AssembledContext result;
         result.tools = availableTools;
 
-        // 1. 组装 System Prompt (人设 + 项目工作区约束 + 规则 + 紧凑的 Skill 索引)
-        QStringList systemParts;
-        if (agent.has_value() && !agent->systemPrompt.isEmpty()) {
-            systemParts.append(agent->systemPrompt);
-        } else {
-            systemParts.append("You are a helpful and versatile AI assistant.");
-        }
+        // 1. 组装 System Prompt（采用 PromptBuilder 进行标准化构建）
+        PromptBuilder builder;
 
-        // 如果绑定了 Project，注入工作区根目录与专属规则
+        // 优先级 10: 基础角色与人设（最稳定前缀）
+        QString personaText = (agent.has_value() && !agent->systemPrompt.isEmpty())
+                                  ? agent->systemPrompt
+                                  : "You are ForgeAI, a helpful and versatile AI assistant.";
+        builder.addSection("system_instructions", personaText, 10);
+
+        // 优先级 20: 工作区环境锚定
         if (project.has_value()) {
-            QString workspaceInfo = QString("## Current Workspace:\n- Name: %1\n- Root Path: %2")
-                .arg(project->name, project->rootPath);
-            
+            QString workspaceInfo = QString("- Project Name: %1\n- Root Path: %2")
+                    .arg(project->name, project->rootPath);
+            builder.addSection("workspace", workspaceInfo, 20);
+
+            // 优先级 30: 项目专属规则
             if (!project->customRules.isEmpty()) {
-                workspaceInfo += "\n\n## Project Rules:\n" + project->customRules;
+                builder.addSection("project_rules", project->customRules, 30);
             }
-            systemParts.append(workspaceInfo);
         }
 
+        // 优先级 40: 可用 Skill 索引
         if (!availableSkillSummaries.isEmpty()) {
-            systemParts.append("## Available Skills (Load on demand):\n" + availableSkillSummaries.join("\n"));
+            builder.addSection("available_skills", availableSkillSummaries.join("\n"), 40);
         }
 
-        result.systemPrompt = systemParts.join("\n\n");
+        result.systemPrompt = builder.build();
         int systemTokens = estimateTokens(result.systemPrompt);
 
         // 估算 Tools 声明开销
