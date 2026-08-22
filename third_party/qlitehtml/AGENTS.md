@@ -12,14 +12,16 @@ directory is `src/`).
 | File | Responsibility |
 |---|---|
 | `src/container/container_qpainter.h` | Public API: `DocumentContainer`, `DocumentContainerContext` |
-| `src/container/container_qpainter_p.h` | Private declarations: `DocumentContainerPrivate`, `Selection`, `Index` |
+| `src/container/container_qpainter_p.h` | Private glue layer declarations: `DocumentContainerPrivate` |
 | `src/container/container_internal.h` | `qlitehtml::internal` namespace: shared helpers + traversal declarations |
-| `src/container/container_qpainter.cpp` | Public API + non-painting callbacks (fonts, images, links, media) + resources |
-| `src/container/container_painting.cpp` | All draw callbacks (text, list markers, borders, fills, images, gradients) + layer clipping/tiling |
-| `src/container/container_selection.cpp` | `Selection`/`Index` + document-tree traversal + hit testing |
+| `src/container/container_qpainter.cpp` | Public API + document_container glue delegating to renderer/interactor/resource manager |
+| `src/container/litehtml_renderer.h/.cpp` | `LiteHtmlRenderer`: Pure Qt painting (text, list markers, borders, fills, images, gradients, selection) |
+| `src/container/litehtml_interactor.h/.cpp` | `LiteHtmlInteractor`: Mouse events, selection, hit testing, text search/index, form control & details logic |
+| `src/container/litehtml_resource_manager.h/.cpp` | `LiteHtmlResourceManager`: Async image fetch/decode, QCache, QFont fallback, timeouts/limits, data/qrc URIs |
 | `src/container/container_serializer.cpp` | `DocumentContainer::selectedHtml()` HTML export |
-| `src/elements/element_checkbox.*` | Custom `<input type="checkbox">` element, registered via the element factory |
+| `src/elements/*` | Custom elements (`button_element`, `details_element`, `summary_element`, `form_control_element`) |
 | `src/qlitehtmlwidget.*` | `QLiteHtmlWidget` (scroll area) + `QLiteHtmlSearchWidget` (code-built UI, no .ui file) |
+| `src/qlitehtml_types.h` | Shared types: `ResourceType`, `ResourceHandler`, `RepaintCallback` |
 | `src/qlitehtml_global.h` | Export/import macros |
 
 ## litehtml v0.10 API Rules

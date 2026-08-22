@@ -50,8 +50,9 @@ Keep smoke artifacts in the build directory; never commit them.
   functions, `PascalCase` types, snake_case file names, pointer-to-member
   connects).
 - File responsibilities are fixed (see AGENTS.md): painting →
-  `src/container/container_painting.cpp`; selection/index/traversal →
-  `src/container/container_selection.cpp`; HTML export →
+  `src/container/litehtml_renderer.cpp`; selection/index/traversal/events →
+  `src/container/litehtml_interactor.cpp`; resource management/loading →
+  `src/container/litehtml_resource_manager.cpp`; HTML export →
   `src/container/container_serializer.cpp`; shared internals →
   `src/container/container_internal.h` under `qlitehtml::internal`.
 - No new cross-file globals; shared helpers go to `container_internal.h`.
@@ -75,5 +76,5 @@ If the parent project bumps the litehtml FetchContent tag:
   changes (coordinate spaces, redraw reporting) break silently.
 - Check `types.h` typedefs (`pixel_t`, `string`, `elements_list`) and re-run
   the verification suite.
-- Expect churn in `container_painting.cpp` if draw callbacks change (as in the
+- Expect churn in `litehtml_renderer.cpp` if draw callbacks change (as in the
   0.9 → 0.10 migration: `draw_background` → per-layer callbacks).

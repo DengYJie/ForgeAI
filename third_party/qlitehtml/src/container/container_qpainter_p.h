@@ -1,12 +1,13 @@
 #pragma once
 
 #include "container_qpainter.h"
-#include "elements/details_element.h"
 #include "litehtml_renderer.h"
+#include "litehtml_interactor.h"
+#include "litehtml_resource_manager.h"
 
 #include <litehtml.h>
 
-#include <QCache>
+#include <QFont>
 #include <QHash>
 #include <QPaintDevice>
 #include <QPixmap>
@@ -14,11 +15,6 @@
 #include <QRect>
 #include <QString>
 #include <QVector>
-
-#include <unordered_map>
-
-#include "litehtml_interactor.h"
-#include "litehtml_resource_manager.h"
 
 class DocumentContainerPrivate final
     : public litehtml::document_container

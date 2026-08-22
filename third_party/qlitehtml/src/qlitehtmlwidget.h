@@ -1,6 +1,7 @@
 #pragma once
 
 #include "qlitehtml_global.h"
+#include "qlitehtml_types.h"
 
 #include <QAbstractScrollArea>
 #include <QTextDocument>
@@ -39,12 +40,8 @@ public:
 
     void scrollToAnchor(const QString &name);
 
-    enum class ResourceType {
-        Image,
-        StyleSheet,
-        Font
-    };
-    using ResourceHandler = std::function<QByteArray(const QUrl &url, ResourceType type)>;
+    using ResourceType = qlitehtml::ResourceType;
+    using ResourceHandler = qlitehtml::ResourceHandler;
     void setResourceHandler(const ResourceHandler &handler);
     void setAllowNetworkAccess(bool allow);
     bool allowNetworkAccess() const;
