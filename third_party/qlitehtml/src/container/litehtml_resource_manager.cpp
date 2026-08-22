@@ -1,81 +1,23 @@
 #include "litehtml_resource_manager.h"
 #include "container_internal.h"
+#include "litehtml_resource_task.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
-#include <QDir>
-#include <QEventLoop>
-#include <QFile>
 #include <QFontDatabase>
 #include <QImage>
 #include <QImageReader>
 #include <QLoggingCategory>
 #include <QMetaObject>
-#include <QNetworkAccessManager>
 #include <QNetworkReply>
-#include <QNetworkRequest>
-#include <QRunnable>
 #include <QThreadPool>
-#include <QTimer>
 
 namespace {
 static Q_LOGGING_CATEGORY(log, "qlitehtml.resource", QtCriticalMsg)
 
-constexpr int kNetworkTimeoutMs = 10000;                      // 10s timeout
 constexpr qint64 kMaxImageSizeBytes = 16 * 1024 * 1024;       // 16 MiB max payload
 constexpr int kMaxImageDimension = 16384;                     // 16384 px max width or height
 constexpr qint64 kMaxImagePixelCount = 32 * 1024 * 1024;      // 32 megapixels max
-
-static QByteArray parseDataUrl(const QUrl &url)
-{
-    const QString urlStr = url.toString();
-    const int commaIndex = urlStr.indexOf(',');
-    if (commaIndex == -1)
-        return {};
-    
-    const QString meta = urlStr.left(commaIndex);
-    const QString dataStr = urlStr.mid(commaIndex + 1);
-
-    // Rough check against oversized base64 strings
-    if (dataStr.size() > kMaxImageSizeBytes * 4 / 3)
-        return {};
-    
-    if (meta.contains(QLatin1String(";base64"), Qt::CaseInsensitive)) {
-        return QByteArray::fromBase64(dataStr.toLatin1(), QByteArray::OmitTrailingEquals | QByteArray::AbortOnBase64DecodingErrors);
-    } else {
-        return QByteArray::fromPercentEncoding(dataStr.toLatin1());
-    }
-}
-
-static QString normalizeQrcPath(const QUrl &url)
-{
-    if (url.scheme() == "qrc") {
-        QString path = url.path();
-        if (!path.startsWith('/'))
-            path.prepend('/');
-        return ":" + path;
-    }
-    const QString str = url.toString();
-    if (str.startsWith("qrc:/")) {
-        return ":" + str.mid(4);
-    }
-    if (str.startsWith("qrc:")) {
-        return ":/" + str.mid(4);
-    }
-    if (str.startsWith(":/")) {
-        return str;
-    }
-    return {};
-}
-
-static QString normalizeLocalPath(const QUrl &url)
-{
-    if (url.isLocalFile())
-        return url.toLocalFile();
-    if (url.scheme() == "file")
-        return url.toLocalFile();
-    return url.toString();
-}
 
 static QString resolveFontFamily(const QStringList &candidates)
 {
@@ -95,6 +37,11 @@ static QString resolveFontFamily(const QStringList &candidates)
 namespace qlitehtml::internal {
 
 LiteHtmlResourceManager::LiteHtmlResourceManager() = default;
+
+LiteHtmlResourceManager::~LiteHtmlResourceManager()
+{
+    cancelAll();
+}
 
 void LiteHtmlResourceManager::setBaseUrl(const QString &baseUrl)
 {
@@ -141,6 +88,45 @@ QUrl LiteHtmlResourceManager::resolveUrl(const QString &url, const QString &base
     return qlitehtml::internal::resolveUrl(url, baseUrl.isEmpty() ? m_baseUrl : baseUrl);
 }
 
+void LiteHtmlResourceManager::cancelUrl(const QUrl &url)
+{
+    const auto it = m_activeTasks.find(url);
+    if (it != m_activeTasks.end()) {
+        const auto &task = it.value();
+        if (task) {
+            task->cancelToken->store(true);
+            if (auto *reply = task->reply.data()) {
+                QMetaObject::invokeMethod(reply, &QNetworkReply::abort, Qt::QueuedConnection);
+            }
+        }
+        m_activeTasks.erase(it);
+    }
+    m_loadingImages.remove(url);
+}
+
+void LiteHtmlResourceManager::cancelAll()
+{
+    for (const auto &task : m_activeTasks) {
+        if (task) {
+            task->cancelToken->store(true);
+            if (auto *reply = task->reply.data()) {
+                QMetaObject::invokeMethod(reply, &QNetworkReply::abort, Qt::QueuedConnection);
+            }
+        }
+    }
+    m_activeTasks.clear();
+    m_loadingImages.clear();
+}
+
+void LiteHtmlResourceManager::clearCache()
+{
+    cancelAll();
+    m_pixmaps.clear();
+    m_rawBytesCache.clear();
+    m_intrinsicSizes.clear();
+    ++m_cacheGeneration;
+}
+
 void LiteHtmlResourceManager::load_image(const char *src,
                                          const char *baseurl,
                                          bool redraw_on_ready)
@@ -151,147 +137,133 @@ void LiteHtmlResourceManager::load_image(const char *src,
     if (m_pixmaps.contains(url) || m_loadingImages.contains(url))
         return;
 
-    // Fetch and decode on a worker thread.
-    // The pixmap cache and layout are only touched on the main thread: convert
-    // decoded QImage to QPixmap, re-layout and repaint there.
-    // The weak reference guards against the manager/container being destroyed.
+    // Fast-path: check L2 raw bytes in RAM
+    if (const QByteArray *cachedBytes = m_rawBytesCache.object(url)) {
+        QImage img;
+        img.loadFromData(*cachedBytes);
+        if (!img.isNull()) {
+            QPixmap pm = QPixmap::fromImage(img);
+            const int cost = qMax(1, (pm.width() * pm.height() * 4) / 1024);
+            m_pixmaps.insert(url, new QPixmap(pm), cost);
+            if (redraw_on_ready) {
+                if (m_relayoutCallback)
+                    m_relayoutCallback();
+                if (m_repaintCallback)
+                    m_repaintCallback();
+            }
+            return;
+        }
+    }
+
+    // Register generic active task context with cancel token
+    auto taskCtx = std::make_shared<ResourceTaskContext>();
+    m_activeTasks.insert(url, taskCtx);
     m_loadingImages.insert(url);
+
     const uint64_t generation = m_cacheGeneration;
-    const auto handler = m_resourceHandler; // snapshot handler on GUI thread to prevent cross-thread race condition
+    const auto handler = m_resourceHandler; // snapshot handler on GUI thread
     const bool allowNetwork = m_allowNetworkAccess;
     const std::weak_ptr<LiteHtmlResourceManager> weak = shared_from_this();
-    auto *task = QRunnable::create([weak, url, redraw_on_ready, generation, handler, allowNetwork] {
+
+    ResourceRequest req{url, ResourceType::Image, 0, allowNetwork};
+
+    // Phase 1: Header Sniffing for Intrinsic Sizing (Anti-CLS)
+    auto onChunk = [weak, url](const QByteArray &cumulativeData) {
+        if (cumulativeData.size() >= 512) {
+            QBuffer buf(const_cast<QByteArray *>(&cumulativeData));
+            buf.open(QIODevice::ReadOnly);
+            QImageReader reader(&buf);
+            const QSize s = reader.size();
+            if (s.isValid() && s.width() <= kMaxImageDimension && s.height() <= kMaxImageDimension) {
+                QMetaObject::invokeMethod(
+                    QCoreApplication::instance(),
+                    [weak, url, s] {
+                        if (const auto self = weak.lock()) {
+                            if (!self->m_intrinsicSizes.contains(url)) {
+                                self->m_intrinsicSizes.insert(url, s);
+                                if (self->m_relayoutCallback)
+                                    self->m_relayoutCallback();
+                            }
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+        }
+    };
+
+    // Phase 2: Image Decoding Post-Processor (Worker thread)
+    auto processor = [](const QByteArray &data, const std::shared_ptr<ResourceTaskContext> &ctx) -> QImage {
+        if (data.isEmpty() || data.size() > kMaxImageSizeBytes || ctx->cancelToken->load())
+            return {};
+
+        QBuffer buffer(const_cast<QByteArray *>(&data));
+        buffer.open(QIODevice::ReadOnly);
+        QImageReader reader(&buffer);
+        reader.setAutoTransform(true);
+        const QSize imgSize = reader.size();
+
+        // Protection against decompression bombs
+        if (imgSize.isValid()) {
+            if (imgSize.width() <= kMaxImageDimension &&
+                imgSize.height() <= kMaxImageDimension &&
+                qint64(imgSize.width()) * imgSize.height() <= kMaxImagePixelCount) {
+                return reader.read();
+            }
+        } else {
+            QImage img = reader.read();
+            if (!img.isNull()) {
+                if (img.width() <= kMaxImageDimension &&
+                    img.height() <= kMaxImageDimension &&
+                    qint64(img.width()) * img.height() <= kMaxImagePixelCount) {
+                    return img;
+                }
+            }
+        }
+        return {};
+    };
+
+    // Phase 3: Completion Callback (GUI thread)
+    auto onComplete = [weak, url, redraw_on_ready, generation](const QByteArray &rawData, QImage &&image) {
         const std::shared_ptr<LiteHtmlResourceManager> self = weak.lock();
-        if (!self)
+        if (!self || self->m_cacheGeneration != generation)
             return;
-        
-        QByteArray data;
-        if (handler) {
-            data = handler(url, ResourceType::Image);
-        }
-        if (data.isEmpty()) {
-            if (url.scheme() == "data" || url.toString().startsWith("data:")) {
-                data = parseDataUrl(url);
-            } else if (url.scheme() == "qrc" || url.toString().startsWith("qrc:") || url.toString().startsWith(":/")) {
-                const QString qrcPath = normalizeQrcPath(url);
-                QFile file(qrcPath);
-                if (file.size() <= kMaxImageSizeBytes && file.open(QIODevice::ReadOnly)) {
-                    data = file.readAll();
-                }
-            } else if (url.isLocalFile() || url.scheme() == "file") {
-                const QString localPath = normalizeLocalPath(url);
-                QFile file(localPath);
-                if (file.size() <= kMaxImageSizeBytes && file.open(QIODevice::ReadOnly)) {
-                    data = file.readAll();
-                }
-            } else if (allowNetwork && (url.scheme() == "http" || url.scheme() == "https")) {
-                QNetworkAccessManager netManager;
-                QNetworkRequest request(url);
-                request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-                request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"));
-                
-                QNetworkReply *reply = netManager.get(request);
-                QEventLoop loop;
-                QTimer timer;
-                timer.setSingleShot(true);
-                
-                QObject::connect(&timer, &QTimer::timeout, &loop, [&reply, &loop] {
-                    if (reply && reply->isRunning()) {
-                        reply->abort();
-                    }
-                    loop.quit();
-                });
-                
-                QObject::connect(reply, &QNetworkReply::finished, &loop, [&loop, &timer] {
-                    timer.stop();
-                    loop.quit();
-                });
 
-                QByteArray receivedData;
-                QObject::connect(reply, &QNetworkReply::readyRead, [&reply, &receivedData] {
-                    // Check Content-Length header early if available
-                    const auto clHeader = reply->header(QNetworkRequest::ContentLengthHeader);
-                    if (clHeader.isValid() && clHeader.toLongLong() > kMaxImageSizeBytes) {
-                        reply->abort();
-                        receivedData.clear();
-                        return;
-                    }
-                    receivedData.append(reply->readAll());
-                    if (receivedData.size() > kMaxImageSizeBytes) {
-                        reply->abort();
-                        receivedData.clear();
-                    }
-                });
+        self->m_activeTasks.remove(url);
+        self->m_loadingImages.remove(url);
 
-                timer.start(kNetworkTimeoutMs);
-                loop.exec();
-
-                if (reply->error() == QNetworkReply::NoError && !receivedData.isEmpty()) {
-                    data = std::move(receivedData);
-                }
-                reply->deleteLater();
+        if (!image.isNull()) {
+            // L2 Cache: save raw compressed bytes
+            if (!rawData.isEmpty()) {
+                const int rawCost = qMax(1, int(rawData.size() / 1024));
+                self->m_rawBytesCache.insert(url, new QByteArray(rawData), rawCost);
             }
+            // L1 Cache: save decoded QPixmap
+            QPixmap pixmap = QPixmap::fromImage(image);
+            const int cost = qMax(1, (pixmap.width() * pixmap.height() * 4) / 1024);
+            self->m_pixmaps.insert(url, new QPixmap(pixmap), cost);
+        } else {
+            // Remember failure so we do not refetch on every draw
+            self->m_pixmaps.insert(url, new QPixmap());
         }
 
-        QImage image;
-        if (!data.isEmpty() && data.size() <= kMaxImageSizeBytes) {
-            QBuffer buffer(&data);
-            buffer.open(QIODevice::ReadOnly);
-            QImageReader reader(&buffer);
-            reader.setAutoTransform(true);
-            const QSize imgSize = reader.size();
-            
-            // Protection against decompression bombs
-            if (imgSize.isValid()) {
-                if (imgSize.width() <= kMaxImageDimension && 
-                    imgSize.height() <= kMaxImageDimension &&
-                    qint64(imgSize.width()) * imgSize.height() <= kMaxImagePixelCount) {
-                    image = reader.read();
-                }
-            } else {
-                image = reader.read();
-                if (!image.isNull()) {
-                    if (image.width() > kMaxImageDimension || 
-                        image.height() > kMaxImageDimension ||
-                        qint64(image.width()) * image.height() > kMaxImagePixelCount) {
-                        image = QImage();
-                    }
-                }
+        if (redraw_on_ready) {
+            if (!image.isNull() && self->m_relayoutCallback) {
+                self->m_relayoutCallback();
             }
+            if (self->m_repaintCallback)
+                self->m_repaintCallback();
         }
+    };
 
-        QMetaObject::invokeMethod(
-            QCoreApplication::instance(),
-            [weak, url, image, redraw_on_ready, generation] {
-                const std::shared_ptr<LiteHtmlResourceManager> self = weak.lock();
-                if (!self)
-                    return;
-                
-                // Discard stale completion if clearCache() was called during in-flight fetch
-                if (self->m_cacheGeneration != generation)
-                    return;
+    auto *task = new GenericResourceTask<QImage>(
+        std::move(req),
+        handler,
+        taskCtx,
+        std::move(onChunk),
+        std::move(processor),
+        std::move(onComplete));
 
-                self->m_loadingImages.remove(url);
-                if (!image.isNull()) {
-                    QPixmap pixmap = QPixmap::fromImage(image);
-                    // Cost in KiB, approximated as 4 bytes per pixel.
-                    const int cost = qMax(1, (pixmap.width() * pixmap.height() * 4) / 1024);
-                    self->m_pixmaps.insert(url, new QPixmap(pixmap), cost);
-                } else {
-                    // Remember the failure so we do not refetch on every draw.
-                    self->m_pixmaps.insert(url, new QPixmap());
-                }
-                if (redraw_on_ready) {
-                    if (!image.isNull() && self->m_relayoutCallback) {
-                        self->m_relayoutCallback();
-                    }
-                    if (self->m_repaintCallback)
-                        self->m_repaintCallback();
-                }
-            },
-            Qt::QueuedConnection);
-    });
-    QThreadPool::globalInstance()->start(task);
+    QThreadPool::globalInstance()->start(task, req.priority);
 }
 
 void LiteHtmlResourceManager::get_image_size(const char *src,
@@ -302,9 +274,17 @@ void LiteHtmlResourceManager::get_image_size(const char *src,
     const auto qtBaseUrl = QString::fromUtf8(baseurl);
     if (qtSrc.isEmpty())
         return;
-    qDebug(log) << "get_image_size:"
-                << QStringLiteral("src = \"%1\";").arg(qtSrc).toUtf8().constData()
-                << QStringLiteral("base = \"%1\"").arg(qtBaseUrl).toUtf8().constData();
+    const QUrl url = resolveUrl(qtSrc, qtBaseUrl);
+
+    // 1. Intrinsic size from Header Sniffing (immediate layout without waiting for full download)
+    if (m_intrinsicSizes.contains(url)) {
+        const QSize s = m_intrinsicSizes.value(url);
+        sz.width = s.width();
+        sz.height = s.height();
+        return;
+    }
+
+    // 2. Pixmap from L1/L2 cache
     const QPixmap pm = getPixmap(qtSrc, qtBaseUrl);
     sz.width = pm.width();
     sz.height = pm.height();
@@ -313,9 +293,20 @@ void LiteHtmlResourceManager::get_image_size(const char *src,
 QPixmap LiteHtmlResourceManager::getPixmap(const QString &imageUrl, const QString &baseUrl)
 {
     const QUrl url = resolveUrl(imageUrl, baseUrl);
-    // object() refreshes the LRU position on access.
+    // L1: Decoded QPixmap Cache
     if (const QPixmap *pixmap = m_pixmaps.object(url))
         return *pixmap;
+    // L2: Raw bytes RAM Cache -> Fast in-memory decode
+    if (const QByteArray *rawBytes = m_rawBytesCache.object(url)) {
+        QImage img;
+        img.loadFromData(*rawBytes);
+        if (!img.isNull()) {
+            QPixmap pm = QPixmap::fromImage(img);
+            const int cost = qMax(1, (pm.width() * pm.height() * 4) / 1024);
+            m_pixmaps.insert(url, new QPixmap(pm), cost);
+            return pm;
+        }
+    }
     qWarning(log) << "draw_background: pixmap not loaded for" << url;
     return {};
 }
@@ -324,23 +315,80 @@ void LiteHtmlResourceManager::import_css(litehtml::string &text,
                                          const litehtml::string &url,
                                          litehtml::string &baseurl)
 {
-    if (!m_resourceHandler) {
-        text.clear();
-        return;
-    }
     const QUrl actualUrl = resolveUrl(QString::fromUtf8(url.data(), int(url.size())),
                                       QString::fromUtf8(baseurl.data(), int(baseurl.size())));
     const QString urlString = actualUrl.toString(QUrl::None);
     const int lastSlash = urlString.lastIndexOf('/');
     baseurl = urlString.left(lastSlash).toUtf8().constData();
-    text = m_resourceHandler(actualUrl, ResourceType::StyleSheet).constData();
-}
 
-void LiteHtmlResourceManager::clearCache()
-{
-    m_pixmaps.clear();
-    m_loadingImages.clear();
-    ++m_cacheGeneration;
+    // 1. Custom handler override
+    if (m_resourceHandler) {
+        const QByteArray data = m_resourceHandler(actualUrl, ResourceType::StyleSheet);
+        if (!data.isEmpty()) {
+            text = data.constData();
+            return;
+        }
+    }
+
+    // 2. Check L2 raw bytes in-memory cache
+    if (const QByteArray *cached = m_rawBytesCache.object(actualUrl)) {
+        text = cached->constData();
+        return;
+    }
+
+    // 3. Synchronous local protocols (data:, qrc:, file:)
+    if (actualUrl.scheme() == "data" || actualUrl.scheme() == "qrc" || actualUrl.isLocalFile() || actualUrl.scheme() == "file") {
+        ResourceRequest req{actualUrl, ResourceType::StyleSheet, 0, m_allowNetworkAccess};
+        auto ctx = std::make_shared<ResourceTaskContext>();
+        QByteArray data = GenericResourceFetcher::fetchRawData(req, nullptr, ctx);
+        if (!data.isEmpty()) {
+            m_rawBytesCache.insert(actualUrl, new QByteArray(data), qMax(1, int(data.size() / 1024)));
+            text = data.constData();
+            return;
+        }
+    }
+
+    // 4. HTTP/HTTPS asynchronous prefetch (never block the UI thread!)
+    if (m_allowNetworkAccess && (actualUrl.scheme() == "http" || actualUrl.scheme() == "https")) {
+        if (!m_activeTasks.contains(actualUrl)) {
+            ResourceRequest req{actualUrl, ResourceType::StyleSheet, 0, m_allowNetworkAccess};
+            auto ctx = std::make_shared<ResourceTaskContext>();
+            m_activeTasks.insert(actualUrl, ctx);
+
+            const std::weak_ptr<LiteHtmlResourceManager> weak = shared_from_this();
+            const uint64_t generation = m_cacheGeneration;
+
+            auto processor = [](const QByteArray &data, const std::shared_ptr<ResourceTaskContext> &) -> QString {
+                return QString::fromUtf8(data);
+            };
+
+            auto onComplete = [weak, actualUrl, generation](const QByteArray &rawData, QString &&) {
+                const std::shared_ptr<LiteHtmlResourceManager> self = weak.lock();
+                if (!self || self->m_cacheGeneration != generation)
+                    return;
+
+                self->m_activeTasks.remove(actualUrl);
+                if (!rawData.isEmpty()) {
+                    self->m_rawBytesCache.insert(actualUrl, new QByteArray(rawData), qMax(1, int(rawData.size() / 1024)));
+                    // Trigger relayout so litehtml re-evaluates document styles with the newly loaded CSS
+                    if (self->m_relayoutCallback)
+                        self->m_relayoutCallback();
+                }
+            };
+
+            auto *task = new GenericResourceTask<QString>(
+                std::move(req),
+                m_resourceHandler,
+                ctx,
+                nullptr,
+                std::move(processor),
+                std::move(onComplete));
+
+            QThreadPool::globalInstance()->start(task, req.priority);
+        }
+    }
+
+    text.clear();
 }
 
 QString LiteHtmlResourceManager::serifFont() const

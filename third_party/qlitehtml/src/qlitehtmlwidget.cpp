@@ -276,6 +276,11 @@ bool QLiteHtmlWidget::allowNetworkAccess() const
     return d->documentContainer.allowNetworkAccess();
 }
 
+void QLiteHtmlWidget::clearResourceCache()
+{
+    d->documentContainer.clearResourceCache();
+}
+
 QString QLiteHtmlWidget::selectedText() const
 {
     return d->documentContainer.selectedText();

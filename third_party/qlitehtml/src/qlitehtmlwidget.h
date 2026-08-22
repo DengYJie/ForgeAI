@@ -45,6 +45,7 @@ public:
     void setResourceHandler(const ResourceHandler &handler);
     void setAllowNetworkAccess(bool allow);
     bool allowNetworkAccess() const;
+    void clearResourceCache();
 
     // declaring this Q_INVOKABLE to make it Squish-testable
     Q_INVOKABLE QString selectedText() const;

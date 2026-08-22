@@ -6,6 +6,8 @@ add_library(qlitehtml STATIC
     src/container/litehtml_renderer.cpp
     src/container/litehtml_interactor.cpp
     src/container/litehtml_resource_manager.cpp
+    src/container/litehtml_network_session.cpp
+    src/container/litehtml_resource_task.cpp
     src/container/container_serializer.cpp
     src/elements/form_control_element.cpp
     src/elements/button_element.cpp
@@ -23,6 +25,8 @@ target_sources(qlitehtml PRIVATE
     src/container/litehtml_renderer.h
     src/container/litehtml_interactor.h
     src/container/litehtml_resource_manager.h
+    src/container/litehtml_network_session.h
+    src/container/litehtml_resource_task.h
     src/elements/form_control_element.h
     src/elements/button_element.h
     src/elements/details_element.h
