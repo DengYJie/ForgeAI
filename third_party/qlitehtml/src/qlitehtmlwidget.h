@@ -71,6 +71,7 @@ protected:
     void leaveEvent(QEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void changeEvent(QEvent *event) override;
     bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
@@ -80,6 +81,7 @@ private:
     void scrollSelection();
     void withFixedTextPosition(const std::function<void()> &action);
     void render();
+    void smoothScrollTo(const QPoint &target);
     QPoint scrollPosition() const;
     void htmlPos(const QPoint &pos, QPoint *viewportPos, QPoint *htmlPos) const;
     QPoint toVirtual(const QPoint &p) const;
