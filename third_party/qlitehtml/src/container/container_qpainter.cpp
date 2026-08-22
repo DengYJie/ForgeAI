@@ -840,6 +840,27 @@ QVector<QRect> DocumentContainer::leaveEvent()
     return {};
 }
 
+QVector<QRect> DocumentContainer::scrollAt(const QPoint &documentPos, const QPoint &viewportPos, const QPoint &delta)
+{
+    if (!d->m_document)
+        return {};
+        
+    std::vector<litehtml::scroll_values> scroll_values = 
+        d->m_document->on_scroll(delta.x(), delta.y(), documentPos.x(), documentPos.y(), viewportPos.x(), viewportPos.y());
+        
+    QVector<QRect> redrawRects;
+    for (const auto &val : scroll_values) {
+        if (val.dx != 0 || val.dy != 0) {
+            // Document coordinate scroll box mapped to a slightly expanded rect to prevent edge artifacts
+            QRect rect = toQRect(val.scroll_box).adjusted(-1, -1, 1, 1);
+            // Include fixed positioning and selection intersections if they exist
+            // (on_scroll simply returns the scroll_box of the element that handled it)
+            redrawRects.append(rect);
+        }
+    }
+    return redrawRects;
+}
+
 QUrl DocumentContainer::linkAt(const QPoint &documentPos, const QPoint &viewportPos)
 {
     const litehtml::element::ptr element

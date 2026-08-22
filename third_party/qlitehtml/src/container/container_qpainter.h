@@ -72,6 +72,7 @@ public: // outside API
                                          const QPoint &viewportPos,
                                          Qt::MouseButton button);
     QVector<QRect> leaveEvent();
+    QVector<QRect> scrollAt(const QPoint &documentPos, const QPoint &viewportPos, const QPoint &delta);
 
     QUrl linkAt(const QPoint &documentPos, const QPoint &viewportPos);
     QUrl imageAt(const QPoint &documentPos, const QPoint &viewportPos);

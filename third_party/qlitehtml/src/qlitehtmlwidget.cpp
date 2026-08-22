@@ -45,6 +45,9 @@ QLiteHtmlWidget::QLiteHtmlWidget(QWidget *parent)
     horizontalScrollBar()->setSingleStep(kScrollBarStep);
     verticalScrollBar()->setSingleStep(kScrollBarStep);
     
+    horizontalScrollBar()->installEventFilter(this);
+    verticalScrollBar()->installEventFilter(this);
+    
     // Enable modern kinetic scrolling for touchpads and touchscreens
     QScroller::grabGesture(viewport(), QScroller::TouchGesture);
 
@@ -257,13 +260,55 @@ void QLiteHtmlWidget::scrollContentsBy(int dx, int dy)
 
 void QLiteHtmlWidget::wheelEvent(QWheelEvent *event)
 {
-    // If it's a touchpad high-resolution scrolling (pixel delta), let Qt handle it directly
-    if (!event->pixelDelta().isNull()) {
+    QPoint viewportPos;
+    QPoint documentPos;
+    htmlPos(event->position().toPoint(), &viewportPos, &documentPos);
+
+    QPointF virtualDelta;
+    bool isPixelDelta = !event->pixelDelta().isNull();
+    
+    if (isPixelDelta) {
+        // Touchpad pixel delta. Positive means scrolling left/up.
+        virtualDelta = QPointF(event->pixelDelta()) / d->zoomFactor;
+    } else {
+        // Mouse wheel angle delta. 120 per notch.
+        QPoint angle = event->angleDelta();
+        if (event->modifiers() & Qt::ShiftModifier) {
+            // Shift + wheel prefers horizontal scroll
+            if (angle.x() == 0 && angle.y() != 0) {
+                angle = QPoint(angle.y(), 0);
+            }
+        }
+        // Map 120 angle delta to singleStep * 3 (standard wheel distance)
+        int stepY = verticalScrollBar()->singleStep() * 3;
+        int stepX = horizontalScrollBar()->singleStep() * 3;
+        virtualDelta = QPointF(angle.x() * stepX / 120.0, angle.y() * stepY / 120.0) / d->zoomFactor;
+    }
+    
+    // Qt delta is positive for scrolling UP/LEFT. litehtml expects positive dx/dy for scrolling DOWN/RIGHT.
+    QPoint internalDelta = (-virtualDelta).toPoint();
+    
+    if (!internalDelta.isNull()) {
+        const QVector<QRect> consumedRects = d->documentContainer.scrollAt(documentPos, viewportPos, internalDelta);
+        if (!consumedRects.isEmpty()) {
+            if (d->smoothScrollAnim && d->smoothScrollAnim->state() == QAbstractAnimation::Running) {
+                d->smoothScrollAnim->stop();
+            }
+            for (const QRect &r : consumedRects) {
+                viewport()->update(fromVirtual(r.translated(-scrollPosition())));
+            }
+            event->accept();
+            return;
+        }
+    }
+    
+    // Not handled by internal overflow, hand off to outer area
+    if (isPixelDelta) {
         QAbstractScrollArea::wheelEvent(event);
         return;
     }
     
-    // Traditional mouse wheel uses angleDelta
+    // Smooth scrolling for traditional mouse wheel
     int numDegrees = event->angleDelta().y() / 8;
     int numSteps = numDegrees / 15;
     
@@ -272,7 +317,6 @@ void QLiteHtmlWidget::wheelEvent(QWheelEvent *event)
         return;
     }
     
-    // Calculate scroll offset: 3 steps per wheel notch is standard
     int scrollOffset = numSteps * verticalScrollBar()->singleStep() * 3;
     
     if (!d->smoothScrollAnim) {
@@ -284,7 +328,6 @@ void QLiteHtmlWidget::wheelEvent(QWheelEvent *event)
         });
     }
     
-    // Accumulate target if user scrolls repeatedly while animation is running
     if (d->smoothScrollAnim->state() == QAbstractAnimation::Running) {
         d->targetScrollValue -= scrollOffset;
     } else {
@@ -413,6 +456,25 @@ void QLiteHtmlWidget::keyPressEvent(QKeyEvent *event)
     }
 
     QAbstractScrollArea::keyPressEvent(event);
+}
+
+bool QLiteHtmlWidget::eventFilter(QObject *obj, QEvent *event)
+{
+    if ((obj == verticalScrollBar() || obj == horizontalScrollBar()) && event->type() == QEvent::Wheel) {
+        // Intercept wheel events on the scrollbars and forward them to QLiteHtmlWidget
+        // to maintain smooth scrolling consistency.
+        auto *wheelEvent = static_cast<QWheelEvent *>(event);
+        QWheelEvent clonedEvent(
+            this->mapFromGlobal(wheelEvent->globalPosition()), 
+            wheelEvent->globalPosition(),
+            wheelEvent->pixelDelta(), wheelEvent->angleDelta(),
+            wheelEvent->buttons(), wheelEvent->modifiers(),
+            wheelEvent->phase(), wheelEvent->inverted(), wheelEvent->source()
+        );
+        this->wheelEvent(&clonedEvent);
+        return true;
+    }
+    return QAbstractScrollArea::eventFilter(obj, event);
 }
 
 void QLiteHtmlWidget::updateHightlightedLink()
