@@ -133,6 +133,12 @@ public: // outside API
     using PaletteCallback = std::function<QPalette()>;
     void setPaletteCallback(const PaletteCallback &callback);
 
+    using FormControlCallback = std::function<void(const QString &tag, const QString &type, const QString &name, const QString &value, bool checked)>;
+    void setFormControlCallback(const FormControlCallback &callback);
+
+    using DetailsCallback = std::function<void(const QString &id, bool open)>;
+    void setDetailsCallback(const DetailsCallback &callback);
+
     using ClipboardCallback = std::function<void(bool)>;
     void setClipboardCallback(const ClipboardCallback &callback);
 

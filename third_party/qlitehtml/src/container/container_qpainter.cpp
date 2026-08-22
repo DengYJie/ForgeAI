@@ -1,7 +1,9 @@
 #include "container_qpainter.h"
 #include "container_qpainter_p.h"
 #include "container_internal.h"
-#include "elements/element_checkbox.h"
+#include "elements/button_element.h"
+#include "elements/form_control_element.h"
+#include "elements/summary_element.h"
 
 #include <QCursor>
 #include <QCoreApplication>
@@ -46,19 +48,48 @@ DocumentContainer::DocumentContainer()
 {
     d->m_owner = this;
 
-    // Built-in custom element: <input type="checkbox">.
+    // Register custom elements for form controls
     registerElementFactory("input",
-                           [](const char *,
+                           [](const char *tag_name,
                               const litehtml::string_map &attributes,
                               const std::shared_ptr<litehtml::document> &doc) {
                                const auto type = attributes.find("type");
-                               if (type != attributes.end() && type->second == "checkbox") {
-                                   auto checkBox = std::make_shared<checkbox>(doc);
-                                   checkBox->set_checked(attributes.find("checked")
-                                                         != attributes.end());
-                                   return std::static_pointer_cast<litehtml::element>(checkBox);
+                               if (type != attributes.end()) {
+                                   if (type->second == "button" || type->second == "submit" || type->second == "reset") {
+                                       auto btn = std::make_shared<button_element>(doc);
+                                       btn->set_tagName(tag_name);
+                                       return std::static_pointer_cast<litehtml::element>(btn);
+                                   }
                                }
-                               return std::shared_ptr<litehtml::element>{};
+                               // Return nullptr for unsupported input types (text, etc.) to let litehtml handle them natively
+                               return std::shared_ptr<litehtml::element>();
+                           });
+
+    registerElementFactory("button",
+                           [](const char *tag_name,
+                              const litehtml::string_map &,
+                              const std::shared_ptr<litehtml::document> &doc) {
+                               auto btn = std::make_shared<button_element>(doc);
+                               btn->set_tagName(tag_name);
+                               return std::static_pointer_cast<litehtml::element>(btn);
+                           });
+
+    registerElementFactory("details",
+                           [](const char *tag_name,
+                              const litehtml::string_map &,
+                              const std::shared_ptr<litehtml::document> &doc) {
+                               auto details = std::make_shared<details_element>(doc);
+                               details->set_tagName(tag_name);
+                               return std::static_pointer_cast<litehtml::element>(details);
+                           });
+
+    registerElementFactory("summary",
+                           [](const char *tag_name,
+                              const litehtml::string_map &,
+                              const std::shared_ptr<litehtml::document> &doc) {
+                               auto summary = std::make_shared<summary_element>(doc);
+                               summary->set_tagName(tag_name);
+                               return std::static_pointer_cast<litehtml::element>(summary);
                            });
 }
 
@@ -369,6 +400,22 @@ void DocumentContainerPrivate::on_anchor_click(const char *url,
         m_linkCallback(resolveUrl(QString::fromUtf8(url), m_baseUrl));
 }
 
+bool DocumentContainerPrivate::on_element_click(const litehtml::element::ptr &el)
+{
+    if (m_formControlCallback && el) {
+        if (auto formControl = std::dynamic_pointer_cast<form_control_element>(el)) {
+            auto type = QString::fromUtf8(el->get_attr("type", ""));
+            auto name = QString::fromUtf8(el->get_attr("name", ""));
+            auto value = QString::fromUtf8(el->get_attr("value", ""));
+            bool checked = formControl->is_checked();
+            
+            m_formControlCallback(QString::fromUtf8(el->get_tagName()), type, name, value, checked);
+            return true;
+        }
+    }
+    return false;
+}
+
 void DocumentContainerPrivate::on_mouse_event(const litehtml::element::ptr &el,
                                               litehtml::mouse_event event)
 {
@@ -512,7 +559,7 @@ std::shared_ptr<litehtml::element> DocumentContainerPrivate::create_element(
 
 void DocumentContainerPrivate::get_media_features(litehtml::media_features &media) const
 {
-    media.type = litehtml::media_type_screen;
+    media.type = (m_mediaForceToggle % 2 == 1) ? litehtml::media_type_print : litehtml::media_type_screen;
     // Width/height are the viewport in CSS pixels (virtual coordinates, as
     // passed to render()). Screen size feeds device queries.
     media.width = m_clientRect.width();
@@ -530,6 +577,16 @@ void DocumentContainerPrivate::get_media_features(litehtml::media_features &medi
     media.color = 24;
     media.color_index = 0;
     media.monochrome = 0;
+}
+
+void DocumentContainerPrivate::rebuildRenderTree()
+{
+    if (m_document) {
+        m_mediaForceToggle++;
+        m_document->media_changed();
+        m_mediaForceToggle++;
+        m_document->media_changed();
+    }
 }
 
 void DocumentContainerPrivate::get_language(litehtml::string &language,
@@ -684,6 +741,36 @@ int DocumentContainer::anchorY(const QString &anchorName) const
     return -1;
 }
 
+std::shared_ptr<details_element> DocumentContainerPrivate::detailsForSummary(const litehtml::element::ptr &element) const
+{
+    litehtml::element::ptr curr = element;
+    litehtml::element::ptr summaryEl = nullptr;
+    while (curr) {
+        if (curr->tag() == litehtml::_id("summary")) {
+            summaryEl = curr;
+            break;
+        }
+        curr = curr->parent();
+    }
+    if (!summaryEl) {
+        return nullptr;
+    }
+    litehtml::element::ptr parent = summaryEl->parent();
+    if (!parent || parent->tag() != litehtml::_id("details")) {
+        return nullptr;
+    }
+    // Verify it is the first summary child of details
+    for (const auto &child : parent->children()) {
+        if (child->tag() == litehtml::_id("summary")) {
+            if (child == summaryEl) {
+                return std::dynamic_pointer_cast<details_element>(parent);
+            }
+            return nullptr;
+        }
+    }
+    return nullptr;
+}
+
 QVector<QRect> DocumentContainer::mousePressEvent(const QPoint &documentPos,
                                                   const QPoint &viewportPos,
                                                   Qt::MouseButton button,
@@ -712,6 +799,10 @@ QVector<QRect> DocumentContainer::mousePressEvent(const QPoint &documentPos,
                                                           viewportPos,
                                                           d->m_selection.mode);
     }
+
+    const litehtml::element::ptr pressedEl = elementAtPoint(d->m_document, documentPos, viewportPos);
+    d->m_pressedDetails = d->detailsForSummary(pressedEl);
+
     // post to litehtml
     litehtml::position::vector redrawBoxes;
     if (d->m_document->on_lbutton_down(documentPos.x(),
@@ -795,6 +886,28 @@ QVector<QRect> DocumentContainer::mouseReleaseEvent(const QPoint &documentPos,
             redrawRects.append(toQRect(box));
     }
     d->m_blockLinks = false;
+
+    // Check if released on the same summary that was pressed
+    const litehtml::element::ptr releasedEl = elementAtPoint(d->m_document, documentPos, viewportPos);
+    auto releasedDetails = d->detailsForSummary(releasedEl);
+    auto pressedDetails = d->m_pressedDetails.lock();
+    d->m_pressedDetails.reset();
+
+    if (pressedDetails && releasedDetails && pressedDetails == releasedDetails) {
+        pressedDetails->toggle();
+
+        d->rebuildRenderTree();
+
+        d->m_needRelayout = true;
+        render(d->m_clientRect.width(), d->m_clientRect.height());
+        redrawRects.append(d->m_clientRect);
+
+        if (d->m_detailsCallback) {
+            QString id = QString::fromUtf8(pressedDetails->get_attr("id", ""));
+            d->m_detailsCallback(id, pressedDetails->is_open());
+        }
+    }
+
     return redrawRects;
 }
 
@@ -1038,12 +1151,22 @@ void DocumentContainer::setLinkCallback(const DocumentContainer::LinkCallback &c
     d->m_linkCallback = callback;
 }
 
-void DocumentContainer::setPaletteCallback(const DocumentContainer::PaletteCallback &callback)
+void DocumentContainer::setPaletteCallback(const PaletteCallback &callback)
 {
     d->m_paletteCallback = callback;
 }
 
-void DocumentContainer::setClipboardCallback(const DocumentContainer::ClipboardCallback &callback)
+void DocumentContainer::setFormControlCallback(const FormControlCallback &callback)
+{
+    d->m_formControlCallback = callback;
+}
+
+void DocumentContainer::setDetailsCallback(const DetailsCallback &callback)
+{
+    d->m_detailsCallback = callback;
+}
+
+void DocumentContainer::setClipboardCallback(const ClipboardCallback &callback)
 {
     d->m_clipboardCallback = callback;
 }
@@ -1101,8 +1224,8 @@ QString DocumentContainerPrivate::serifFont() const
 
 QString DocumentContainerPrivate::sansSerifFont() const
 {
-    // TODO make configurable
-    return {"Arial"};
+    // Preferred modern system sans-serif font for CJK and Western text
+    return {"Microsoft YaHei"};
 }
 
 QString DocumentContainerPrivate::monospaceFont() const

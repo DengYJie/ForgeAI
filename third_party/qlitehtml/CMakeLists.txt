@@ -6,7 +6,10 @@ add_library(qlitehtml STATIC
     src/container/container_painting.cpp
     src/container/container_selection.cpp
     src/container/container_serializer.cpp
-    src/elements/element_checkbox.cpp
+    src/elements/form_control_element.cpp
+    src/elements/button_element.cpp
+    src/elements/details_element.cpp
+    src/elements/summary_element.cpp
     src/qlitehtmlwidget.cpp
     src/qlitehtmlsearchwidget.cpp
 )
@@ -16,7 +19,10 @@ target_sources(qlitehtml PRIVATE
     src/container/container_internal.h
     src/container/container_qpainter.h
     src/container/container_qpainter_p.h
-    src/elements/element_checkbox.h
+    src/elements/form_control_element.h
+    src/elements/button_element.h
+    src/elements/details_element.h
+    src/elements/summary_element.h
     src/qlitehtml_global.h
     src/qlitehtmlwidget.h
     src/qlitehtmlsearchwidget.h

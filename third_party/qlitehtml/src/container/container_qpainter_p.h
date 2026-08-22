@@ -1,6 +1,7 @@
 #pragma once
 
 #include "container_qpainter.h"
+#include "elements/details_element.h"
 
 #include <litehtml.h>
 
@@ -125,6 +126,7 @@ public: // document_container API
     void link(const std::shared_ptr<litehtml::document> &doc,
               const litehtml::element::ptr &el) override;
     void on_anchor_click(const char *url, const litehtml::element::ptr &el) override;
+    bool on_element_click(const litehtml::element::ptr &el) override;
     void on_mouse_event(const litehtml::element::ptr &el, litehtml::mouse_event event) override;
     void set_cursor(const char *cursor) override;
     void transform_text(litehtml::string &text, litehtml::text_transform tt) override;
@@ -151,6 +153,8 @@ public: // document_container API
     void buildIndex();
     void updateSelection();
     void clearSelection();
+
+    std::shared_ptr<details_element> detailsForSummary(const litehtml::element::ptr &element) const;
 
     QPaintDevice *m_paintDevice = nullptr;
     QPainter *m_painter = nullptr;
@@ -182,13 +186,19 @@ public: // document_container API
     // Invoked on the main thread after an async image finished loading, so
     // the widget can repaint the (re-laid-out) viewport.
     DocumentContainer::RepaintCallback m_repaintCallback;
-    Selection m_selection;
     DocumentContainer::ResourceHandler m_resourceHandler;
     DocumentContainer::CursorCallback m_cursorCallback;
     DocumentContainer::LinkCallback m_linkCallback;
     DocumentContainer::PaletteCallback m_paletteCallback;
+    DocumentContainer::FormControlCallback m_formControlCallback;
+    DocumentContainer::DetailsCallback m_detailsCallback;
     DocumentContainer::ClipboardCallback m_clipboardCallback;
+    Selection m_selection;
+    std::weak_ptr<details_element> m_pressedDetails;
     bool m_blockLinks = false;
+    mutable int m_mediaForceToggle = 0;
+
+    void rebuildRenderTree();
 };
 
 class DocumentContainerContextPrivate

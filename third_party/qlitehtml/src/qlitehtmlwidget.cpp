@@ -2,6 +2,8 @@
 
 #include "container/container_qpainter.h"
 
+#include <litehtml/master_css.h>
+
 #include <QClipboard>
 #include <QDebug>
 #include <QGuiApplication>
@@ -64,11 +66,61 @@ QLiteHtmlWidget::QLiteHtmlWidget(QWidget *parent)
             this, [this, fullUrl] { emit linkClicked(fullUrl); }, Qt::QueuedConnection);
     });
     d->documentContainer.setClipboardCallback([this](bool yes) { emit copyAvailable(yes); });
+    d->documentContainer.setFormControlCallback([this](const QString &tag, const QString &type, const QString &name, const QString &value, bool checked) {
+        emit formControlActivated(tag, type, name, value, checked);
+    });
+    d->documentContainer.setDetailsCallback([this](const QString &id, bool open) {
+        const QSize vViewportSize = toVirtual(viewport()->size());
+        const int fullWidth = width() / d->zoomFactor;
+        const int scrollbarWidth = style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, this);
+        const int w = fullWidth - scrollbarWidth - 2;
+        horizontalScrollBar()->setRange(0, std::max(0, d->documentContainer.documentWidth() - w));
+        verticalScrollBar()->setRange(0, std::max(0, d->documentContainer.documentHeight() - vViewportSize.height()));
+        viewport()->update();
+        emit detailsToggled(id, open);
+    });
     d->documentContainer.setRepaintCallback([this] { viewport()->update(); });
     d->selectionScrollTimer.setInterval(30);
     connect(&d->selectionScrollTimer, &QTimer::timeout, this, &QLiteHtmlWidget::scrollSelection);
 
-    // Default to litehtml v0.10's built-in master stylesheet (see note above).
+    // Default to litehtml v0.10's built-in master stylesheet, plus form control and details UA styles
+    QString customMasterCss = QString::fromUtf8(litehtml::master_css) + R"(
+html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+input[type="button"], button, input[type="submit"], input[type="reset"] {
+    padding: 2px 6px;
+    background-color: #e0e0e0;
+    border: 1px solid #a0a0a0;
+    border-radius: 4px;
+    color: #000000;
+    text-align: center;
+    display: inline-block;
+    text-decoration: none;
+}
+input[type="button"]:hover, button:hover, input[type="submit"]:hover, input[type="reset"]:hover {
+    background-color: #d0d0d0;
+}
+input[type="button"]:active, button:active, input[type="submit"]:active, input[type="reset"]:active {
+    background-color: #c0c0c0;
+}
+details {
+    display: block;
+}
+details > summary {
+    display: block;
+    cursor: pointer;
+    padding-left: 18px;
+    list-style-type: disc;
+}
+details:not([open]) > :not(summary) {
+    display: none;
+}
+@media print {
+    .__qlh_dummy_print { color: red; }
+}
+)";
+    d->context.setMasterStyleSheet(customMasterCss);
 }
 
 QLiteHtmlWidget::~QLiteHtmlWidget()

@@ -54,6 +54,8 @@ public:
 signals:
     void linkClicked(const QUrl &url);
     void linkHighlighted(const QUrl &url);
+    void formControlActivated(const QString &tag, const QString &type, const QString &name, const QString &value, bool checked);
+    void detailsToggled(const QString &id, bool open);
     void copyAvailable(bool available);
     void contextMenuRequested(const QPoint &pos, const QUrl &linkUrl, const QUrl &imageUrl);
 
