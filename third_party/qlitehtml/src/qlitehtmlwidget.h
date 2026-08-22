@@ -83,7 +83,9 @@ private:
     void render();
     void smoothScrollTo(const QPoint &target);
     QPoint scrollPosition() const;
-    void htmlPos(const QPoint &pos, QPoint *viewportPos, QPoint *htmlPos) const;
+    // Input coordinates are always local to viewport(). QAbstractScrollArea
+    // remaps its mouse and wheel handlers to viewport events.
+    void htmlPos(const QPoint &viewportPoint, QPoint *viewportPos, QPoint *htmlPos) const;
     QPoint toVirtual(const QPoint &p) const;
     QSize toVirtual(const QSize &s) const;
     QRect toVirtual(const QRect &r) const;

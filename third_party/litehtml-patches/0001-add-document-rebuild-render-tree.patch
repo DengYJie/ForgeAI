@@ -1,0 +1,64 @@
+diff --git a/include/litehtml/document.h b/include/litehtml/document.h
+index e01f5b49..847f4376 100644
+--- a/include/litehtml/document.h
++++ b/include/litehtml/document.h
+@@ -78,6 +78,7 @@ namespace litehtml
+ 		document_mode					mode() const { return m_mode; }
+ 		uint_ptr						get_font(const font_description& descr, font_metrics* fm);
+ 		pixel_t							render(pixel_t max_width, render_type rt = render_all);
++		void							rebuild_render_tree();
+ 		void							draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip);
+ 		web_color						get_def_color()	{ return m_def_color; }
+ 		void 							cvt_units(css_length& val, const font_metrics& metrics, pixel_t size) const;
+diff --git a/src/document.cpp b/src/document.cpp
+index abf39872..5f896b1d 100644
+--- a/src/document.cpp
++++ b/src/document.cpp
+@@ -833,24 +833,34 @@ void document::add_fixed_box( const position& pos )
+ 	m_fixed_boxes.push_back(pos);
+ }
+ 
++void document::rebuild_render_tree()
++{
++	if(!m_root)
++	{
++		return;
++	}
++
++	// A display change can add or remove boxes. Rebuild the whole render tree
++	// so nodes which were display:none at initial document creation can later
++	// participate in layout (for example, a closed <details> being opened).
++	m_tabular_elements.clear();
++	m_fixed_boxes.clear();
++	m_root->refresh_styles();
++	m_root->compute_styles();
++	m_root_render = m_root->create_render_item(nullptr);
++	fix_tables_layout();
++	if(m_root_render)
++	{
++		m_root_render = m_root_render->init();
++	}
++}
++
+ bool document::media_changed()
+ {
+ 	container()->get_media_features(m_media);
+ 	if (update_media_lists(m_media))
+ 	{
+-		m_root->refresh_styles();
+-		m_root->compute_styles();
+-		// The set of rendered elements can change across a media breakpoint
+-		// (e.g. display:none <-> block on responsive nav/hero blocks). The render
+-		// tree is built once in createFromString() from the computed display values,
+-		// so rebuild it here to add/remove render items for elements whose display
+-		// just changed; otherwise a newly-shown element keeps no render item and
+-		// never lays out (it collapses to zero).
+-		m_root_render = m_root->create_render_item(nullptr);
+-		if (m_root_render)
+-		{
+-			m_root_render = m_root_render->init();
+-		}
++		rebuild_render_tree();
+ 		return true;
+ 	}
+ 	return false;

@@ -423,11 +423,11 @@ void DocumentContainerPrivate::get_media_features(litehtml::media_features &medi
 
 void DocumentContainerPrivate::rebuildRenderTree()
 {
-    if (m_document && m_document->root()) {
-        m_document->root()->refresh_styles();
-        m_document->root()->compute_styles(true);
-        m_needRelayout = true;
-    }
+    if (!m_document)
+        return;
+
+    m_document->rebuild_render_tree();
+    m_needRelayout = true;
 }
 
 void DocumentContainerPrivate::get_language(litehtml::string &language,
