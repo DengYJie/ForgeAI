@@ -84,6 +84,8 @@ namespace ui::screen::chat {
 
         void hidePreview();
 
+        void setHoverIntensity(qreal target, int duration);
+
         QList<ChatAnchorItem> m_items;
         int m_activeIndex = -1;
         int m_hoveredIndex = -1;
@@ -91,6 +93,7 @@ namespace ui::screen::chat {
         qreal m_mouseY = -1000.0;
         qreal m_hoverIntensity = 0.0;
         QVariantAnimation *m_hoverAnim = nullptr;
+        QVariantAnimation *m_intensityAnim = nullptr;
 
         ChatAnchorPreviewCard *m_previewCard = nullptr;
     };
