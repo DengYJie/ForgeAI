@@ -10,8 +10,11 @@
 #include <QPainter>
 #include <QRegion>
 #include <QScrollBar>
+#include <QScroller>
 #include <QStyle>
 #include <QTimer>
+#include <QVariantAnimation>
+#include <QWheelEvent>
 
 const int kScrollBarStep = 40;
 
@@ -29,6 +32,9 @@ public:
     QUrl lastHighlightedLink;
     QTimer selectionScrollTimer;
     QPoint selectionDragPosition;
+    
+    QVariantAnimation *smoothScrollAnim = nullptr;
+    int targetScrollValue = 0;
 };
 
 QLiteHtmlWidget::QLiteHtmlWidget(QWidget *parent)
@@ -38,6 +44,9 @@ QLiteHtmlWidget::QLiteHtmlWidget(QWidget *parent)
     setMouseTracking(true);
     horizontalScrollBar()->setSingleStep(kScrollBarStep);
     verticalScrollBar()->setSingleStep(kScrollBarStep);
+    
+    // Enable modern kinetic scrolling for touchpads and touchscreens
+    QScroller::grabGesture(viewport(), QScroller::TouchGesture);
 
     d->documentContainer.setCursorCallback([this](const QCursor &c) { viewport()->setCursor(c); });
     d->documentContainer.setPaletteCallback([this] { return palette(); });
@@ -217,22 +226,59 @@ void QLiteHtmlWidget::resizeEvent(QResizeEvent *event)
 void QLiteHtmlWidget::scrollContentsBy(int dx, int dy)
 {
     if (d->documentContainer.hasDocument()) {
-        // Blit the existing content and only repaint the newly exposed strip
-        // instead of redrawing the whole document. Paint uses
-        // -scrollPosition(), so the content must move opposite to the
-        // scrollbar delta.
-        viewport()->scroll(-dx, -dy);
-        // position:fixed elements and the selection highlight stay put
-        // relative to the viewport; mark their boxes dirty so they are
-        // repainted at the new scroll offset.
-        const QPoint scroll = scrollPosition();
-        for (const QRect &box : d->documentContainer.fixedBoxes())
-            viewport()->update(fromVirtual(box.translated(-scroll)));
-        for (const QRect &box : d->documentContainer.selectionRects())
-            viewport()->update(fromVirtual(box.translated(-scroll)));
+        // Modern Qt recommendation: avoid viewport()->scroll() for complex custom painting
+        // as it causes severe tearing on high-DPI displays and Wayland/macOS.
+        // Modern CPUs/GPUs are fast enough to just repaint the viewport.
+        viewport()->update();
     } else {
         QAbstractScrollArea::scrollContentsBy(dx, dy);
     }
+}
+
+void QLiteHtmlWidget::wheelEvent(QWheelEvent *event)
+{
+    // If it's a touchpad high-resolution scrolling (pixel delta), let Qt handle it directly
+    if (!event->pixelDelta().isNull()) {
+        QAbstractScrollArea::wheelEvent(event);
+        return;
+    }
+    
+    // Traditional mouse wheel uses angleDelta
+    int numDegrees = event->angleDelta().y() / 8;
+    int numSteps = numDegrees / 15;
+    
+    if (numSteps == 0) {
+        QAbstractScrollArea::wheelEvent(event);
+        return;
+    }
+    
+    // Calculate scroll offset: 3 steps per wheel notch is standard
+    int scrollOffset = numSteps * verticalScrollBar()->singleStep() * 3;
+    
+    if (!d->smoothScrollAnim) {
+        d->smoothScrollAnim = new QVariantAnimation(this);
+        d->smoothScrollAnim->setEasingCurve(QEasingCurve::OutCubic);
+        d->smoothScrollAnim->setDuration(250);
+        connect(d->smoothScrollAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+            verticalScrollBar()->setValue(value.toInt());
+        });
+    }
+    
+    // Accumulate target if user scrolls repeatedly while animation is running
+    if (d->smoothScrollAnim->state() == QAbstractAnimation::Running) {
+        d->targetScrollValue -= scrollOffset;
+    } else {
+        d->targetScrollValue = verticalScrollBar()->value() - scrollOffset;
+    }
+    
+    d->targetScrollValue = qBound(verticalScrollBar()->minimum(), d->targetScrollValue, verticalScrollBar()->maximum());
+    
+    d->smoothScrollAnim->stop();
+    d->smoothScrollAnim->setStartValue(verticalScrollBar()->value());
+    d->smoothScrollAnim->setEndValue(d->targetScrollValue);
+    d->smoothScrollAnim->start();
+    
+    event->accept();
 }
 
 void QLiteHtmlWidget::mouseMoveEvent(QMouseEvent *event)
