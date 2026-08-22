@@ -55,7 +55,7 @@ void LiteHtmlRenderer::draw_text(QPainter* painter,
         selectionFormat.start = start;
         selectionFormat.length = length;
         selectionFormat.format.setForeground(highlightColor);
-        // Background is drawn separately by container_selection.cpp
+        // Background is drawn separately by litehtml_renderer.cpp/draw_selection
         formats.append(selectionFormat);
         layout.setFormats(formats);
     }

@@ -4,7 +4,7 @@ project(qlitehtml)
 add_library(qlitehtml STATIC
     src/container/container_qpainter.cpp
     src/container/litehtml_renderer.cpp
-    src/container/container_selection.cpp
+    src/container/litehtml_interactor.cpp
     src/container/container_serializer.cpp
     src/elements/form_control_element.cpp
     src/elements/button_element.cpp
@@ -19,6 +19,8 @@ target_sources(qlitehtml PRIVATE
     src/container/container_internal.h
     src/container/container_qpainter.h
     src/container/container_qpainter_p.h
+    src/container/litehtml_renderer.h
+    src/container/litehtml_interactor.h
     src/elements/form_control_element.h
     src/elements/button_element.h
     src/elements/details_element.h

@@ -17,65 +17,7 @@
 
 #include <unordered_map>
 
-class Selection
-{
-public:
-    struct Element
-    {
-        Element() = default;
-        Element(litehtml::element::ptr p, int idx, int _x)
-            : element(p)
-            , index(idx)
-            , x(_x)
-        {}
-        litehtml::element::ptr element;
-        int index = -1;
-        int x = -1;
-    };
-
-    // Per-element selection segment info used by draw_text to render only
-    // the selected portion of a text element in the highlight text color.
-    struct SegmentInfo
-    {
-        int charStart = 0;  // First selected character index (0 = from beginning)
-        int charEnd = -1;   // One-past-last selected char (-1 = to end of string)
-        int pixelStart = 0; // Pixel offset of charStart from element left edge
-        int pixelEnd = -1;  // Pixel offset of charEnd from element left edge (-1 = to right edge)
-    };
-
-    enum class Mode { Free, Word };
-
-    bool isValid() const;
-
-    void update();
-    QRect boundingRect() const;
-
-    Element startElem;
-    Element endElem;
-    QVector<QRect> selection;
-    QString text;
-
-    // Maps each selected element's unadjusted placement rect (document
-    // coordinates) to its selection segment info; populated by update() and
-    // consumed by DocumentContainerPrivate::draw_text().
-    QHash<QRect, SegmentInfo> segmentMap;
-
-    QPoint selectionStartDocumentPos;
-    Mode mode = Mode::Free;
-    bool isSelecting = false;
-};
-
-struct Index
-{
-    QString text;
-    // only contains leaf elements
-    std::unordered_map<litehtml::element::ptr, int> elementToIndex;
-
-    using Entry = std::pair<int, litehtml::element::ptr>;
-    std::vector<Entry> indexToElement;
-
-    Entry findElement(int index) const;
-};
+#include "litehtml_interactor.h"
 
 class DocumentContainerPrivate final
     : public litehtml::document_container
@@ -151,11 +93,6 @@ public: // document_container API
     QString monospaceFont() const;
     QUrl resolveUrl(const QString &url, const QString &baseUrl) const;
     void drawSelection(QPainter *painter, const QRect &clip) const;
-    void buildIndex();
-    void updateSelection();
-    void clearSelection();
-
-    std::shared_ptr<details_element> detailsForSummary(const litehtml::element::ptr &element) const;
 
     QPaintDevice *m_paintDevice = nullptr;
     QPainter *m_painter = nullptr;
@@ -164,21 +101,17 @@ public: // document_container API
     // load_image() guarantees this is alive when the callback runs.
     DocumentContainer *m_owner = nullptr;
     litehtml::document::ptr m_document;
-    Index m_index;
     QHash<QByteArray, DocumentContainer::ElementFactory> m_elementFactories;
-    // Last leaf element covered by buildIndex(); updateIndex() continues from
-    // its next leaf, so appending HTML only re-indexes the new content.
-    litehtml::element::ptr m_lastIndexedElement;
     // Set when the document or its fonts changed and render() must re-layout,
     // even if the viewport width did not change.
     bool m_needRelayout = true;
-    void updateIndex();
     QString m_baseUrl;
     QRect m_clientRect;
     QPoint m_scrollPosition;
     QString m_caption;
     QFont m_defaultFont = QFont(sansSerifFont(), 16);
     mutable qlitehtml::internal::LiteHtmlRenderer m_renderer;
+    qlitehtml::internal::LiteHtmlInteractor m_interactor;
     QByteArray m_defaultFontFamilyName = m_defaultFont.family().toUtf8();
     // LRU image cache, costed by decoded size (1 unit = 1 KiB), capped at
     // 64 MiB so long documents cannot grow memory without bound.
@@ -189,16 +122,7 @@ public: // document_container API
     // the widget can repaint the (re-laid-out) viewport.
     DocumentContainer::RepaintCallback m_repaintCallback;
     DocumentContainer::ResourceHandler m_resourceHandler;
-    DocumentContainer::CursorCallback m_cursorCallback;
-    DocumentContainer::LinkCallback m_linkCallback;
     DocumentContainer::PaletteCallback m_paletteCallback;
-    DocumentContainer::FormControlCallback m_formControlCallback;
-    DocumentContainer::DetailsCallback m_detailsCallback;
-    DocumentContainer::ClipboardCallback m_clipboardCallback;
-    Selection m_selection;
-    std::weak_ptr<details_element> m_pressedDetails;
-    bool m_blockLinks = false;
-    mutable int m_mediaForceToggle = 0;
 
     void rebuildRenderTree();
 };

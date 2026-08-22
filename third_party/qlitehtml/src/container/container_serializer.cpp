@@ -201,7 +201,7 @@ static void serializeLeafWithParents(const litehtml::element::ptr &leafElement,
 
 QString DocumentContainer::selectedHtml() const
 {
-    const Selection &sel = d->m_selection;
+    const Selection &sel = d->m_interactor.selection();
     if (!sel.startElem.element || !sel.endElem.element) {
         return QString();
     }

@@ -167,7 +167,7 @@ inline QCursor toQCursor(const QString &c)
 }
 
 // Document-tree traversal and hit-testing helpers, defined in
-// container_selection.cpp.
+// litehtml_interactor.cpp.
 std::vector<litehtml::element::ptr> path(const litehtml::element::ptr &element);
 std::pair<litehtml::element::ptr, size_t> getCommonParent(const std::vector<litehtml::element::ptr> &a,
                                                           const std::vector<litehtml::element::ptr> &b);

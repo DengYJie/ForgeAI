@@ -27,8 +27,6 @@
 #include <limits>
 #include <set>
 
-const int kDragDistance = 5;
-
 using namespace qlitehtml::internal;
 
 namespace {
@@ -47,6 +45,11 @@ DocumentContainer::DocumentContainer()
     : d(std::make_shared<DocumentContainerPrivate>())
 {
     d->m_owner = this;
+    d->m_interactor.setRelayoutCallback([this]() {
+        d->rebuildRenderTree();
+        d->m_needRelayout = true;
+        render(d->m_clientRect.width(), d->m_clientRect.height());
+    });
 
     // Register custom elements for form controls
     registerElementFactory("input",
@@ -287,92 +290,6 @@ void DocumentContainerPrivate::get_image_size(const char *src,
     sz.height = pm.height();
 }
 
-void DocumentContainerPrivate::buildIndex()
-{
-    m_index.elementToIndex.clear();
-    m_index.indexToElement.clear();
-    m_index.text.clear();
-
-    // The leaf traversal below never visits the <body> element itself (it is
-    // not a leaf), so membership is checked via ancestry instead. Note that
-    // litehtml's is_ancestor() checks whether its argument is an ancestor of
-    // *this* element.
-    const litehtml::element::ptr body = m_document->root()->select_one("body");
-    int index = 0;
-    litehtml::element::ptr current = firstLeaf(m_document->root(), nullptr);
-    while (current != m_document->root()) {
-        m_index.elementToIndex.insert({current, index});
-        if ((!body || current->is_ancestor(body))
-            && current->css().get_display() != litehtml::display_none
-            && current->css().get_visibility() != litehtml::visibility_hidden) {
-            litehtml::string text;
-            current->get_text(text);
-            if (!text.empty()) {
-                m_index.indexToElement.push_back({index, current});
-                const QString str = QString::fromUtf8(text.data(), int(text.size()));
-                m_index.text += str;
-                index += str.size();
-            }
-        }
-        m_lastIndexedElement = current;
-        current = nextLeaf(current, m_document->root());
-    }
-}
-
-// Incremental continuation of buildIndex(): re-indexes only the leaf
-// elements added after m_lastIndexedElement (e.g. via appendHtml).
-void DocumentContainerPrivate::updateIndex()
-{
-    if (!m_document || !m_document->root())
-        return;
-
-    litehtml::element::ptr body = m_document->root()->select_one("body");
-    litehtml::element::ptr current = m_lastIndexedElement
-                                          ? nextLeaf(m_lastIndexedElement, m_document->root())
-                                          : firstLeaf(m_document->root(), nullptr);
-    while (current != m_document->root()) {
-        const int offset = int(m_index.text.size());
-        m_index.elementToIndex.insert({current, offset});
-        if ((!body || current->is_ancestor(body))
-            && current->css().get_display() != litehtml::display_none
-            && current->css().get_visibility() != litehtml::visibility_hidden) {
-            litehtml::string text;
-            current->get_text(text);
-            if (!text.empty()) {
-                m_index.indexToElement.push_back({offset, current});
-                m_index.text += QString::fromUtf8(text.data(), int(text.size()));
-            }
-        }
-        m_lastIndexedElement = current;
-        current = nextLeaf(current, m_document->root());
-    }
-}
-
-void DocumentContainerPrivate::updateSelection()
-{
-    const QString oldText = m_selection.text;
-    m_selection.update();
-    if (!m_clipboardCallback)
-        return;
-
-    const QString newText = m_selection.text;
-    if (oldText.isEmpty() && !newText.isEmpty())
-        m_clipboardCallback(true);
-    else if (!oldText.isEmpty() && newText.isEmpty())
-        m_clipboardCallback(false);
-}
-
-void DocumentContainerPrivate::clearSelection()
-{
-    const QString oldText = m_selection.text;
-    m_selection = {};
-    if (!m_clipboardCallback)
-        return;
-
-    if (!oldText.isEmpty())
-        m_clipboardCallback(false);
-}
-
 void DocumentContainerPrivate::set_caption(const char *caption)
 {
     m_caption = QString::fromUtf8(caption);
@@ -381,6 +298,7 @@ void DocumentContainerPrivate::set_caption(const char *caption)
 void DocumentContainerPrivate::set_base_url(const char *base_url)
 {
     m_baseUrl = QString::fromUtf8(base_url);
+    m_interactor.setBaseUrl(m_baseUrl);
 }
 
 void DocumentContainerPrivate::link(const std::shared_ptr<litehtml::document> &doc,
@@ -395,39 +313,23 @@ void DocumentContainerPrivate::link(const std::shared_ptr<litehtml::document> &d
 void DocumentContainerPrivate::on_anchor_click(const char *url,
                                                const litehtml::element::ptr &el)
 {
-    Q_UNUSED(el)
-    if (!m_blockLinks)
-        m_linkCallback(resolveUrl(QString::fromUtf8(url), m_baseUrl));
+    m_interactor.on_anchor_click(url, el);
 }
 
 bool DocumentContainerPrivate::on_element_click(const litehtml::element::ptr &el)
 {
-    if (m_formControlCallback && el) {
-        if (auto formControl = std::dynamic_pointer_cast<form_control_element>(el)) {
-            auto type = QString::fromUtf8(el->get_attr("type", ""));
-            auto name = QString::fromUtf8(el->get_attr("name", ""));
-            auto value = QString::fromUtf8(el->get_attr("value", ""));
-            bool checked = formControl->is_checked();
-            
-            m_formControlCallback(QString::fromUtf8(el->get_tagName()), type, name, value, checked);
-            return true;
-        }
-    }
-    return false;
+    return m_interactor.on_element_click(el);
 }
 
 void DocumentContainerPrivate::on_mouse_event(const litehtml::element::ptr &el,
                                               litehtml::mouse_event event)
 {
-    Q_UNUSED(el)
-    Q_UNUSED(event)
-    // Mouse enter/leave styling is driven by QLiteHtmlWidget's own mouse
-    // tracking (document::on_mouse_over/on_mouse_leave), nothing to do here.
+    m_interactor.on_mouse_event(el, event);
 }
 
 void DocumentContainerPrivate::set_cursor(const char *cursor)
 {
-    m_cursorCallback(toQCursor(QString::fromUtf8(cursor)));
+    m_interactor.set_cursor(cursor);
 }
 
 void DocumentContainerPrivate::transform_text(litehtml::string &text, litehtml::text_transform tt)
@@ -545,7 +447,7 @@ void DocumentContainerPrivate::get_viewport(litehtml::position &viewport) const
 
 std::shared_ptr<litehtml::element> DocumentContainerPrivate::create_element(
     const char *tag_name,
-    const litehtml::string_map &attributes,
+const litehtml::string_map &attributes,
     const std::shared_ptr<litehtml::document> &doc)
 {
     const auto it = m_elementFactories.constFind(
@@ -559,7 +461,7 @@ std::shared_ptr<litehtml::element> DocumentContainerPrivate::create_element(
 
 void DocumentContainerPrivate::get_media_features(litehtml::media_features &media) const
 {
-    media.type = (m_mediaForceToggle % 2 == 1) ? litehtml::media_type_print : litehtml::media_type_screen;
+    media.type = litehtml::media_type_screen;
     // Width/height are the viewport in CSS pixels (virtual coordinates, as
     // passed to render()). Screen size feeds device queries.
     media.width = m_clientRect.width();
@@ -581,11 +483,10 @@ void DocumentContainerPrivate::get_media_features(litehtml::media_features &medi
 
 void DocumentContainerPrivate::rebuildRenderTree()
 {
-    if (m_document) {
-        m_mediaForceToggle++;
-        m_document->media_changed();
-        m_mediaForceToggle++;
-        m_document->media_changed();
+    if (m_document && m_document->root()) {
+        m_document->root()->refresh_styles();
+        m_document->root()->compute_styles(true);
+        m_needRelayout = true;
     }
 }
 
@@ -621,7 +522,7 @@ void DocumentContainer::setDocument(const QByteArray &data, DocumentContainerCon
     // across setDocument() calls: streaming renderers (e.g. chat markdown at
     // 30 Hz) would otherwise re-decode the same images on every refresh. Call
     // clearResourceCache() when a hard resource reload is required.
-    d->clearSelection();
+    d->m_interactor.clearSelection();
     const std::string masterCss
         = context && !context->d->masterStyleSheet.isEmpty()
               ? context->d->masterStyleSheet.toUtf8().constData()
@@ -630,8 +531,9 @@ void DocumentContainer::setDocument(const QByteArray &data, DocumentContainerCon
                                                          d.get(),
                                                          masterCss,
                                                          std::string());
+    d->m_interactor.setDocument(d->m_document);
     d->m_needRelayout = true;
-    d->buildIndex();
+    d->m_interactor.buildIndex();
 }
 
 bool DocumentContainer::hasDocument() const
@@ -668,7 +570,7 @@ void DocumentContainer::appendHtml(const QByteArray &html)
     d->m_document->append_children_from_string(*parent, html.constData(), false);
     d->m_needRelayout = true;
     render(d->m_clientRect.width(), d->m_clientRect.height());
-    d->updateIndex();
+    d->m_interactor.updateIndex();
 }
 
 QVector<QRect> DocumentContainer::fixedBoxes() const
@@ -686,7 +588,7 @@ QVector<QRect> DocumentContainer::fixedBoxes() const
 
 QVector<QRect> DocumentContainer::selectionRects() const
 {
-    return d->m_selection.selection;
+    return d->m_interactor.selectionRects();
 }
 
 void DocumentContainer::render(int width, int height)
@@ -695,6 +597,7 @@ void DocumentContainer::render(int width, int height)
     // must not re-layout the whole document.
     const bool layoutChanged = d->m_needRelayout || width != d->m_clientRect.width();
     d->m_clientRect = {0, 0, width, height};
+    d->m_interactor.setClientRect(d->m_clientRect);
     if (!d->m_document)
         return;
     if (layoutChanged) {
@@ -703,7 +606,7 @@ void DocumentContainer::render(int width, int height)
         // block-level elements (like blockquotes and backgrounds) to their intrinsic content width.
         d->m_document->render(width);
     }
-    d->updateSelection();
+    d->m_interactor.updateSelection();
 }
 
 void DocumentContainer::draw(QPainter *painter, const QRect &clip)
@@ -741,277 +644,52 @@ int DocumentContainer::anchorY(const QString &anchorName) const
     return -1;
 }
 
-std::shared_ptr<details_element> DocumentContainerPrivate::detailsForSummary(const litehtml::element::ptr &element) const
-{
-    litehtml::element::ptr curr = element;
-    litehtml::element::ptr summaryEl = nullptr;
-    while (curr) {
-        if (curr->tag() == litehtml::_id("summary")) {
-            summaryEl = curr;
-            break;
-        }
-        curr = curr->parent();
-    }
-    if (!summaryEl) {
-        return nullptr;
-    }
-    litehtml::element::ptr parent = summaryEl->parent();
-    if (!parent || parent->tag() != litehtml::_id("details")) {
-        return nullptr;
-    }
-    // Verify it is the first summary child of details
-    for (const auto &child : parent->children()) {
-        if (child->tag() == litehtml::_id("summary")) {
-            if (child == summaryEl) {
-                return std::dynamic_pointer_cast<details_element>(parent);
-            }
-            return nullptr;
-        }
-    }
-    return nullptr;
-}
-
 QVector<QRect> DocumentContainer::mousePressEvent(const QPoint &documentPos,
                                                   const QPoint &viewportPos,
                                                   Qt::MouseButton button,
                                                   Qt::KeyboardModifiers modifiers)
 {
-    if (!d->m_document || button != Qt::LeftButton)
-        return {};
-    QVector<QRect> redrawRects;
-    // selection
-    if (modifiers.testFlag(Qt::ShiftModifier) && d->m_selection.isValid()) {
-        d->m_selection.selectionStartDocumentPos = documentPos;
-        d->m_selection.endElem = deepestElementAtPoint(d->m_document,
-                                                        documentPos,
-                                                        viewportPos,
-                                                        d->m_selection.mode);
-        d->updateSelection();
-        if (d->m_selection.isValid())
-            redrawRects.append(d->m_selection.boundingRect());
-    } else {
-        if (d->m_selection.isValid())
-            redrawRects.append(d->m_selection.boundingRect());
-        d->clearSelection();
-        d->m_selection.selectionStartDocumentPos = documentPos;
-        d->m_selection.startElem = deepestElementAtPoint(d->m_document,
-                                                          documentPos,
-                                                          viewportPos,
-                                                          d->m_selection.mode);
-    }
-
-    const litehtml::element::ptr pressedEl = elementAtPoint(d->m_document, documentPos, viewportPos);
-    d->m_pressedDetails = d->detailsForSummary(pressedEl);
-
-    // post to litehtml
-    litehtml::position::vector redrawBoxes;
-    if (d->m_document->on_lbutton_down(documentPos.x(),
-                                       documentPos.y(),
-                                       viewportPos.x(),
-                                       viewportPos.y(),
-                                       redrawBoxes)) {
-        for (const litehtml::position &box : redrawBoxes)
-            redrawRects.append(toQRect(box));
-        // Custom elements (e.g. the checkbox) may flip internal state without
-        // a CSS style change, so litehtml reports no redraw box for them.
-        // Repaint the clicked element's box as well.
-        const litehtml::element::ptr clicked = elementAtPoint(d->m_document, documentPos, viewportPos);
-        if (clicked)
-            redrawRects.append(toQRect(clicked->get_placement()));
-    }
-    return redrawRects;
+    return d->m_interactor.mousePressEvent(documentPos, viewportPos, button, modifiers);
 }
 
 QVector<QRect> DocumentContainer::mouseMoveEvent(const QPoint &documentPos,
                                                  const QPoint &viewportPos)
 {
-    if (!d->m_document)
-        return {};
-    QVector<QRect> redrawRects;
-    // selection
-    if (d->m_selection.isSelecting
-        || (!d->m_selection.selectionStartDocumentPos.isNull()
-            && (d->m_selection.selectionStartDocumentPos - documentPos).manhattanLength()
-                   >= kDragDistance
-            && d->m_selection.startElem.element)) {
-        const Selection::Element element = deepestElementAtPoint(d->m_document,
-                                                                  documentPos,
-                                                                  viewportPos,
-                                                                  d->m_selection.mode);
-        if (element.element
-            && (element.element != d->m_selection.endElem.element
-                || element.index != d->m_selection.endElem.index)) {
-            redrawRects.append(
-                d->m_selection
-                    .boundingRect() /*.adjusted(-1, -1, +1, +1)*/); // redraw old selection area
-            d->m_selection.endElem = element;
-            d->updateSelection();
-            redrawRects.append(d->m_selection.boundingRect());
-        }
-        d->m_selection.isSelecting = true;
-    }
-    litehtml::position::vector redrawBoxes;
-    if (d->m_document->on_mouse_over(documentPos.x(),
-                                     documentPos.y(),
-                                     viewportPos.x(),
-                                     viewportPos.y(),
-                                     redrawBoxes)) {
-        for (const litehtml::position &box : redrawBoxes)
-            redrawRects.append(toQRect(box));
-    }
-    return redrawRects;
+    return d->m_interactor.mouseMoveEvent(documentPos, viewportPos);
 }
 
 QVector<QRect> DocumentContainer::mouseReleaseEvent(const QPoint &documentPos,
                                                     const QPoint &viewportPos,
                                                     Qt::MouseButton button)
 {
-    if (!d->m_document || button != Qt::LeftButton)
-        return {};
-    QVector<QRect> redrawRects;
-    // selection
-    d->m_selection.isSelecting = false;
-    d->m_selection.selectionStartDocumentPos = {};
-    if (d->m_selection.isValid())
-        d->m_blockLinks = true;
-    else
-        d->clearSelection();
-    litehtml::position::vector redrawBoxes;
-    if (d->m_document->on_lbutton_up(documentPos.x(),
-                                     documentPos.y(),
-                                     viewportPos.x(),
-                                     viewportPos.y(),
-                                     redrawBoxes)) {
-        for (const litehtml::position &box : redrawBoxes)
-            redrawRects.append(toQRect(box));
-    }
-    d->m_blockLinks = false;
-
-    // Check if released on the same summary that was pressed
-    const litehtml::element::ptr releasedEl = elementAtPoint(d->m_document, documentPos, viewportPos);
-    auto releasedDetails = d->detailsForSummary(releasedEl);
-    auto pressedDetails = d->m_pressedDetails.lock();
-    d->m_pressedDetails.reset();
-
-    if (pressedDetails && releasedDetails && pressedDetails == releasedDetails) {
-        pressedDetails->toggle();
-
-        d->rebuildRenderTree();
-
-        d->m_needRelayout = true;
-        render(d->m_clientRect.width(), d->m_clientRect.height());
-        redrawRects.append(d->m_clientRect);
-
-        if (d->m_detailsCallback) {
-            QString id = QString::fromUtf8(pressedDetails->get_attr("id", ""));
-            d->m_detailsCallback(id, pressedDetails->is_open());
-        }
-    }
-
-    return redrawRects;
+    return d->m_interactor.mouseReleaseEvent(documentPos, viewportPos, button);
 }
 
 QVector<QRect> DocumentContainer::mouseDoubleClickEvent(const QPoint &documentPos,
                                                         const QPoint &viewportPos,
                                                         Qt::MouseButton button)
 {
-    if (!d->m_document || button != Qt::LeftButton)
-        return {};
-    QVector<QRect> redrawRects;
-    d->clearSelection();
-    d->m_selection.mode = Selection::Mode::Word;
-    const Selection::Element element = deepestElementAtPoint(d->m_document,
-                                                              documentPos,
-                                                              viewportPos,
-                                                              d->m_selection.mode);
-    if (element.element) {
-        d->m_selection.startElem = element;
-        d->m_selection.endElem = d->m_selection.startElem;
-        d->m_selection.isSelecting = true;
-        d->updateSelection();
-        if (d->m_selection.isValid())
-            redrawRects.append(d->m_selection.boundingRect());
-    } else {
-        if (d->m_selection.isValid())
-            redrawRects.append(d->m_selection.boundingRect());
-        d->clearSelection();
-    }
-    return redrawRects;
+    return d->m_interactor.mouseDoubleClickEvent(documentPos, viewportPos, button);
 }
 
 QVector<QRect> DocumentContainer::leaveEvent()
 {
-    if (!d->m_document)
-        return {};
-    litehtml::position::vector redrawBoxes;
-    if (d->m_document->on_mouse_leave(redrawBoxes)) {
-        QVector<QRect> redrawRects;
-        for (const litehtml::position &box : redrawBoxes)
-            redrawRects.append(toQRect(box));
-        return redrawRects;
-    }
-    return {};
+    return d->m_interactor.leaveEvent();
 }
 
 QVector<QRect> DocumentContainer::scrollAt(const QPoint &documentPos, const QPoint &viewportPos, const QPoint &delta)
 {
-    if (!d->m_document)
-        return {};
-        
-    std::vector<litehtml::scroll_values> scroll_values = 
-        d->m_document->on_scroll(delta.x(), delta.y(), documentPos.x(), documentPos.y(), viewportPos.x(), viewportPos.y());
-        
-    QVector<QRect> redrawRects;
-    for (const auto &val : scroll_values) {
-        if (val.dx != 0 || val.dy != 0) {
-            // Document coordinate scroll box mapped to a slightly expanded rect to prevent edge artifacts
-            QRect rect = toQRect(val.scroll_box).adjusted(-1, -1, 1, 1);
-            // Include fixed positioning and selection intersections if they exist
-            // (on_scroll simply returns the scroll_box of the element that handled it)
-            redrawRects.append(rect);
-        }
-    }
-    return redrawRects;
+    return d->m_interactor.scrollAt(documentPos, viewportPos, delta);
 }
 
 QUrl DocumentContainer::linkAt(const QPoint &documentPos, const QPoint &viewportPos)
 {
-    const litehtml::element::ptr element
-        = firstMatchingAncestor(elementAtPoint(d->m_document, documentPos, viewportPos),
-                                [](const litehtml::element::ptr &candidate) {
-                                    const char *href = candidate->get_attr("href");
-                                    return href && href[0] != '\0';
-                                });
-    if (!element)
-        return {};
-    const char *href = element->get_attr("href");
-    if (href)
-        return d->resolveUrl(QString::fromUtf8(href), d->m_baseUrl);
-    return {};
+    return d->m_interactor.linkAt(documentPos, viewportPos);
 }
 
 QUrl DocumentContainer::imageAt(const QPoint &documentPos, const QPoint &viewportPos)
 {
-    const litehtml::element::ptr element
-        = firstMatchingAncestor(elementAtPoint(d->m_document, documentPos, viewportPos),
-                                [](const litehtml::element::ptr &candidate) {
-                                    const char *tagName = candidate->get_tagName();
-                                    if (!tagName || strcmp(tagName, "img") != 0) {
-                                        return false;
-                                    }
-
-                                    const char *src = candidate->get_attr("src");
-                                    return src && src[0] != '\0';
-                                });
-    if (!element)
-        return {};
-
-    const char *src = element->get_attr("src");
-    if (src) {
-        return d->resolveUrl(QString::fromUtf8(src), d->m_baseUrl);
-    }
-
-    return {};
+    return d->m_interactor.imageAt(documentPos, viewportPos);
 }
 
 QString DocumentContainer::caption() const
@@ -1021,7 +699,7 @@ QString DocumentContainer::caption() const
 
 QString DocumentContainer::selectedText() const
 {
-    return d->m_selection.text;
+    return d->m_interactor.selectedText();
 }
 
 void DocumentContainer::findText(const QString &text,
@@ -1032,90 +710,7 @@ void DocumentContainer::findText(const QString &text,
                                  QVector<QRect> *oldSelection,
                                  QVector<QRect> *newSelection)
 {
-    if (success)
-        *success = false;
-    if (oldSelection)
-        oldSelection->clear();
-    if (newSelection)
-        newSelection->clear();
-    if (!d->m_document)
-        return;
-    const bool backward = flags & QTextDocument::FindBackward;
-    int startIndex = backward ? -1 : 0;
-    if (d->m_selection.startElem.element && d->m_selection.endElem.element) { // selection
-        // poor-man's incremental search starts at beginning of selection,
-        // non-incremental at end (forward search) or beginning (backward search)
-        Selection::Element start;
-        Selection::Element end;
-        std::tie(start, end) = getStartAndEnd(d->m_selection.startElem, d->m_selection.endElem);
-        Selection::Element searchStart;
-        if (incremental || backward) {
-            if (start.index < 0) // fully selected
-                searchStart = {firstLeaf(start.element, nullptr), 0, -1};
-            else
-                searchStart = start;
-        } else {
-            if (end.index < 0) // fully selected
-                searchStart = {nextLeaf(end.element, nullptr), 0, -1};
-            else
-                searchStart = end;
-        }
-        const auto findInIndex = d->m_index.elementToIndex.find(searchStart.element);
-        if (findInIndex == std::end(d->m_index.elementToIndex)) {
-            qWarning() << "internal error: cannot find litehmtl element in index";
-            return;
-        }
-        startIndex = findInIndex->second + searchStart.index;
-        if (backward)
-            --startIndex;
-    }
-
-    const auto fillXPos = [](const Selection::Element &e) {
-        litehtml::string ttext;
-        e.element->get_text(ttext);
-        const QString text = QString::fromUtf8(ttext.data(), int(ttext.size()));
-        const QFont &font = toQFont(e.element->css().get_font());
-        const QFontMetrics fm(font);
-        return Selection::Element{e.element, e.index, fm.size(0, text.left(e.index)).width()};
-    };
-
-    QString term = QRegularExpression::escape(text);
-    if (flags & QTextDocument::FindWholeWords)
-        term = QStringLiteral("\\b%1\\b").arg(term);
-    const QRegularExpression::PatternOptions patternOptions
-        = (flags & QTextDocument::FindCaseSensitively) ? QRegularExpression::NoPatternOption
-                                                       : QRegularExpression::CaseInsensitiveOption;
-    const QRegularExpression expression(term, patternOptions);
-
-    int foundIndex = backward ? d->m_index.text.lastIndexOf(expression, startIndex)
-                              : d->m_index.text.indexOf(expression, startIndex);
-    if (foundIndex < 0) { // wrap
-        foundIndex = backward ? d->m_index.text.lastIndexOf(expression)
-                              : d->m_index.text.indexOf(expression);
-        if (wrapped && foundIndex >= 0)
-            *wrapped = true;
-    }
-    if (foundIndex >= 0) {
-        const Index::Entry startEntry = d->m_index.findElement(foundIndex);
-        const Index::Entry endEntry = d->m_index.findElement(foundIndex + text.size());
-        if (!startEntry.second || !endEntry.second) {
-            qWarning() << "internal error: search ended up with nullptr elements";
-            return;
-        }
-        if (oldSelection)
-            *oldSelection = d->m_selection.selection;
-        d->clearSelection();
-        d->m_selection.startElem = fillXPos({startEntry.second, foundIndex - startEntry.first, -1});
-        d->m_selection.endElem = fillXPos(
-            {endEntry.second, int(foundIndex + text.size() - endEntry.first), -1});
-        d->updateSelection();
-        if (newSelection)
-            *newSelection = d->m_selection.selection;
-        if (success)
-            *success = true;
-        return;
-    }
-    return;
+    d->m_interactor.findText(text, flags, incremental, wrapped, success, oldSelection, newSelection);
 }
 
 void DocumentContainer::setDefaultFont(const QFont &font)
@@ -1143,12 +738,12 @@ void DocumentContainer::setResourceHandler(const DocumentContainer::ResourceHand
 
 void DocumentContainer::setCursorCallback(const DocumentContainer::CursorCallback &callback)
 {
-    d->m_cursorCallback = callback;
+    d->m_interactor.setCursorCallback(callback);
 }
 
 void DocumentContainer::setLinkCallback(const DocumentContainer::LinkCallback &callback)
 {
-    d->m_linkCallback = callback;
+    d->m_interactor.setLinkCallback(callback);
 }
 
 void DocumentContainer::setPaletteCallback(const PaletteCallback &callback)
@@ -1158,17 +753,17 @@ void DocumentContainer::setPaletteCallback(const PaletteCallback &callback)
 
 void DocumentContainer::setFormControlCallback(const FormControlCallback &callback)
 {
-    d->m_formControlCallback = callback;
+    d->m_interactor.setFormControlCallback(callback);
 }
 
 void DocumentContainer::setDetailsCallback(const DetailsCallback &callback)
 {
-    d->m_detailsCallback = callback;
+    d->m_interactor.setDetailsCallback(callback);
 }
 
 void DocumentContainer::setClipboardCallback(const ClipboardCallback &callback)
 {
-    d->m_clipboardCallback = callback;
+    d->m_interactor.setClipboardCallback(callback);
 }
 
 void DocumentContainer::setRepaintCallback(const DocumentContainer::RepaintCallback &callback)
@@ -1271,6 +866,7 @@ void DocumentContainerContext::setMasterStyleSheet(const QString &css)
 {
     d->masterStyleSheet = css;
 }
+
 void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
                                          const char *text,
                                          litehtml::uint_ptr hFont,
@@ -1278,17 +874,18 @@ void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
                                          const litehtml::position &pos)
 {
     const QRect placementRect = toQRect(pos).translated(m_scrollPosition);
-    const auto segIt = m_selection.segmentMap.constFind(placementRect);
+    qlitehtml::internal::Selection::SegmentInfo localSeg;
+    const qlitehtml::internal::Selection::SegmentInfo* segInfo = 
+        m_interactor.getSelectionSegmentInfo(placementRect, localSeg);
     
-    // Convert segIt to pointer
-    const qlitehtml::internal::SelectionSegmentInfo* segInfo = nullptr;
-    qlitehtml::internal::SelectionSegmentInfo localSeg;
-    if (segIt != m_selection.segmentMap.constEnd() && m_paletteCallback) {
-        localSeg.charStart = segIt.value().charStart;
-        localSeg.charEnd = segIt.value().charEnd;
-        localSeg.pixelStart = segIt.value().pixelStart;
-        localSeg.pixelEnd = segIt.value().pixelEnd;
-        segInfo = &localSeg;
+    qlitehtml::internal::SelectionSegmentInfo convertedSeg;
+    const qlitehtml::internal::SelectionSegmentInfo* pConvertedSeg = nullptr;
+    if (segInfo && m_paletteCallback) {
+        convertedSeg.charStart = segInfo->charStart;
+        convertedSeg.charEnd = segInfo->charEnd;
+        convertedSeg.pixelStart = segInfo->pixelStart;
+        convertedSeg.pixelEnd = segInfo->pixelEnd;
+        pConvertedSeg = &convertedSeg;
     }
     
     m_renderer.draw_text(toQPainter(hdc),
@@ -1296,7 +893,7 @@ void DocumentContainerPrivate::draw_text(litehtml::uint_ptr hdc,
                          toQFont(hFont),
                          toQColor(color),
                          toQRect(pos),
-                         segInfo,
+                         pConvertedSeg,
                          m_paletteCallback ? m_paletteCallback() : QPalette());
 }
 
@@ -1367,9 +964,7 @@ void DocumentContainerPrivate::draw_image(litehtml::uint_ptr hdc,
     m_renderer.draw_image(toQPainter(hdc), layer, pixmap);
 }
 
-
 void DocumentContainerPrivate::drawSelection(QPainter *painter, const QRect &clip) const
 {
-    m_renderer.draw_selection(painter, m_selection.selection, m_scrollPosition, clip, m_paletteCallback ? m_paletteCallback() : QPalette());
+    m_renderer.draw_selection(painter, m_interactor.selectionRects(), m_scrollPosition, clip, m_paletteCallback ? m_paletteCallback() : QPalette());
 }
-
