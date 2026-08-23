@@ -5,6 +5,9 @@ namespace {
 
 QString cssColor(const QColor &color)
 {
+    if (!color.isValid() || color == Qt::transparent || color.alpha() == 0)
+        return QStringLiteral("transparent");
+
     if (color.alpha() == 255)
         return color.name(QColor::HexRgb);
 
@@ -54,6 +57,20 @@ QString MarkdownStyleSheet::build() const
         .markdown-body hr { border: 0; border-top: 1px solid %11; margin-top: 24px; margin-bottom: 24px; }
         .markdown-body img { max-width: 100%%; height: auto; border-radius: 6px; }
         .markdown-error { white-space: pre-wrap; color: %2; }
+        .markdown-body details.thought-chain { margin-top: 0; margin-bottom: 12px; padding: 8px 12px; border: 1px solid %11; border-radius: 6px; background: %15; font-size: 13px; color: %14; }
+        .markdown-body details.thought-chain summary { cursor: pointer; font-weight: 500; color: %14; user-select: none; }
+        .markdown-body details.thought-chain summary:hover { color: %2; }
+        .markdown-body details.thought-chain .thought-body { margin-top: 8px; padding-top: 8px; border-top: 1px dashed %11; color: %14; }
+        .markdown-body details.tool-card { margin-top: 0; margin-bottom: 12px; padding: 8px 12px; border: 1px solid %11; border-radius: 6px; background: %17; font-size: 13px; }
+        .markdown-body details.tool-card summary { cursor: pointer; font-weight: 500; color: %2; user-select: none; }
+        .markdown-body details.tool-card .tool-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: %15; font-size: 11px; margin-right: 6px; }
+        .markdown-body details.tool-card .tool-status { float: right; font-size: 12px; }
+        .markdown-body details.tool-card .tool-status.success { color: #107c41; }
+        .markdown-body details.tool-card .tool-status.error { color: #d83b01; }
+        .markdown-body details.tool-card .tool-content { margin-top: 8px; }
+        .markdown-body details.tool-card pre { margin-top: 4px; margin-bottom: 4px; }
+        .markdown-body .image-gallery { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .markdown-body .image-gallery img { max-height: 240px; border-radius: 6px; object-fit: cover; }
     )")
         .arg(cssColor(colors.background),
              cssColor(colors.text),

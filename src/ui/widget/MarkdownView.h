@@ -9,40 +9,33 @@
 #include <memory>
 
 #include <FluentQt/Foundation.h>
-#include "qlitehtml_types.h"
+#include <FluentQt/TextFields.h>
 #include "MarkdownStyle.h"
-
-class QLiteHtmlWidget;
-
-namespace core::markdown {
-class MarkdownRenderer;
-}
 
 namespace ui::widget {
 
 /**
- * @brief Fluent Design 2-styled Markdown rendering and streaming viewer widget.
- *
- * Backed by md4c (GFM parsing) and QLiteHtmlWidget (high-performance HTML rendering engine).
+ * @brief Fluent Design 2-styled Markdown / PlainText viewer widget.
+ * Backed by fluent::textfields::TextEdit.
  */
 class MarkdownView : public QWidget, public fluent::FluentElement
 {
     Q_OBJECT
 
 public:
-    using ResourceHandler = qlitehtml::ResourceHandler;
-    using ResourceType = qlitehtml::ResourceType;
-
     explicit MarkdownView(QWidget *parent = nullptr);
     ~MarkdownView() override;
 
     // Document loading
     void setMarkdown(const QString &markdown);
     QString markdown() const;
+    void setHtml(const QString &html);
+    QString html() const;
 
     // Incremental streaming
     void beginStream();
     void appendMarkdown(const QString &chunk);
+    void appendHtml(const QString &htmlFragment);
     void finishStream();
     bool isStreaming() const;
 
@@ -55,12 +48,15 @@ public:
     void setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet);
     MarkdownStyleSheet markdownStyleSheet() const;
     void resetMarkdownStyleSheetToTheme();
+    void setTransparentBackground(bool transparent);
+    bool isTransparentBackground() const;
+    void setAutoFitHeight(bool enable);
+    bool isAutoFitHeight() const;
     void onThemeUpdated() override;
 
     // Resource & Security Pipeline
     void setAllowNetworkAccess(bool allow);
     bool allowNetworkAccess() const;
-    void setResourceHandler(const ResourceHandler &handler);
     void clearResourceCache();
 
     // HTML / Extension Configuration
@@ -80,6 +76,9 @@ public:
                   bool incremental,
                   bool *wrapped = nullptr);
 
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
 signals:
     void linkActivated(const QUrl &url);
     void linkHighlighted(const QUrl &url);
@@ -88,40 +87,28 @@ signals:
     void copyAvailable(bool available);
     void contextMenuRequested(const QPoint &pos, const QUrl &linkUrl, const QUrl &imageUrl);
     void streamingChanged(bool streaming);
+    void autoFitHeightChanged(int height);
+
+protected:
+    void showEvent(QShowEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
-    void handleLinkClicked(const QUrl &url);
-    void processCompleteLines();
-    void commitCurrentBlock();
-    void previewCurrentBlock();
-    void scheduleCurrentBlockPreview();
-    void resetBlockState();
-    void rebuildDocument();
-    MarkdownStyleSheet themeStyleSheet() const;
-    static bool fenceOpener(const QString &line, QChar *marker, int *length);
-    static bool isPreviewableParagraphStart(const QString &line);
-    static bool containsGfmTable(const QString &markdown);
-    static bool isAtxHeading(const QString &line);
-    bool fenceCloser(const QString &line) const;
+    void updateAutoFitHeight();
 
-    std::unique_ptr<core::markdown::MarkdownRenderer> m_renderer;
-    QLiteHtmlWidget *m_htmlView = nullptr;
+    fluent::textfields::TextEdit *m_textEdit = nullptr;
     QString m_markdown;
-    QString m_renderedHtml;
-    QString m_lineBuffer;
-    QString m_currentBlock;
-    QString m_pendingPreviewHtml;
-    QString m_fenceContent;
     QUrl m_baseUrl;
     MarkdownStyleSheet m_styleSheet;
     bool m_usesThemeStyleSheet = true;
+    bool m_transparentBackground = true;
+    bool m_autoFitHeight = false;
+    int m_autoFitContentHeight = 1;
     bool m_streaming = false;
-    bool m_blockHasContent = false;
-    bool m_currentBlockPreviewable = false;
-    bool m_inFence = false;
-    QChar m_fenceMarker;
-    int m_fenceLength = 0;
-    QTimer m_previewTimer;
+    bool m_allowNetworkAccess = true;
+    bool m_allowHtml = true;
+    qreal m_zoomFactor = 1.0;
 };
 
 } // namespace ui::widget
