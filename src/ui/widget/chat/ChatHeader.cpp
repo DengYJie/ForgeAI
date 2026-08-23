@@ -7,7 +7,7 @@
 #include "ui/animation/AnimatedIcon.h"
 #include "ui/animation/AnimatedPanelLeftVisualSource.h"
 
-namespace ui::screen::chat {
+namespace ui::widget::chat {
     ChatHeader::ChatHeader(QWidget *parent)
         : QWidget(parent) {
         setupUi();
@@ -125,4 +125,4 @@ namespace ui::screen::chat {
         painter.setPen(themeColorsRef().strokeDivider);
         painter.drawLine(0, height() - 1, width(), height() - 1);
     }
-} // namespace ui::screen::chat
+} // namespace ui::widget::chat

@@ -4,13 +4,14 @@
 #include <QHBoxLayout>
 
 #include "ui/widget/CollapsibleSplitView.h"
+#include "ui/widget/chat/ChatHeader.h"
+#include "ui/widget/chat/ChatAnchorBar.h"
+#include "ui/widget/chat/ChatInputBox.h"
 #include "ChatSidebar.h"
-#include "ChatHeader.h"
-#include "ChatAnchorBar.h"
-#include "ChatInputBox.h"
 #include "ChatViewModel.h"
 
 namespace ui::screen::chat {
+    using namespace ui::widget::chat;
     ChatPage::ChatPage(QWidget *parent)
         : BasePage(parent) {
         setupUi();

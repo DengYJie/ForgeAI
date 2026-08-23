@@ -87,6 +87,13 @@ set(PROJECT_SOURCES
         src/ui/widget/MarkdownView.h
         src/ui/widget/MarkdownView.cpp
 
+        src/ui/widget/chat/ChatHeader.h
+        src/ui/widget/chat/ChatHeader.cpp
+        src/ui/widget/chat/ChatAnchorBar.h
+        src/ui/widget/chat/ChatAnchorBar.cpp
+        src/ui/widget/chat/ChatInputBox.h
+        src/ui/widget/chat/ChatInputBox.cpp
+
         src/ui/widget/message/MessageCardWidget.h
         src/ui/widget/message/MessageCardWidget.cpp
         src/ui/widget/message/MessageListView.h
@@ -161,38 +168,6 @@ set(PROJECT_SOURCES
         src/ui/screen/chat/ChatSessionDelegate.cpp
         src/ui/screen/chat/ChatSidebar.h
         src/ui/screen/chat/ChatSidebar.cpp
-        src/ui/screen/chat/ChatHeader.h
-        src/ui/screen/chat/ChatHeader.cpp
-        src/ui/screen/chat/ChatAnchorBar.h
-        src/ui/screen/chat/ChatAnchorBar.cpp
-        src/ui/screen/chat/ChatInputBox.h
-        src/ui/screen/chat/ChatInputBox.cpp
-        src/ui/widget/message/MessageCardWidget.h
-        src/ui/widget/message/MessageCardWidget.cpp
-        src/ui/widget/message/MessageListView.h
-        src/ui/widget/message/MessageListView.cpp
-        src/ui/widget/message/ProcessGroupWidget.h
-        src/ui/widget/message/ProcessGroupWidget.cpp
-        src/ui/widget/message/blocks/ThinkingBlockWidget.h
-        src/ui/widget/message/blocks/ThinkingBlockWidget.cpp
-        src/ui/widget/message/blocks/AbstractToolBlockWidget.h
-        src/ui/widget/message/blocks/AbstractToolBlockWidget.cpp
-        src/ui/widget/message/blocks/ToolWidgetFactory.h
-        src/ui/widget/message/blocks/ToolWidgetFactory.cpp
-        src/ui/widget/message/blocks/tools/BashToolWidget.h
-        src/ui/widget/message/blocks/tools/BashToolWidget.cpp
-        src/ui/widget/message/blocks/tools/FileReadToolWidget.h
-        src/ui/widget/message/blocks/tools/FileReadToolWidget.cpp
-        src/ui/widget/message/blocks/tools/FileDiffToolWidget.h
-        src/ui/widget/message/blocks/tools/FileDiffToolWidget.cpp
-        src/ui/widget/message/blocks/tools/GenericToolWidget.h
-        src/ui/widget/message/blocks/tools/GenericToolWidget.cpp
-        src/ui/widget/message/blocks/ImageBlockWidget.h
-        src/ui/widget/message/blocks/ImageBlockWidget.cpp
-        src/ui/widget/message/blocks/ErrorBlockWidget.h
-        src/ui/widget/message/blocks/ErrorBlockWidget.cpp
-        src/ui/widget/message/blocks/FlatExpander.h
-        src/ui/widget/message/blocks/FlatExpander.cpp
         src/ui/screen/chat/ChatPage.h
         src/ui/screen/chat/ChatPage.cpp
 

@@ -12,11 +12,14 @@ namespace ui::widget {
     class CollapsibleSplitView;
 }
 
-namespace ui::screen::chat {
-    class ChatSidebar;
+namespace ui::widget::chat {
     class ChatHeader;
     class ChatAnchorBar;
     class ChatInputBox;
+}
+
+namespace ui::screen::chat {
+    class ChatSidebar;
     class ChatViewModel;
     struct ChatState;
 
@@ -42,10 +45,10 @@ namespace ui::screen::chat {
         ChatSidebar *m_sidebar = nullptr;
         QWidget *m_chatAreaWidget = nullptr;
 
-        ChatHeader *m_header = nullptr;
-        ChatAnchorBar *m_anchorBar = nullptr;
+        ui::widget::chat::ChatHeader *m_header = nullptr;
+        ui::widget::chat::ChatAnchorBar *m_anchorBar = nullptr;
         QWidget *m_mainArea = nullptr;
         QWidget *m_mainRight = nullptr;
-        ChatInputBox *m_inputBox = nullptr;
+        ui::widget::chat::ChatInputBox *m_inputBox = nullptr;
     };
 } // namespace ui::screen::chat

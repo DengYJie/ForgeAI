@@ -10,7 +10,7 @@
 #include <FluentQt/TextFields.h>
 #include <FluentQt/Design.h>
 
-namespace ui::screen::chat {
+namespace ui::widget::chat {
     namespace {
         constexpr int kBarWidth = 32;
         constexpr int kItemSpacing = 8;
@@ -305,4 +305,4 @@ namespace ui::screen::chat {
             m_previewCard->hide();
         }
     }
-} // namespace ui::screen::chat
+} // namespace ui::widget::chat

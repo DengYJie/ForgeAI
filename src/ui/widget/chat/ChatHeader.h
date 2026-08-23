@@ -24,7 +24,7 @@ namespace ui::animation {
     class AnimatedPanelLeftVisualSource;
 }
 
-namespace ui::screen::chat {
+namespace ui::widget::chat {
     /**
      * @brief 聊天面板顶部栏控件
      */
@@ -78,4 +78,4 @@ namespace ui::screen::chat {
         fluent::basicinput::Button *m_clearButton = nullptr;
         fluent::basicinput::Button *m_thirdPaneToggle = nullptr;
     };
-} // namespace ui::screen::chat
+} // namespace ui::widget::chat

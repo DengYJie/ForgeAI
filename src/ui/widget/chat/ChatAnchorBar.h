@@ -8,7 +8,7 @@
 #include <FluentQt/Foundation.h>
 #include <FluentQt/TextFields.h>
 
-namespace ui::screen::chat {
+namespace ui::widget::chat {
     struct ChatAnchorItem {
         QString id;
         QString title;
@@ -97,4 +97,4 @@ namespace ui::screen::chat {
 
         ChatAnchorPreviewCard *m_previewCard = nullptr;
     };
-} // namespace ui::screen::chat
+} // namespace ui::widget::chat

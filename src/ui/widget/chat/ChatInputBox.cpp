@@ -7,7 +7,7 @@
 #include <QAbstractTextDocumentLayout>
 #include <FluentQt/BasicInput.h>
 
-namespace ui::screen::chat {
+namespace ui::widget::chat {
     namespace {
         constexpr int kMinInputHeight = 48;
         constexpr int kMaxInputHeight = 140;
@@ -262,4 +262,4 @@ namespace ui::screen::chat {
         painter.setBrush(colors.bgLayer);
         painter.drawRoundedRect(boxRect, kBoxCornerRadius, kBoxCornerRadius);
     }
-} // namespace ui::screen::chat
+} // namespace ui::widget::chat

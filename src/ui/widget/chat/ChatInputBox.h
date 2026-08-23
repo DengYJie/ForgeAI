@@ -12,7 +12,7 @@ namespace fluent::basicinput {
     class ToggleButton;
 }
 
-namespace ui::screen::chat {
+namespace ui::widget::chat {
     /**
  * @brief 底部一体化智能输入控制台（自适应输入框 + 底部左侧工具栏 + 底部右侧模型切换与发送状态机）
  */
@@ -59,28 +59,31 @@ namespace ui::screen::chat {
 
         void webSearchToggled(bool enabled);
 
-        void deepThinkToggled(bool enabled);
+        void deepThinkingToggled(bool enabled);
+
+        void contextCleared();
 
     protected:
-        void paintEvent(QPaintEvent *event) override;
-
         bool eventFilter(QObject *watched, QEvent *event) override;
+
+        void paintEvent(QPaintEvent *event) override;
 
     private:
         void setupUi();
 
-        void updateInputHeight() const;
+        void updateInputHeight();
 
-        void updateSendButtonVisual();
+        void updateSendButtonVisuals();
 
-        QTextEdit *m_textEdit = nullptr;
-        fluent::basicinput::Button *m_attachButton = nullptr;
-        fluent::basicinput::Button *m_webSearchButton = nullptr;
-        fluent::basicinput::Button *m_deepThinkButton = nullptr;
-
-        fluent::basicinput::Button *m_modelButton = nullptr;
-        fluent::basicinput::Button *m_sendButton = nullptr;
+        void setupShadowLayers();
 
         SendState m_sendState = SendState::Idle;
+        QTextEdit *m_textEdit = nullptr;
+        fluent::basicinput::Button *m_modelBtn = nullptr;
+        fluent::basicinput::Button *m_sendBtn = nullptr;
+        fluent::basicinput::Button *m_attachBtn = nullptr;
+        fluent::basicinput::ToggleButton *m_webSearchBtn = nullptr;
+        fluent::basicinput::ToggleButton *m_deepThinkingBtn = nullptr;
+        fluent::basicinput::Button *m_clearContextBtn = nullptr;
     };
-} // namespace ui::screen::chat
+} // namespace ui::widget::chat
