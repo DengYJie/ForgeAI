@@ -51,6 +51,38 @@ namespace llm::protocol::anthropic {
             if (msg.role == domain::MessageRole::System) {
                 if (!systemPrompt.isEmpty()) systemPrompt += "\n\n";
                 systemPrompt += msg.content;
+            } else if (msg.role == domain::MessageRole::Tool) {
+                QJsonObject msgObj;
+                msgObj.insert("role", "user");
+                QJsonArray contentArr;
+                QJsonObject toolResObj;
+                toolResObj.insert("type", "tool_result");
+                toolResObj.insert("tool_use_id", msg.toolCallId);
+                toolResObj.insert("content", msg.content);
+                contentArr.append(toolResObj);
+                msgObj.insert("content", contentArr);
+                msgsArray.append(msgObj);
+            } else if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
+                QJsonObject msgObj;
+                msgObj.insert("role", "assistant");
+                QJsonArray contentArr;
+                if (!msg.content.isEmpty()) {
+                    QJsonObject txtObj;
+                    txtObj.insert("type", "text");
+                    txtObj.insert("text", msg.content);
+                    contentArr.append(txtObj);
+                }
+                for (const auto &tc : msg.toolCalls.value()) {
+                    QJsonObject tuObj;
+                    tuObj.insert("type", "tool_use");
+                    tuObj.insert("id", tc.id);
+                    tuObj.insert("name", tc.name);
+                    QJsonDocument argsDoc = QJsonDocument::fromJson(tc.arguments.toUtf8());
+                    tuObj.insert("input", argsDoc.isObject() ? argsDoc.object() : QJsonObject{});
+                    contentArr.append(tuObj);
+                }
+                msgObj.insert("content", contentArr);
+                msgsArray.append(msgObj);
             } else {
                 QJsonObject msgObj;
                 msgObj.insert("role", (msg.role == domain::MessageRole::Assistant) ? "assistant" : "user");
@@ -63,6 +95,18 @@ namespace llm::protocol::anthropic {
             bodyObj.insert("system", systemPrompt);
         }
         bodyObj.insert("messages", msgsArray);
+
+        if (request.tools.has_value() && !request.tools->isEmpty()) {
+            QJsonArray toolsArr;
+            for (const auto &tool : request.tools.value()) {
+                QJsonObject toolObj;
+                toolObj.insert("name", tool.name);
+                toolObj.insert("description", tool.description);
+                toolObj.insert("input_schema", tool.parameters);
+                toolsArr.append(toolObj);
+            }
+            bodyObj.insert("tools", toolsArr);
+        }
 
         QJsonDocument doc(bodyObj);
         netReq.body = doc.toJson(QJsonDocument::Compact);

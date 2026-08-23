@@ -98,11 +98,35 @@ namespace llm::protocol::openai {
             events.append(domain::llm::EventTextDelta{delta.value("content").toString()});
         }
 
+        // DeepSeek-R1 / Qwen 等兼容协议的 reasoning_content 思考流
+        if (delta.contains("reasoning_content") && !delta.value("reasoning_content").isNull()) {
+            events.append(domain::llm::EventThinkingDelta{delta.value("reasoning_content").toString()});
+        }
+
+        // OpenAI Function / Tool Calling 流解析
+        if (delta.contains("tool_calls") && delta.value("tool_calls").isArray()) {
+            QJsonArray tcArr = delta.value("tool_calls").toArray();
+            for (const auto &tcVal : tcArr) {
+                if (!tcVal.isObject()) continue;
+                QJsonObject tcObj = tcVal.toObject();
+                QString id = tcObj.value("id").toString();
+                
+                QJsonObject funcObj = tcObj.value("function").toObject();
+                QString fnName = funcObj.value("name").toString();
+                QString argsDelta = funcObj.value("arguments").toString();
+
+                if (!fnName.isEmpty()) {
+                    events.append(domain::llm::EventToolCallStarted{id, fnName});
+                }
+                if (!argsDelta.isEmpty()) {
+                    events.append(domain::llm::EventToolCallDelta{id, argsDelta});
+                }
+            }
+        }
+
         if (choice.contains("finish_reason") && !choice.value("finish_reason").isNull()) {
             events.append(domain::llm::EventFinished{choice.value("finish_reason").toString()});
         }
-
-        // tool_calls / usage 处理可以在此处进一步扩充
 
         return events;
     }

@@ -42,10 +42,39 @@ namespace llm::protocol::openai_responses {
                 case domain::MessageRole::Assistant: msgObj.insert("role", "assistant"); break;
                 case domain::MessageRole::Tool: msgObj.insert("role", "tool"); break;
             }
-            msgObj.insert("content", msg.content);
+            if (msg.role == domain::MessageRole::Tool && !msg.toolCallId.isEmpty()) {
+                msgObj.insert("tool_call_id", msg.toolCallId);
+            }
+            if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
+                QJsonArray tcArr;
+                for (const auto &tc : msg.toolCalls.value()) {
+                    QJsonObject tcObj;
+                    tcObj.insert("id", tc.id);
+                    tcObj.insert("type", "function");
+                    QJsonObject fObj;
+                    fObj.insert("name", tc.name);
+                    fObj.insert("arguments", tc.arguments);
+                    tcObj.insert("function", fObj);
+                    tcArr.append(tcObj);
+                }
+                msgObj.insert("tool_calls", tcArr);
+            }
             inputArray.append(msgObj);
         }
         bodyObj.insert("input", inputArray);
+
+        if (request.tools.has_value() && !request.tools->isEmpty()) {
+            QJsonArray toolsArr;
+            for (const auto &tool : request.tools.value()) {
+                QJsonObject toolObj;
+                toolObj.insert("type", "function");
+                toolObj.insert("name", tool.name);
+                toolObj.insert("description", tool.description);
+                toolObj.insert("parameters", tool.parameters);
+                toolsArr.append(toolObj);
+            }
+            bodyObj.insert("tools", toolsArr);
+        }
 
         if (request.temperature.has_value()) {
             bodyObj.insert("temperature", request.temperature.value());

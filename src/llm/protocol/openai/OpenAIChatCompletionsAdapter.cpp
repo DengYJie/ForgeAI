@@ -48,11 +48,39 @@ namespace llm::protocol::openai {
             if (msg.role == domain::MessageRole::Tool && !msg.toolCallId.isEmpty()) {
                 msgObj.insert("tool_call_id", msg.toolCallId);
             }
-            // name field if exists could be added here
+            if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
+                QJsonArray tcArr;
+                for (const auto &tc : msg.toolCalls.value()) {
+                    QJsonObject tcObj;
+                    tcObj.insert("id", tc.id);
+                    tcObj.insert("type", "function");
+                    QJsonObject fObj;
+                    fObj.insert("name", tc.name);
+                    fObj.insert("arguments", tc.arguments);
+                    tcObj.insert("function", fObj);
+                    tcArr.append(tcObj);
+                }
+                msgObj.insert("tool_calls", tcArr);
+            }
             
             msgsArray.append(msgObj);
         }
         bodyObj.insert("messages", msgsArray);
+
+        if (request.tools.has_value() && !request.tools->isEmpty()) {
+            QJsonArray toolsArr;
+            for (const auto &tool : request.tools.value()) {
+                QJsonObject toolObj;
+                toolObj.insert("type", "function");
+                QJsonObject funcObj;
+                funcObj.insert("name", tool.name);
+                funcObj.insert("description", tool.description);
+                funcObj.insert("parameters", tool.parameters);
+                toolObj.insert("function", funcObj);
+                toolsArr.append(toolObj);
+            }
+            bodyObj.insert("tools", toolsArr);
+        }
 
         if (request.stream.value_or(true)) {
             bodyObj.insert("stream", true);

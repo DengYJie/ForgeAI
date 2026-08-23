@@ -97,6 +97,16 @@ namespace llm::protocol::gemini {
                     events.append(domain::llm::EventThinkingDelta{part.value("text").toString()});
                 } else if (part.contains("text")) {
                     events.append(domain::llm::EventTextDelta{part.value("text").toString()});
+                } else if (part.contains("functionCall") && part.value("functionCall").isObject()) {
+                    QJsonObject fnCall = part.value("functionCall").toObject();
+                    QString name = fnCall.value("name").toString();
+                    QJsonObject args = fnCall.value("args").toObject();
+                    QJsonDocument argsDoc(args);
+                    QString argsStr = QString::fromUtf8(argsDoc.toJson(QJsonDocument::Compact));
+                    QString callId = "gemini_call_" + name;
+                    events.append(domain::llm::EventToolCallStarted{callId, name});
+                    events.append(domain::llm::EventToolCallDelta{callId, argsStr});
+                    events.append(domain::llm::EventToolCallFinished{callId});
                 }
             }
         }

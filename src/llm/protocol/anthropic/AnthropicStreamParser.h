@@ -24,6 +24,7 @@ namespace llm::protocol::anthropic {
 
         QByteArray m_buffer;
         QString m_currentEventType;
+        QString m_currentToolCallId;
         bool m_isFinished = false;
     };
 

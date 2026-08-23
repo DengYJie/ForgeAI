@@ -1,6 +1,7 @@
 #include "OllamaStreamParser.h"
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QJsonValue>
 
 namespace llm::protocol::ollama {
@@ -93,6 +94,23 @@ namespace llm::protocol::ollama {
                 QString content = msgObj.value("content").toString();
                 if (!content.isEmpty()) {
                     events.append(domain::llm::EventTextDelta{content});
+                }
+            }
+
+            if (msgObj.contains("tool_calls") && msgObj.value("tool_calls").isArray()) {
+                QJsonArray tcArr = msgObj.value("tool_calls").toArray();
+                for (const auto &tcVal : tcArr) {
+                    if (!tcVal.isObject()) continue;
+                    QJsonObject tcObj = tcVal.toObject();
+                    QJsonObject funcObj = tcObj.value("function").toObject();
+                    QString name = funcObj.value("name").toString();
+                    QJsonObject args = funcObj.value("arguments").toObject();
+                    QJsonDocument argsDoc(args);
+                    QString argsStr = QString::fromUtf8(argsDoc.toJson(QJsonDocument::Compact));
+                    QString callId = "ollama_call_" + name;
+                    events.append(domain::llm::EventToolCallStarted{callId, name});
+                    events.append(domain::llm::EventToolCallDelta{callId, argsStr});
+                    events.append(domain::llm::EventToolCallFinished{callId});
                 }
             }
         }

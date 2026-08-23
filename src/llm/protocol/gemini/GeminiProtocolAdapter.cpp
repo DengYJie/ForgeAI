@@ -39,6 +39,45 @@ namespace llm::protocol::gemini {
             if (msg.role == domain::MessageRole::System) {
                 if (!systemPrompt.isEmpty()) systemPrompt += "\n\n";
                 systemPrompt += msg.content;
+            } else if (msg.role == domain::MessageRole::Tool) {
+                QJsonObject contentObj;
+                contentObj.insert("role", "user");
+                QJsonArray partsArray;
+                QJsonObject partObj;
+                QJsonObject fnRes;
+                fnRes.insert("name", msg.name.isEmpty() ? "tool" : msg.name);
+                QJsonObject resContent;
+                QJsonDocument parsedRes = QJsonDocument::fromJson(msg.content.toUtf8());
+                if (parsedRes.isObject()) {
+                    resContent = parsedRes.object();
+                } else {
+                    resContent.insert("output", msg.content);
+                }
+                fnRes.insert("response", resContent);
+                partObj.insert("functionResponse", fnRes);
+                partsArray.append(partObj);
+                contentObj.insert("parts", partsArray);
+                contentsArray.append(contentObj);
+            } else if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
+                QJsonObject contentObj;
+                contentObj.insert("role", "model");
+                QJsonArray partsArray;
+                if (!msg.content.isEmpty()) {
+                    QJsonObject partObj;
+                    partObj.insert("text", msg.content);
+                    partsArray.append(partObj);
+                }
+                for (const auto &tc : msg.toolCalls.value()) {
+                    QJsonObject partObj;
+                    QJsonObject fnCall;
+                    fnCall.insert("name", tc.name);
+                    QJsonDocument argsDoc = QJsonDocument::fromJson(tc.arguments.toUtf8());
+                    fnCall.insert("args", argsDoc.isObject() ? argsDoc.object() : QJsonObject{});
+                    partObj.insert("functionCall", fnCall);
+                    partsArray.append(partObj);
+                }
+                contentObj.insert("parts", partsArray);
+                contentsArray.append(contentObj);
             } else {
                 QJsonObject contentObj;
                 contentObj.insert("role", (msg.role == domain::MessageRole::Assistant) ? "model" : "user");
@@ -64,6 +103,22 @@ namespace llm::protocol::gemini {
         }
 
         bodyObj.insert("contents", contentsArray);
+
+        if (request.tools.has_value() && !request.tools->isEmpty()) {
+            QJsonArray toolsArr;
+            QJsonObject toolItem;
+            QJsonArray fnDecls;
+            for (const auto &tool : request.tools.value()) {
+                QJsonObject fnDecl;
+                fnDecl.insert("name", tool.name);
+                fnDecl.insert("description", tool.description);
+                fnDecl.insert("parameters", tool.parameters);
+                fnDecls.append(fnDecl);
+            }
+            toolItem.insert("functionDeclarations", fnDecls);
+            toolsArr.append(toolItem);
+            bodyObj.insert("tools", toolsArr);
+        }
 
         // generationConfig
         QJsonObject genConfig;

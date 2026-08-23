@@ -88,6 +88,15 @@ namespace llm::protocol::anthropic {
                     events.append(domain::llm::EventUsageUpdated{usage});
                 }
             }
+        } else if (type == "content_block_start") {
+            if (obj.contains("content_block") && obj.value("content_block").isObject()) {
+                QJsonObject cb = obj.value("content_block").toObject();
+                if (cb.value("type").toString() == "tool_use") {
+                    m_currentToolCallId = cb.value("id").toString();
+                    QString name = cb.value("name").toString();
+                    events.append(domain::llm::EventToolCallStarted{m_currentToolCallId, name});
+                }
+            }
         } else if (type == "content_block_delta") {
             if (obj.contains("delta") && obj.value("delta").isObject()) {
                 QJsonObject delta = obj.value("delta").toObject();
@@ -96,7 +105,14 @@ namespace llm::protocol::anthropic {
                     events.append(domain::llm::EventTextDelta{delta.value("text").toString()});
                 } else if (deltaType == "thinking_delta" && delta.contains("thinking")) {
                     events.append(domain::llm::EventThinkingDelta{delta.value("thinking").toString()});
+                } else if (deltaType == "input_json_delta" && delta.contains("partial_json")) {
+                    events.append(domain::llm::EventToolCallDelta{m_currentToolCallId, delta.value("partial_json").toString()});
                 }
+            }
+        } else if (type == "content_block_stop") {
+            if (!m_currentToolCallId.isEmpty()) {
+                events.append(domain::llm::EventToolCallFinished{m_currentToolCallId});
+                m_currentToolCallId.clear();
             }
         } else if (type == "message_delta") {
             if (obj.contains("usage") && obj.value("usage").isObject()) {

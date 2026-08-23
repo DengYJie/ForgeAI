@@ -48,6 +48,8 @@ namespace application::usecase::chat {
     Q_SIGNALS:
         void userMessageCreated(const QString &sessionId, const domain::conversation::Message &message);
         void tokenReceived(const QString &sessionId, const QString &token);
+        void thoughtReceived(const QString &sessionId, const QString &thought);
+        void toolCallReceived(const QString &sessionId, const domain::agent::ToolCall &toolCall);
         void replyGenerated(const QString &sessionId, const domain::conversation::Message &message);
         void generationFinished(const QString &sessionId);
         void generationFailed(const QString &sessionId, const QString &errorMessage);
@@ -64,6 +66,8 @@ namespace application::usecase::chat {
         QString m_currentSessionId;
         
         QString m_replyBuffer;
+        QString m_thoughtBuffer;
+        QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
     };
 
 } // namespace application::usecase::chat

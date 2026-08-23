@@ -1,6 +1,9 @@
 #pragma once
 #include <QString>
+#include <QList>
+#include <optional>
 #include "domain/Types.h"
+#include "domain/agent/ToolExecution.h"
 
 namespace domain::llm {
 
@@ -13,9 +16,10 @@ namespace domain::llm {
         domain::MessageRole role = domain::MessageRole::User; ///< 角色：System, User, Assistant, Tool
         QString content; ///< 消息文本正文
 
-        // 为工具调用预留字段
+        // 工具调用与结果字段
         QString name; ///< Tool 的名称或调用函数名
         QString toolCallId; ///< Tool 调用的关联 ID
+        std::optional<QList<domain::agent::ToolCall>> toolCalls; ///< Assistant 消息包含的工具调用指令
 
         bool operator==(const ChatMessage &other) const = default;
     };

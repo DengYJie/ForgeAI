@@ -92,6 +92,25 @@ namespace llm::protocol::openai_responses {
             if (obj.contains("delta") && !obj.value("delta").isNull()) {
                 events.append(domain::llm::EventThinkingDelta{obj.value("delta").toString()});
             }
+        } else if (type == "response.output_item.added") {
+            if (obj.contains("item") && obj.value("item").isObject()) {
+                QJsonObject itemObj = obj.value("item").toObject();
+                if (itemObj.value("type").toString() == "function_call") {
+                    QString callId = itemObj.value("call_id").toString();
+                    if (callId.isEmpty()) callId = itemObj.value("id").toString();
+                    QString name = itemObj.value("name").toString();
+                    events.append(domain::llm::EventToolCallStarted{callId, name});
+                }
+            }
+        } else if (type == "response.function_call_arguments.delta") {
+            QString callId = obj.value("call_id").toString();
+            QString delta = obj.value("delta").toString();
+            if (!delta.isEmpty()) {
+                events.append(domain::llm::EventToolCallDelta{callId, delta});
+            }
+        } else if (type == "response.function_call_arguments.done") {
+            QString callId = obj.value("call_id").toString();
+            events.append(domain::llm::EventToolCallFinished{callId});
         } else if (type == "response.completed") {
             if (obj.contains("response") && obj.value("response").isObject()) {
                 QJsonObject respObj = obj.value("response").toObject();
