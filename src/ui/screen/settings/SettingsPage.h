@@ -28,6 +28,8 @@ namespace ui::screen::settings {
 
         ~SettingsPage() override = default;
 
+        SettingsViewModel *viewModel() const { return m_viewModel; }
+
         void onThemeUpdated() override;
 
     protected:

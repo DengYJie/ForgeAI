@@ -256,6 +256,8 @@ set(PROJECT_SOURCES
         src/core/settings/providers/CoreSettingsProvider.cpp
         src/core/settings/providers/LoggingSettingsProvider.h
         src/core/settings/providers/LoggingSettingsProvider.cpp
+        src/core/settings/providers/ModelSettingsProvider.h
+        src/core/settings/providers/ModelSettingsProvider.cpp
         src/ui/screen/settings/ISettingsUIFactory.h
         src/ui/screen/settings/SettingsUIRegistry.h
         src/ui/screen/settings/SettingsUIRegistry.cpp
@@ -263,6 +265,22 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/factories/CoreSettingsUIFactory.cpp
         src/ui/screen/settings/factories/LoggingSettingsUIFactory.h
         src/ui/screen/settings/factories/LoggingSettingsUIFactory.cpp
+        src/ui/screen/settings/factories/ModelManagerSettingsUIFactory.h
+        src/ui/screen/settings/factories/ModelManagerSettingsUIFactory.cpp
+        src/ui/screen/settings/model_manager/ModelItemCard.h
+        src/ui/screen/settings/model_manager/ModelItemCard.cpp
+        src/ui/screen/settings/model_manager/ProviderNavigationItem.h
+        src/ui/screen/settings/model_manager/ProviderNavigationItem.cpp
+        src/ui/screen/settings/model_manager/ProviderNavigationPane.h
+        src/ui/screen/settings/model_manager/ProviderNavigationPane.cpp
+        src/ui/screen/settings/model_manager/ProviderDetailView.h
+        src/ui/screen/settings/model_manager/ProviderDetailView.cpp
+        src/ui/screen/settings/model_manager/AddProviderDialog.h
+        src/ui/screen/settings/model_manager/AddProviderDialog.cpp
+        src/ui/screen/settings/model_manager/AddModelDialog.h
+        src/ui/screen/settings/model_manager/AddModelDialog.cpp
+        src/ui/screen/settings/model_manager/ModelManagerDialog.h
+        src/ui/screen/settings/model_manager/ModelManagerDialog.cpp
         src/ui/screen/settings/SettingsViewModel.h
         src/ui/screen/settings/SettingsViewModel.cpp
         src/ui/screen/settings/SettingsPage.h

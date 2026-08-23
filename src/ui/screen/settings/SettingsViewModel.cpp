@@ -1,4 +1,5 @@
 #include "SettingsViewModel.h"
+#include "ui/screen/settings/model_manager/ModelManagerDialog.h"
 
 namespace ui::screen::settings {
     SettingsViewModel::SettingsViewModel(
@@ -44,6 +45,17 @@ namespace ui::screen::settings {
                 s.enabledModels = models;
             });
         }
+    }
+
+    void SettingsViewModel::openModelManager(QWidget *parent) {
+        auto *dialog = new model_manager::ModelManagerDialog(
+            m_useCases.modelRegistry.get(),
+            m_useCases.refreshModels,
+            parent
+        );
+        dialog->setAttribute(Qt::WA_DeleteOnClose, true);
+        connect(dialog, &QDialog::finished, this, &SettingsViewModel::refreshModels);
+        dialog->exec();
     }
 
     void SettingsViewModel::emitStateChanged() {

@@ -181,6 +181,7 @@ namespace app {
         s.saveSetting = m_saveSettingUseCase.get();
         s.getModels = m_getModelsUseCase.get();
         s.refreshModels = m_refreshModelsUseCase.get();
+        s.modelRegistry = m_modelRegistry;
         return s;
     }
 

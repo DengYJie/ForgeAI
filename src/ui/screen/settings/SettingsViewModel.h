@@ -45,6 +45,12 @@ namespace ui::screen::settings {
          */
         void refreshModels();
 
+        /**
+         * @brief 打开模型与服务商管理对话框
+         * @param parent 宿主父控件
+         */
+        void openModelManager(QWidget *parent = nullptr);
+
     Q_SIGNALS:
         void stateChanged(const ui::screen::settings::SettingsState &state);
 

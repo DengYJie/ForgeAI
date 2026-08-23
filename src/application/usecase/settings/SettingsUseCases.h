@@ -1,9 +1,14 @@
 #pragma once
 
+#include <memory>
 #include "application/usecase/settings/LoadSettingsUseCase.h"
 #include "application/usecase/settings/SaveSettingUseCase.h"
 #include "application/usecase/settings/GetModelsUseCase.h"
 #include "application/usecase/settings/RefreshModelsUseCase.h"
+
+namespace core::model {
+    class ModelRegistry;
+}
 
 namespace application::usecase::settings {
     /**
@@ -14,5 +19,6 @@ namespace application::usecase::settings {
         SaveSettingUseCase *saveSetting = nullptr;
         GetModelsUseCase *getModels = nullptr;
         RefreshModelsUseCase *refreshModels = nullptr;
+        std::shared_ptr<core::model::ModelRegistry> modelRegistry = nullptr;
     };
 } // namespace application::usecase::settings
