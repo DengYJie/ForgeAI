@@ -52,6 +52,7 @@ namespace ui::screen::chat {
 
         connect(m_sidebar, &ChatSidebar::newChatRequested, m_viewModel, &ChatViewModel::newSession);
         connect(m_sidebar, &ChatSidebar::sessionSelected, m_viewModel, &ChatViewModel::loadSession);
+        connect(m_sidebar, &ChatSidebar::sessionDeleted, m_viewModel, &ChatViewModel::deleteSession);
 
         // 2. 右侧主对话工作区 (第二 Pane)
         m_chatAreaWidget = new QWidget(this);
@@ -127,6 +128,9 @@ namespace ui::screen::chat {
     }
 
     void ChatPage::render(const ChatState &state) {
+        // 0. 侧边栏会话列表全量同步（内部 blockSignals 防止重入）
+        m_sidebar->setSessions(state.sessions, state.currentSessionId);
+
         // 1. 顶部会话标题
         m_header->setTitle(state.sessionTitle);
 

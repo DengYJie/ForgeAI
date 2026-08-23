@@ -7,21 +7,45 @@ namespace ui::screen::chat {
             QString result;
             for (const auto &block : msg.blocks) {
                 if (block.isText()) {
-                    if (!result.isEmpty()) {
-                        result += QLatin1Char('\n');
-                    }
+                    if (!result.isEmpty()) result += QLatin1Char('\n');
                     result += std::get<domain::conversation::TextBlock>(block.payload).text;
                 }
             }
             return result;
+        }
+
+        ChatSessionItemData makeSession(const QString &id, const QString &title, bool isPinned = false) {
+            ChatSessionItemData s;
+            s.id = id;
+            s.title = title;
+            s.isPinned = isPinned;
+            s.timestamp = QDateTime::currentMSecsSinceEpoch();
+            return s;
+        }
+
+        // 返回 messages 中第一条 User 消息的文本前 18 字（+…）作为自动标题
+        QString autoTitle(const QList<domain::conversation::Message> &messages) {
+            for (const auto &msg : messages) {
+                if (msg.role == domain::MessageRole::User) {
+                    const QString text = extractMessageText(msg);
+                    if (!text.trimmed().isEmpty()) {
+                        return text.left(18) + (text.length() > 18 ? QStringLiteral("...") : QString());
+                    }
+                }
+            }
+            return QStringLiteral("新对话");
         }
     } // namespace
 
     ChatViewModel::ChatViewModel(QObject *parent)
         : BaseViewModel<ChatViewModel, ChatState>(parent) {
         updateState([](ChatState &s) {
+            // 初始化演示会话列表
+            s.sessions.append(makeSession(QStringLiteral("session_1"), QStringLiteral("ForgeAI 架构与设计讨论"), true));
+            s.sessions.append(makeSession(QStringLiteral("session_2"), QStringLiteral("新对话")));
             s.currentSessionId = QStringLiteral("session_1");
             s.sessionTitle = QStringLiteral("ForgeAI 架构与设计讨论");
+            s.sessionTitleManuallyEdited = true; // 演示数据视为已命名
 
             domain::conversation::Message u1;
             u1.id = QUuid::createUuid();
@@ -78,10 +102,22 @@ namespace ui::screen::chat {
     ChatViewModel::~ChatViewModel() = default;
 
     void ChatViewModel::loadSession(const QString &sessionId) {
+        // 切换到已存在的会话（此处简化：清空消息，真实场景从存储加载）
         updateState([sessionId](ChatState &s) {
+            // 找到 sessions 中对应条目的标题
+            QString title = QStringLiteral("新对话");
+            bool manuallyEdited = false;
+            for (const auto &sess : s.sessions) {
+                if (sess.id == sessionId) {
+                    title = sess.title;
+                    // 若标题与默认标题相同，视为未命名
+                    manuallyEdited = (title != QStringLiteral("新对话"));
+                    break;
+                }
+            }
             s.currentSessionId = sessionId;
-            s.sessionTitle = QStringLiteral("会话 %1").arg(sessionId);
-            // 切换会话清空并重新初始化
+            s.sessionTitle = title;
+            s.sessionTitleManuallyEdited = manuallyEdited;
             s.messages.clear();
             s.isGenerating = false;
             recalculateAnchors(s);
@@ -89,8 +125,75 @@ namespace ui::screen::chat {
     }
 
     void ChatViewModel::newSession() {
-        static int newSessionIdx = 1;
-        loadSession(QStringLiteral("session_%1").arg(++newSessionIdx));
+        updateState([](ChatState &s) {
+            // ① 在现有会话列表中查找可复用的空白会话（无消息且标题未手动编辑）
+            for (const auto &sess : s.sessions) {
+                if (sess.title == QStringLiteral("新对话") && sess.id != s.currentSessionId) {
+                    // 已存在空白占位，直接切换
+                    s.currentSessionId = sess.id;
+                    s.sessionTitle = QStringLiteral("新对话");
+                    s.sessionTitleManuallyEdited = false;
+                    s.messages.clear();
+                    s.isGenerating = false;
+                    recalculateAnchors(s);
+                    return;
+                }
+            }
+
+            // ② 若当前会话本身就是空白，什么都不做
+            if (s.messages.isEmpty() && !s.sessionTitleManuallyEdited) {
+                return;
+            }
+
+            // ③ 没有可复用的空白会话 → 创建全新会话
+            static int idCounter = 100;
+            const QString newId = QStringLiteral("session_%1").arg(++idCounter);
+            const ChatSessionItemData newSess = makeSession(newId, QStringLiteral("新对话"));
+            s.sessions.prepend(newSess); // 新会话置顶显示
+
+            s.currentSessionId = newId;
+            s.sessionTitle = QStringLiteral("新对话");
+            s.sessionTitleManuallyEdited = false;
+            s.messages.clear();
+            s.isGenerating = false;
+            recalculateAnchors(s);
+        });
+    }
+
+    void ChatViewModel::deleteSession(const QString &sessionId) {
+        updateState([sessionId](ChatState &s) {
+            const int idx = [&]() {
+                for (int i = 0; i < s.sessions.size(); ++i) {
+                    if (s.sessions[i].id == sessionId) return i;
+                }
+                return -1;
+            }();
+            if (idx < 0) return;
+
+            s.sessions.removeAt(idx);
+
+            if (s.currentSessionId != sessionId) return;
+
+            // 被删除的是当前会话 → 回退到邻近会话
+            if (s.sessions.isEmpty()) {
+                // 列表清空 → 自动创建新空白会话
+                static int idCounter = 200;
+                const QString newId = QStringLiteral("session_%1").arg(++idCounter);
+                s.sessions.append(makeSession(newId, QStringLiteral("新对话")));
+                s.currentSessionId = newId;
+                s.sessionTitle = QStringLiteral("新对话");
+                s.sessionTitleManuallyEdited = false;
+            } else {
+                // 选中下一个，若 idx 超界则选最后一个
+                const int fallback = qMin(idx, s.sessions.size() - 1);
+                s.currentSessionId = s.sessions[fallback].id;
+                s.sessionTitle = s.sessions[fallback].title;
+                s.sessionTitleManuallyEdited = (s.sessionTitle != QStringLiteral("新对话"));
+            }
+            s.messages.clear();
+            s.isGenerating = false;
+            recalculateAnchors(s);
+        });
     }
 
     void ChatViewModel::sendMessage(const QString &text) {
@@ -111,13 +214,23 @@ namespace ui::screen::chat {
         assistantMsg.createdAt = QDateTime::currentDateTime();
         assistantMsg.blocks.append(domain::conversation::MessageBlock(
             domain::BlockType::Text,
-            domain::conversation::TextBlock{QStringLiteral("收到您的提问：“%1”。系统已完成处理并实时更新了侧边对话时间线。").arg(trimmed)}
+            domain::conversation::TextBlock{QStringLiteral("收到您的提问：\"%1\"。系统已完成处理并实时更新了侧边对话时间线。").arg(trimmed)}
         ));
 
         updateState([userMsg, assistantMsg](ChatState &s) {
+            const bool isFirstMessage = s.messages.isEmpty();
+
             s.messages.append(userMsg);
             s.messages.append(assistantMsg);
             s.isGenerating = false;
+
+            // 首条消息且标题未手动改过 → 自动以用户文本前 18 字更新会话标题
+            if (isFirstMessage && !s.sessionTitleManuallyEdited) {
+                const QString newTitle = autoTitle(s.messages);
+                s.sessionTitle = newTitle;
+                syncSessionTitle(s, s.currentSessionId, newTitle);
+            }
+
             recalculateAnchors(s);
         });
     }
@@ -172,9 +285,7 @@ namespace ui::screen::chat {
                         previewText = assistantText.left(60) + (assistantText.length() > 60 ? QStringLiteral("...") : QString());
                         break;
                     }
-                    if (s.messages[j].role == domain::MessageRole::User) {
-                        break;
-                    }
+                    if (s.messages[j].role == domain::MessageRole::User) break;
                 }
 
                 s.anchors.append({msg.id.toString(), title, previewText});
@@ -182,6 +293,15 @@ namespace ui::screen::chat {
         }
         if (s.activeAnchorIndex < 0 || s.activeAnchorIndex >= s.anchors.size()) {
             s.activeAnchorIndex = s.anchors.isEmpty() ? -1 : (s.anchors.size() - 1);
+        }
+    }
+
+    void ChatViewModel::syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title) {
+        for (auto &sess : s.sessions) {
+            if (sess.id == sessionId) {
+                sess.title = title;
+                return;
+            }
         }
     }
 

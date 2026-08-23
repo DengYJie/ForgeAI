@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QWidget>
+#include <QList>
 #include <QPointer>
 #include <FluentQt/Foundation.h>
 #include <FluentQt/Design.h>
+#include "ChatSessionListModel.h"
 
 namespace fluent::basicinput {
     class Button;
@@ -50,6 +52,13 @@ namespace ui::screen::chat {
          * @brief 设置会话置顶状态
          */
         void setSessionPinned(const QString &id, bool pinned);
+
+        /**
+         * @brief 批量同步会话列表（由 ViewModel render 驱动，替代逐条增删）
+         * @param sessions 全量会话列表
+         * @param currentId 当前激活的会话 ID
+         */
+        void setSessions(const QList<ChatSessionItemData> &sessions, const QString &currentId);
 
         /**
          * @brief 设置会话标题

@@ -3,14 +3,19 @@
 #include "ui/base/BaseViewModel.h"
 #include "domain/conversation/Message.h"
 #include "ui/widget/chat/ChatAnchorBar.h"
+#include "ChatSessionListModel.h"
 #include <QString>
 #include <QList>
 #include <QUuid>
 
 namespace ui::screen::chat {
     struct ChatState {
+        // 会话列表
+        QList<ChatSessionItemData> sessions;
         QString currentSessionId;
         QString sessionTitle = QStringLiteral("新对话");
+        bool sessionTitleManuallyEdited = false; ///< 用户是否手动改过标题，若是则首条消息不覆盖
+
         QString currentModelName = QStringLiteral("DeepSeek-R1");
         bool isGenerating = false;
         QString statusMessage;
@@ -37,6 +42,8 @@ namespace ui::screen::chat {
 
         void newSession();
 
+        void deleteSession(const QString &sessionId);
+
         void sendMessage(const QString &text);
 
         void stopGeneration();
@@ -55,5 +62,8 @@ namespace ui::screen::chat {
 
     private:
         static void recalculateAnchors(ChatState &s);
+
+        // 在会话列表中同步更新指定 session 的 title
+        static void syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title);
     };
 } // namespace ui::screen::chat

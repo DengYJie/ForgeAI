@@ -121,10 +121,24 @@ namespace ui::screen::chat {
                 });
 
         mainLayout->addWidget(m_listView, 1);
+        // 会话列表数据由 ChatViewModel 通过 render() 分发，无需在此硬编码
+    }
 
-        // 默认添加一个新会话并选中
-        addSession(QStringLiteral("default_session"), tr("新对话"), false);
-        selectSession(QStringLiteral("default_session"));
+    void ChatSidebar::setSessions(const QList<ChatSessionItemData> &sessions, const QString &currentId) {
+        if (!m_model) return;
+
+        // 断开 currentChanged 信号防止 ViewModel 重入
+        m_listView->selectionModel()->blockSignals(true);
+        m_model->setSessions(sessions);
+        m_listView->selectionModel()->blockSignals(false);
+
+        // 还原选中
+        if (!currentId.isEmpty()) {
+            const int row = m_model->indexOf(currentId);
+            if (row >= 0) {
+                m_listView->setCurrentIndex(m_model->index(row, 0));
+            }
+        }
     }
 
     void ChatSidebar::addSession(const QString &id, const QString &title, bool isPinned) {
