@@ -57,6 +57,17 @@ namespace ui::widget::message {
         m_followTimer->setSingleShot(true);
         m_followTimer->setInterval(16);
         connect(m_followTimer, &QTimer::timeout, this, &MessageListView::executeFollowBottom);
+
+        m_visibleCheckTimer = new QTimer(this);
+        m_visibleCheckTimer->setSingleShot(true);
+        m_visibleCheckTimer->setInterval(25);
+        connect(m_visibleCheckTimer, &QTimer::timeout, this, &MessageListView::checkTopVisibleMessage);
+
+        connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
+            if (m_visibleCheckTimer && !m_visibleCheckTimer->isActive()) {
+                m_visibleCheckTimer->start();
+            }
+        });
     }
 
     void MessageListView::setCustomScrollBar(QScrollBar* scrollBar) {
@@ -234,6 +245,41 @@ namespace ui::widget::message {
     void MessageListView::scrollToBottom() {
         m_autoScrollToBottom = true;
         scheduleFollowBottom();
+    }
+
+    void MessageListView::scrollToMessage(const QUuid& id) {
+        if (!m_cardMap.contains(id) || !m_container || !viewport()) return;
+        m_autoScrollToBottom = false;
+        m_scrollAnimation->stop();
+        MessageCardWidget* card = m_cardMap[id];
+        const int targetY = card->mapTo(m_container, QPoint(0, 0)).y() - 16;
+        verticalScrollBar()->setValue(qBound(0, targetY, verticalScrollBar()->maximum()));
+    }
+
+    void MessageListView::scrollToMessage(const QString& idString) {
+        scrollToMessage(QUuid::fromString(idString));
+    }
+
+    void MessageListView::checkTopVisibleMessage() {
+        if (m_cardMap.isEmpty() || !m_container || !viewport()) return;
+        const int viewTop = verticalScrollBar()->value();
+        QUuid topId;
+        for (int i = 0; i < m_layout->count(); ++i) {
+            QLayoutItem* item = m_layout->itemAt(i);
+            if (!item) continue;
+            QWidget* w = item->widget();
+            auto* card = qobject_cast<MessageCardWidget*>(w);
+            if (!card) continue;
+            const int cardTop = card->mapTo(m_container, QPoint(0, 0)).y();
+            if (cardTop + card->height() > viewTop + 10) {
+                topId = card->messageId();
+                break;
+            }
+        }
+        if (!topId.isNull() && topId != m_lastTopVisibleId) {
+            m_lastTopVisibleId = topId;
+            emit topVisibleMessageChanged(topId);
+        }
     }
 
     void MessageListView::scheduleFollowBottom() {

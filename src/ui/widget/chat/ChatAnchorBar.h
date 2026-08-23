@@ -13,6 +13,8 @@ namespace ui::widget::chat {
         QString id;
         QString title;
         QString previewText;
+
+        bool operator==(const ChatAnchorItem &other) const = default;
     };
 
     class ChatAnchorPreviewCard : public QWidget, public fluent::FluentElement {
@@ -47,6 +49,8 @@ namespace ui::widget::chat {
         void setAnchors(const QList<ChatAnchorItem> &anchors);
 
         void addAnchor(const QString &id, const QString &title, const QString &previewText = QString());
+
+        void updateAnchorPreview(const QString &id, const QString &previewText);
 
         void removeAnchor(const QString &id);
 

@@ -110,6 +110,15 @@ namespace ui::widget::chat {
         update();
     }
 
+    void ChatAnchorBar::updateAnchorPreview(const QString &id, const QString &previewText) {
+        for (auto &item : m_items) {
+            if (item.id == id) {
+                item.previewText = previewText;
+                break;
+            }
+        }
+    }
+
     void ChatAnchorBar::removeAnchor(const QString &id) {
         for (int i = 0; i < m_items.size(); ++i) {
             if (m_items[i].id == id) {

@@ -38,12 +38,20 @@ namespace ui::widget::message {
         // 手动平滑滚到底部
         void scrollToBottom();
 
+        // 瞬间直达定位到指定消息
+        void scrollToMessage(const QUuid& id);
+        void scrollToMessage(const QString& idString);
+
         // 全局头像与头部显示开关控制
         void setAvatarVisible(bool visible);
         bool isAvatarVisible() const { return m_avatarVisible; }
 
         void setHeaderVisible(bool visible);
         bool isHeaderVisible() const { return m_headerVisible; }
+
+    Q_SIGNALS:
+        // 视口滚动时触发，通知当前位于视口顶部的消息ID
+        void topVisibleMessageChanged(const QUuid& id);
 
     protected:
         void resizeEvent(QResizeEvent* event) override;
@@ -56,6 +64,7 @@ namespace ui::widget::message {
         void executeFollowBottom();
         void scheduleFollowBottom();
         void onCardHeightChanged();
+        void checkTopVisibleMessage();
 
     private:
         void setupUi();
@@ -73,8 +82,10 @@ namespace ui::widget::message {
         // 平滑滚动相关
         QScrollBar* m_customScrollBar = nullptr;
         QTimer* m_followTimer = nullptr;
+        QTimer* m_visibleCheckTimer = nullptr;
         QVariantAnimation* m_scrollAnimation = nullptr;
         bool m_autoScrollToBottom = true;
+        QUuid m_lastTopVisibleId;
 
         bool m_avatarVisible = true;
         bool m_headerVisible = true;
