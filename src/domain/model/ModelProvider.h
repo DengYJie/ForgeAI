@@ -11,10 +11,11 @@ namespace domain::model {
      * @brief 服务商协议驱动类型
      */
     enum class ProviderType {
-        OpenAICompatible,   ///< OpenAI 兼容协议
-        Anthropic,          ///< Anthropic 原生 Messages 协议
-        Ollama,             ///< 本地 Ollama 协议 (支持模型检测与拉取)
-        GoogleGemini        ///< Google Gemini 原生协议
+        OpenAIChatCompletionsCompatible, ///< OpenAI 兼容协议 (基于 /v1/chat/completions)
+        OpenAIResponses,                 ///< OpenAI 原生 Responses API
+        Anthropic,                       ///< Anthropic 原生 Messages 协议
+        Ollama,                          ///< 本地 Ollama 协议 (支持模型检测与拉取)
+        GoogleGemini                     ///< Google Gemini 原生协议
     };
 
     /**
@@ -26,7 +27,7 @@ namespace domain::model {
         QString icon;                         ///< 服务商图标路径或内置图标标识
         QString docUrl;                       ///< 官方文档或 API 说明地址
         QString envVarName;                   ///< 对应的环境变量名
-        ProviderType type = ProviderType::OpenAICompatible; ///< 协议驱动类型
+        ProviderType type = ProviderType::OpenAIChatCompletionsCompatible; ///< 协议驱动类型
 
         QString baseUrl;                      ///< API 基础请求地址
         QString apiKey;                       ///< API 密钥
