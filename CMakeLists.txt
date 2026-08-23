@@ -243,6 +243,8 @@ set(PROJECT_SOURCES
 
         src/app/ApplicationContext.h
         src/app/ApplicationContext.cpp
+        src/app/Application.h
+        src/app/Application.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
