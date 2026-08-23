@@ -82,6 +82,10 @@ set(PROJECT_SOURCES
         src/core/logging/ILogger.h
         src/core/logging/LoggingService.h
         src/core/logging/LoggingService.cpp
+        src/core/logging/DiagnosticExporter.h
+        src/core/logging/DiagnosticExporter.cpp
+        src/core/logging/LoggingSettingsService.h
+        src/core/logging/LoggingSettingsService.cpp
 
         src/network/HttpRequest.h
         src/network/HttpOperation.h
@@ -250,11 +254,15 @@ set(PROJECT_SOURCES
         src/core/settings/ISettingsProvider.h
         src/core/settings/providers/CoreSettingsProvider.h
         src/core/settings/providers/CoreSettingsProvider.cpp
+        src/core/settings/providers/LoggingSettingsProvider.h
+        src/core/settings/providers/LoggingSettingsProvider.cpp
         src/ui/screen/settings/ISettingsUIFactory.h
         src/ui/screen/settings/SettingsUIRegistry.h
         src/ui/screen/settings/SettingsUIRegistry.cpp
         src/ui/screen/settings/factories/CoreSettingsUIFactory.h
         src/ui/screen/settings/factories/CoreSettingsUIFactory.cpp
+        src/ui/screen/settings/factories/LoggingSettingsUIFactory.h
+        src/ui/screen/settings/factories/LoggingSettingsUIFactory.cpp
         src/ui/screen/settings/SettingsViewModel.h
         src/ui/screen/settings/SettingsViewModel.cpp
         src/ui/screen/settings/SettingsPage.h

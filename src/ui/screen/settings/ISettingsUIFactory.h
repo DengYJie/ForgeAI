@@ -20,15 +20,21 @@ namespace ui::screen::settings {
     };
 } // namespace ui::screen::settings
 
-#define _REGISTER_SETTINGS_UI_IMPL(FactoryClass, Counter) \
+#define _SETTINGS_UI_CONCAT_IMPL(a, b) a##b
+#define _SETTINGS_UI_CONCAT(a, b) _SETTINGS_UI_CONCAT_IMPL(a, b)
+
+#define _REGISTER_SETTINGS_UI_IMPL2(FactoryClass, Line) \
     namespace { \
-        struct _SettingsUIAutoRegister_##Counter { \
-            _SettingsUIAutoRegister_##Counter() { \
+        struct _SETTINGS_UI_CONCAT(_SettingsUIAutoRegister_, Line) { \
+            _SETTINGS_UI_CONCAT(_SettingsUIAutoRegister_, Line)() { \
                 ::ui::screen::settings::SettingsUIRegistry::instance().registerFactory( \
                     std::make_shared<FactoryClass>()); \
             } \
-        } _s_auto_register_ui_##Counter; \
+        } _SETTINGS_UI_CONCAT(_s_auto_register_ui_, Line); \
     }
+
+#define _REGISTER_SETTINGS_UI_IMPL(FactoryClass, Counter) \
+    _REGISTER_SETTINGS_UI_IMPL2(FactoryClass, Counter)
 
 #define REGISTER_SETTINGS_UI(FactoryClass) \
     _REGISTER_SETTINGS_UI_IMPL(FactoryClass, __COUNTER__)

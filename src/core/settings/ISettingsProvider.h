@@ -31,15 +31,21 @@ namespace core::settings {
     };
 } // namespace core::settings
 
-#define _REGISTER_SETTINGS_PROVIDER_IMPL(ProviderClass, Counter) \
+#define _SETTINGS_PROVIDER_CONCAT_IMPL(a, b) a##b
+#define _SETTINGS_PROVIDER_CONCAT(a, b) _SETTINGS_PROVIDER_CONCAT_IMPL(a, b)
+
+#define _REGISTER_SETTINGS_PROVIDER_IMPL2(ProviderClass, Line) \
     namespace { \
-        struct _SettingsProviderAutoRegister_##Counter { \
-            _SettingsProviderAutoRegister_##Counter() { \
+        struct _SETTINGS_PROVIDER_CONCAT(_SettingsProviderAutoRegister_, Line) { \
+            _SETTINGS_PROVIDER_CONCAT(_SettingsProviderAutoRegister_, Line)() { \
                 ::core::settings::SettingsRegistry::instance().registerProvider( \
                     std::make_shared<ProviderClass>()); \
             } \
-        } _s_auto_register_provider_##Counter; \
+        } _SETTINGS_PROVIDER_CONCAT(_s_auto_register_provider_, Line); \
     }
+
+#define _REGISTER_SETTINGS_PROVIDER_IMPL(ProviderClass, Counter) \
+    _REGISTER_SETTINGS_PROVIDER_IMPL2(ProviderClass, Counter)
 
 #define REGISTER_SETTINGS_PROVIDER(ProviderClass) \
     _REGISTER_SETTINGS_PROVIDER_IMPL(ProviderClass, __COUNTER__)
