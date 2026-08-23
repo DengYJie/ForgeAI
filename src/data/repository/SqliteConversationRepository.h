@@ -27,9 +27,6 @@ namespace data::repository {
 
         void deleteConversation(const QUuid &id) override;
 
-        QList<domain::conversation::Turn> getTurnsByConversationId(const QUuid &conversationId) override;
-
-        void saveTurn(const domain::conversation::Turn &turn) override;
 
     private:
         QString m_connectionName;

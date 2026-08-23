@@ -112,28 +112,29 @@ namespace core::context {
             availableHistoryBudget = 1000; // 兜底至少容纳 1 轮完整交互
         }
 
-        // 3. 按 Turn 进行原子分组逆序装配 (Turn-Level Atomic Grouping)
-        // 先将 fullHistory 按 turnId 分组，杜绝 ToolCall 与 ToolResult 孤儿断裂！
-        QList<QList<domain::conversation::Message> > turnGroups;
+        // 3. 按交互树原子组逆序装配 (Tree-Branch Atomic Grouping)
+        // 从上游传入的 fullHistory 已是沿 parentId 回溯好的单一扁平分支。
+        // 我们以 User 消息为边界进行分组，杜绝 ToolCall 与 ToolResult 孤儿断裂！
+        QList<QList<domain::conversation::Message> > treeGroups;
         for (const auto &msg: fullHistory) {
-            if (turnGroups.isEmpty() || turnGroups.last().first().turnId != msg.turnId) {
-                turnGroups.append(QList<domain::conversation::Message>{msg});
+            if (treeGroups.isEmpty() || msg.role == domain::MessageRole::User) {
+                treeGroups.append(QList<domain::conversation::Message>{msg});
             } else {
-                turnGroups.last().append(msg);
+                treeGroups.last().append(msg);
             }
         }
 
         QList<domain::conversation::Message> selectedHistory;
         int currentHistoryTokens = 0;
 
-        // 从最新的 Turn 往前回溯装填
-        for (int i = turnGroups.size() - 1; i >= 0; --i) {
-            const auto &turnMsgs = turnGroups.at(i);
-            int turnTokens = 0;
+        // 从最新的原子组往前回溯装填
+        for (int i = treeGroups.size() - 1; i >= 0; --i) {
+            const auto &groupMsgs = treeGroups.at(i);
+            int groupTokens = 0;
 
-            // 处理每条消息（应用 Tool Output Clamping 并计算该 Turn 总 Token）
-            QList<domain::conversation::Message> clampedTurnMsgs = turnMsgs;
-            for (auto &msg: clampedTurnMsgs) {
+            // 处理每条消息（应用 Tool Output Clamping 并计算该组总 Token）
+            QList<domain::conversation::Message> clampedGroupMsgs = groupMsgs;
+            for (auto &msg: clampedGroupMsgs) {
                 for (auto &block: msg.blocks) {
                     if (block.type == domain::BlockType::ToolResult) {
                         if (auto *resBlock = std::get_if<domain::conversation::ToolResultBlock>(&block.payload)) {
@@ -143,19 +144,19 @@ namespace core::context {
                         }
                     }
                 }
-                turnTokens += estimateMessageTokens(msg);
+                groupTokens += estimateMessageTokens(msg);
             }
 
             // 超出预算则停止
-            if (currentHistoryTokens + turnTokens > availableHistoryBudget && !selectedHistory.isEmpty()) {
+            if (currentHistoryTokens + groupTokens > availableHistoryBudget && !selectedHistory.isEmpty()) {
                 break;
             }
 
-            // 将整轮 Turn 原子性地插入到头部
-            for (int j = clampedTurnMsgs.size() - 1; j >= 0; --j) {
-                selectedHistory.prepend(clampedTurnMsgs.at(j));
+            // 将整个组原子性地插入到头部
+            for (int j = clampedGroupMsgs.size() - 1; j >= 0; --j) {
+                selectedHistory.prepend(clampedGroupMsgs.at(j));
             }
-            currentHistoryTokens += turnTokens;
+            currentHistoryTokens += groupTokens;
         }
 
         // 4. 角色清洗（Role Sanitization，确保裁剪后第一条历史记录必须是 User，兼容 Claude 规范）

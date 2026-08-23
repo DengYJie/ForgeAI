@@ -30,9 +30,17 @@ namespace data::repository {
 
         QJsonObject msgObj;
         msgObj["id"] = message.id.toString(QUuid::WithoutBraces);
-        msgObj["turnId"] = message.turnId.toString(QUuid::WithoutBraces);
+        if (!message.parentId.isNull()) {
+            msgObj["parentId"] = message.parentId.toString(QUuid::WithoutBraces);
+        }
         msgObj["role"] = static_cast<int>(message.role);
         msgObj["status"] = static_cast<int>(message.status);
+        if (!message.errorMessage.isEmpty()) {
+            msgObj["errorMessage"] = message.errorMessage;
+        }
+        if (!message.turnOptions.isEmpty()) {
+            msgObj["turnOptions"] = message.turnOptions;
+        }
         msgObj["createdAt"] = message.createdAt.toMSecsSinceEpoch();
 
         QJsonArray blocksArray;
@@ -116,9 +124,17 @@ namespace data::repository {
             QJsonObject msgObj = doc.object();
             domain::conversation::Message msg;
             msg.id = QUuid(msgObj["id"].toString());
-            msg.turnId = QUuid(msgObj["turnId"].toString());
+            if (msgObj.contains("parentId")) {
+                msg.parentId = QUuid(msgObj["parentId"].toString());
+            }
             msg.role = static_cast<domain::MessageRole>(msgObj["role"].toInt());
             msg.status = static_cast<domain::MessageStatus>(msgObj["status"].toInt());
+            if (msgObj.contains("errorMessage")) {
+                msg.errorMessage = msgObj["errorMessage"].toString();
+            }
+            if (msgObj.contains("turnOptions")) {
+                msg.turnOptions = msgObj["turnOptions"].toObject();
+            }
             msg.createdAt = QDateTime::fromMSecsSinceEpoch(msgObj["createdAt"].toVariant().toLongLong());
 
             QJsonArray blocksArray = msgObj["blocks"].toArray();
@@ -184,11 +200,7 @@ namespace data::repository {
         return messages;
     }
 
-    QList<domain::conversation::Message> JsonlMessageRepository::getMessagesByTurnId(const QUuid &turnId) {
-        // 由于 JSONL 是按会话分片的，单独按 Turn 取消息比较少见。
-        // 一般我们会把整个会话取出来再在 ViewModel 里过滤，或是在入参里带上 conversationId。
-        return {};
-    }
+
 
     void JsonlMessageRepository::deleteTranscript(const QUuid &conversationId) {
         QFile::remove(getFilePath(conversationId));

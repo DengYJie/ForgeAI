@@ -22,10 +22,7 @@ namespace domain::repository {
          */
         virtual QList<domain::conversation::Message> getMessagesByConversationId(const QUuid &conversationId) = 0;
 
-        /**
-         * @brief 获取指定交互回合的消息列表
-         */
-        virtual QList<domain::conversation::Message> getMessagesByTurnId(const QUuid &turnId) = 0;
+
 
         /**
          * @brief 清理指定会话的物理日志文件

@@ -15,7 +15,7 @@ namespace core::context {
      */
     struct AssembledContext {
         QString systemPrompt;                         ///< 组装好人设、项目工作区约束、规则与按需 Skill 索引的系统提示词
-        QList<domain::conversation::Message> history; ///< 经过严格 Token 预算与原子 Turn 裁剪后的历史消息流
+        QList<domain::conversation::Message> history; ///< 经过严格 Token 预算与原子对话树分支裁剪后的历史消息流
         QList<domain::agent::ToolDefinition> tools;   ///< 当前激活的内置 C++ 工具与外部 MCP 工具列表
         int estimatedTokens = 0;                      ///< 本次请求预估消耗的总 Token 数
     };

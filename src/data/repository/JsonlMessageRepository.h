@@ -19,7 +19,7 @@ namespace data::repository {
 
         QList<domain::conversation::Message> getMessagesByConversationId(const QUuid &conversationId) override;
 
-        QList<domain::conversation::Message> getMessagesByTurnId(const QUuid &turnId) override;
+
 
         void deleteTranscript(const QUuid &conversationId) override;
 

@@ -16,7 +16,7 @@ namespace domain::conversation {
         std::optional<QUuid> projectId; ///< 关联的项目 ID（普通全局对话为 std::nullopt，Agent 模式绑定具体项目）
         std::optional<QUuid> agentId; ///< 绑定的智能体 ID（普通对话为 std::nullopt）
         QString modelId; ///< 当前会话使用的模型名称 (如 "deepseek-v3")
-        domain::ConversationMode mode = domain::ConversationMode::Chat; ///< 会话运行模式
+        domain::ConversationMode mode = domain::ConversationMode::Normal; ///< 会话运行模式
 
         bool isPinned = false; ///< 是否置顶
         QDateTime createdAt; ///< 创建时间

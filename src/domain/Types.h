@@ -10,18 +10,6 @@ namespace domain {
     };
 
     /**
-     * @brief 交互回合状态
-     */
-    enum class TurnStatus {
-        Pending, ///< 排队等待处理
-        Running, ///< 正在生成或执行工具
-        Waiting, ///< 等待外部输入或用户确认
-        Completed, ///< 本回合已顺利完成
-        Failed, ///< 执行失败或网络异常
-        Cancelled ///< 用户手动取消或中止
-    };
-
-    /**
      * @brief 消息发送者角色
      */
     enum class MessageRole {
