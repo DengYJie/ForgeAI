@@ -45,6 +45,10 @@ namespace ui::screen::chat {
     private:
         void setupUi();
 
+        /**
+         * @brief 响应单向状态流更新，对界面全部组件执行声明式渲染
+         * @param state 权威不可变状态快照
+         */
         void render(const ChatState &state);
 
         ChatViewModel *m_viewModel = nullptr;

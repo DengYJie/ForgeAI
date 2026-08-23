@@ -16,7 +16,7 @@ namespace ui::widget::message::blocks {
 class FlatExpander;
 
 /**
- * @brief 思考链展示块（基于 FlatExpander 实现平滑折叠与耗时展示，仿 Cherry Studio ThinkingBlock）
+ * @brief 思考链展示块（基于 FlatExpander 实现平滑折叠与耗时展示）
  */
 class ThinkingBlockWidget : public QWidget, public fluent::FluentElement {
     Q_OBJECT

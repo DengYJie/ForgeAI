@@ -9,7 +9,7 @@ namespace domain::repository {
 
 namespace services::conversation {
     /**
-     * @brief 会话管理服务实现（承载 Cherry Studio 式的会话复用、自动降级与数据缓存）
+     * @brief 会话管理服务实现（承载会话复用、自动降级与数据缓存）
      */
     class ConversationService : public domain::service::IConversationService {
         Q_OBJECT

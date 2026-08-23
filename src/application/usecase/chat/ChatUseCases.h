@@ -9,14 +9,15 @@
 
 namespace application::usecase::chat {
     /**
-     * @brief 对话界面业务用例聚合容器
+     * @brief 对话界面业务用例聚合容器 (UseCase Bundle)
+     * @details 聚合 ChatViewModel 所需的所有单一职责用例指针，简化依赖传递并保持各用例独立性。
      */
     struct ChatUseCases {
-        SendMessageUseCase *sendMessage = nullptr;
-        StopGenerationUseCase *stopGeneration = nullptr;
-        conversation::LoadSessionsUseCase *loadSessions = nullptr;
-        conversation::LoadSessionDetailUseCase *loadSessionDetail = nullptr;
-        conversation::CreateSessionUseCase *createSession = nullptr;
-        conversation::DeleteSessionUseCase *deleteSession = nullptr;
+        SendMessageUseCase *sendMessage = nullptr;                             ///< 发送消息并流式生成回复用例
+        StopGenerationUseCase *stopGeneration = nullptr;                       ///< 中止大模型生成任务用例
+        conversation::LoadSessionsUseCase *loadSessions = nullptr;             ///< 加载会话元数据列表用例
+        conversation::LoadSessionDetailUseCase *loadSessionDetail = nullptr;   ///< 加载会话历史消息流详情用例
+        conversation::CreateSessionUseCase *createSession = nullptr;           ///< 占位复用/新建会话用例
+        conversation::DeleteSessionUseCase *deleteSession = nullptr;           ///< 删除会话并邻近回退用例
     };
 } // namespace application::usecase::chat

@@ -9,7 +9,7 @@ class QLabel;
 namespace ui::widget::message::blocks {
 
 /**
- * @brief 图片展示块（仿 Cherry Studio ImageBlock）
+ * @brief 图片展示块
  *
  * 支持本地图片缓存加载、远程预览与圆角裁剪。
  */

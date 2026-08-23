@@ -16,7 +16,7 @@ class FlatExpander;
 }
 
 /**
- * @brief 基于 FlatExpander 实现的执行过程折叠容器 (仿 Cherry Studio MessageProcessGroup)
+ * @brief 基于 FlatExpander 实现的执行过程折叠容器
  */
 class ProcessGroupWidget : public QWidget, public fluent::FluentElement {
     Q_OBJECT

@@ -8,7 +8,8 @@ namespace domain::service {
 
 namespace application::usecase::chat {
     /**
-     * @brief 中止当前生成任务用例
+     * @brief 中止当前生成任务业务用例
+     * @details 负责协调 IChatService 立即中止指定/当前正在进行的异步生成流。
      */
     class StopGenerationUseCase : public QObject {
         Q_OBJECT
@@ -21,6 +22,9 @@ namespace application::usecase::chat {
 
         ~StopGenerationUseCase() override = default;
 
+        /**
+         * @brief 执行终止当前生成任务
+         */
         void execute();
 
     private:

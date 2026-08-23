@@ -33,7 +33,7 @@ namespace domain::service {
         virtual void saveMessages(const QString &sessionId, const QList<domain::conversation::Message> &messages) = 0;
 
         /**
-         * @brief 遵循 Cherry Studio 逻辑：复用已有的空白未命名会话，若无则新建
+         * @brief 复用已有的空白未命名会话，若无则新建
          * @param sessions 会话列表引用（会被就地更新）
          * @param currentSessionId 当前激活的会话 ID
          * @return 激活的目标会话 ID
