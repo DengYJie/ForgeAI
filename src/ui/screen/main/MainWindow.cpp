@@ -13,10 +13,10 @@
 
 namespace ui::screen::main {
     MainWindow::MainWindow(
-        const application::usecase::chat::ChatUseCases &chatUseCases,
+        ui::screen::chat::ChatViewModel *chatViewModel,
         QWidget *parent
     ) : NavigationWindow(parent),
-        m_chatUseCases(chatUseCases) {
+        m_chatViewModel(chatViewModel) {
         setupUi();
         setupViewModel();
         setupConnections();
@@ -32,7 +32,7 @@ namespace ui::screen::main {
         navigationView()->setPaneOpen(false);
         
         // 1. 注册顶部导航项：对话、工作、知识库
-        auto *chatPage = new ui::screen::chat::ChatPage(m_chatUseCases, this);
+        auto *chatPage = new ui::screen::chat::ChatPage(m_chatViewModel, this);
         addSubInterface(
             QStringLiteral("chat"),
             chatPage,

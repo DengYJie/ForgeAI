@@ -16,16 +16,11 @@ namespace ui::screen::chat {
     using namespace ui::widget::message;
 
     ChatPage::ChatPage(
-        const application::usecase::chat::ChatUseCases &useCases,
+        ChatViewModel *viewModel,
         QWidget *parent
     ) : BasePage(parent),
-        m_useCases(useCases) {
-        setupViewModel();
+        m_viewModel(viewModel) {
         setupUi();
-    }
-
-    void ChatPage::setupViewModel() {
-        m_viewModel = new ChatViewModel(m_useCases, this);
     }
 
     void ChatPage::setupUi() {
@@ -53,9 +48,11 @@ namespace ui::screen::chat {
             sidebarOptions
         );
 
-        connect(m_sidebar, &ChatSidebar::newChatRequested, m_viewModel, &ChatViewModel::newSession);
-        connect(m_sidebar, &ChatSidebar::sessionSelected, m_viewModel, &ChatViewModel::loadSession);
-        connect(m_sidebar, &ChatSidebar::sessionDeleted, m_viewModel, &ChatViewModel::deleteSession);
+        if (m_viewModel) {
+            connect(m_sidebar, &ChatSidebar::newChatRequested, m_viewModel, &ChatViewModel::newSession);
+            connect(m_sidebar, &ChatSidebar::sessionSelected, m_viewModel, &ChatViewModel::loadSession);
+            connect(m_sidebar, &ChatSidebar::sessionDeleted, m_viewModel, &ChatViewModel::deleteSession);
+        }
 
         // 2. 右侧主对话工作区 (第二 Pane)
         m_chatAreaWidget = new QWidget(this);
@@ -106,20 +103,22 @@ namespace ui::screen::chat {
         chatAreaLayout->addWidget(inputContainer);
 
         // 点击锚点瞬间定位到目标消息
-        connect(m_anchorBar, &ChatAnchorBar::anchorClicked, this, [this](int index, const QString &id) {
-            m_messageListView->scrollToMessage(id);
-            m_viewModel->setActiveAnchorIndex(index);
-        });
+        if (m_viewModel) {
+            connect(m_anchorBar, &ChatAnchorBar::anchorClicked, this, [this](int index, const QString &id) {
+                m_messageListView->scrollToMessage(id);
+                m_viewModel->setActiveAnchorIndex(index);
+            });
 
-        // 视口滚动检测：通知 ViewModel 激活对应锚点
-        connect(m_messageListView, &MessageListView::topVisibleMessageChanged, m_viewModel, &ChatViewModel::setActiveAnchorByMessageId);
+            // 视口滚动检测：通知 ViewModel 激活对应锚点
+            connect(m_messageListView, &MessageListView::topVisibleMessageChanged, m_viewModel, &ChatViewModel::setActiveAnchorByMessageId);
 
-        // 输入框动作：发送消息与停止生成
-        connect(m_inputBox, &ChatInputBox::sendRequested, this, [this](const QString &text) {
-            m_inputBox->clearText();
-            m_viewModel->sendMessage(text);
-        });
-        connect(m_inputBox, &ChatInputBox::stopRequested, m_viewModel, &ChatViewModel::stopGeneration);
+            // 输入框动作：发送消息与停止生成
+            connect(m_inputBox, &ChatInputBox::sendRequested, this, [this](const QString &text) {
+                m_inputBox->clearText();
+                m_viewModel->sendMessage(text);
+            });
+            connect(m_inputBox, &ChatInputBox::stopRequested, m_viewModel, &ChatViewModel::stopGeneration);
+        }
 
         fluent::collections::SplitViewPaneOptions chatPaneOptions;
         chatPaneOptions.fill = true;
@@ -127,7 +126,9 @@ namespace ui::screen::chat {
         m_splitView->addPane(m_chatAreaWidget, chatPaneOptions);
 
         // 启动 UDF 状态观察与粘性首次分发
-        m_viewModel->observe(this, &ChatPage::render);
+        if (m_viewModel) {
+            m_viewModel->observe(this, &ChatPage::render);
+        }
     }
 
     void ChatPage::render(const ChatState &state) {

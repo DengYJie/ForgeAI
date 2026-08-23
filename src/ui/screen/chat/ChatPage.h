@@ -2,7 +2,6 @@
 
 #include "ui/base/BasePage.h"
 #include "domain/conversation/Message.h"
-#include "application/usecase/chat/ChatUseCases.h"
 
 class QVBoxLayout;
 
@@ -29,12 +28,15 @@ namespace ui::screen::chat {
     class ChatViewModel;
     struct ChatState;
 
+    /**
+     * @brief 对话主界面 (纯 View)，仅依赖注入的 ChatViewModel 进行单向数据流渲染
+     */
     class ChatPage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
         explicit ChatPage(
-            const application::usecase::chat::ChatUseCases &useCases = {},
+            ChatViewModel *viewModel = nullptr,
             QWidget *parent = nullptr
         );
 
@@ -43,11 +45,7 @@ namespace ui::screen::chat {
     private:
         void setupUi();
 
-        void setupViewModel();
-
         void render(const ChatState &state);
-
-        application::usecase::chat::ChatUseCases m_useCases;
 
         ChatViewModel *m_viewModel = nullptr;
         QVBoxLayout *m_rootLayout = nullptr;

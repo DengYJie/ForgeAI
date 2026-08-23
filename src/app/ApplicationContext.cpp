@@ -27,6 +27,9 @@ namespace app {
         m_deleteSessionUseCase = std::make_unique<application::usecase::conversation::DeleteSessionUseCase>(
             m_conversationService.get()
         );
+
+        // 3. ViewModel 表现层构造（直接注入 UseCases）
+        m_chatViewModel = std::make_unique<ui::screen::chat::ChatViewModel>(chatUseCases());
     }
 
     ApplicationContext::~ApplicationContext() = default;
@@ -80,5 +83,9 @@ namespace app {
         c.createSession = m_createSessionUseCase.get();
         c.deleteSession = m_deleteSessionUseCase.get();
         return c;
+    }
+
+    ui::screen::chat::ChatViewModel *ApplicationContext::chatViewModel() const {
+        return m_chatViewModel.get();
     }
 } // namespace app

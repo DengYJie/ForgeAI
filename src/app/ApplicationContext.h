@@ -6,12 +6,13 @@
 #include "services/conversation/ConversationService.h"
 #include "services/chat/ChatService.h"
 #include "application/usecase/chat/ChatUseCases.h"
+#include "ui/screen/chat/ChatViewModel.h"
 
 namespace app {
     /**
      * @brief 应用程序级组合根 (Composition Root)
-     * @details 在 main 栈上统一构造与编排基础设施、仓储、服务与业务用例，
-     *          通过构造函数注入传递给 UI / ViewModels，实现标准的 Clean Architecture。
+     * @details 在 main 栈上统一构造与编排基础设施、仓储、服务、业务用例与 ViewModels，
+     *          通过构造函数注入传递给 Views，实现标准的 Clean Architecture。
      */
     class ApplicationContext {
     public:
@@ -41,6 +42,9 @@ namespace app {
          */
         application::usecase::chat::ChatUseCases chatUseCases() const;
 
+        // 5. ViewModel 表现层
+        ui::screen::chat::ChatViewModel *chatViewModel() const;
+
     private:
         // 仓储与服务实现
         std::unique_ptr<data::repository::SqliteConversationRepository> m_conversationRepo;
@@ -54,5 +58,8 @@ namespace app {
         std::unique_ptr<application::usecase::conversation::LoadSessionDetailUseCase> m_loadSessionDetailUseCase;
         std::unique_ptr<application::usecase::conversation::CreateSessionUseCase> m_createSessionUseCase;
         std::unique_ptr<application::usecase::conversation::DeleteSessionUseCase> m_deleteSessionUseCase;
+
+        // ViewModels
+        std::unique_ptr<ui::screen::chat::ChatViewModel> m_chatViewModel;
     };
 } // namespace app

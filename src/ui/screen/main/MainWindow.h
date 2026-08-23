@@ -1,7 +1,10 @@
 #pragma once
 
 #include "ui/window/NavigationWindow.h"
-#include "application/usecase/chat/ChatUseCases.h"
+
+namespace ui::screen::chat {
+    class ChatViewModel;
+}
 
 namespace ui::screen::main {
     class MainViewModel;
@@ -12,7 +15,7 @@ namespace ui::screen::main {
 
     public:
         explicit MainWindow(
-            const application::usecase::chat::ChatUseCases &chatUseCases = {},
+            ui::screen::chat::ChatViewModel *chatViewModel = nullptr,
             QWidget *parent = nullptr
         );
 
@@ -29,7 +32,7 @@ namespace ui::screen::main {
 
         void render(const MainState &state);
 
-        application::usecase::chat::ChatUseCases m_chatUseCases;
+        ui::screen::chat::ChatViewModel *m_chatViewModel = nullptr;
         MainViewModel *m_viewModel = nullptr;
     };
 } // namespace ui::screen::main
