@@ -56,24 +56,25 @@ namespace core::logging {
     }
 
     bool LoggingSettingsService::clearLogs() {
-        LoggingService::instance().flush();
+        // 1. 先让 LoggingService 刷空队列并重置当前打开的所有 sink（释放/截断 app.log）
+        LoggingService::instance().resetSinks();
 
+        // 2. 删除日志目录中所有旧备份日志
         QDir dir(getLogDirectory());
-        if (!dir.exists()) {
-            Q_EMIT logSizeChanged(0);
-            return true;
-        }
-
-        const auto entries = dir.entryInfoList(QDir::Files | QDir::NoSymLinks);
-        for (const auto &info : entries) {
-            if (info.fileName().startsWith(QStringLiteral("app."))) {
-                QFile::remove(info.absoluteFilePath());
+        if (dir.exists()) {
+            const auto entries = dir.entryInfoList(QDir::Files | QDir::NoSymLinks);
+            for (const auto &info : entries) {
+                if (info.fileName().startsWith(QStringLiteral("app.")) && info.fileName() != QStringLiteral("app.log")) {
+                    QFile::remove(info.absoluteFilePath());
+                }
             }
         }
 
+        // 3. 记录一条清空成功的审计日志并 flush
         LoggingService::instance().info(core::logging::Category::AppLifecycle, QStringLiteral("Logs cleared by user"));
         LoggingService::instance().flush();
 
+        // 4. 发射大小变动信号通知 UI
         Q_EMIT logSizeChanged(getLogDirectorySizeBytes());
         return true;
     }

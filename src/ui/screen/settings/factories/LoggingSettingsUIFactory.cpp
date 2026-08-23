@@ -87,10 +87,16 @@ namespace ui::screen::settings {
         layout->addWidget(sizeLabel, 0, Qt::AlignVCenter);
         layout->addWidget(clearBtn, 0, Qt::AlignVCenter);
 
-        QObject::connect(clearBtn, &fluent::basicinput::Button::clicked, parent, [parent, sizeLabel]() {
+        auto refreshSize = [sizeLabel]() {
+            if (sizeLabel) {
+                sizeLabel->setText(core::logging::LoggingSettingsService::instance().getFormattedLogSize());
+            }
+        };
+
+        QObject::connect(clearBtn, &fluent::basicinput::Button::clicked, parent, [parent, refreshSize]() {
             bool ok = core::logging::LoggingSettingsService::instance().clearLogs();
             if (ok) {
-                sizeLabel->setText(core::logging::LoggingSettingsService::instance().getFormattedLogSize());
+                refreshSize();
                 fluent::status_info::Toast::showToast(
                     parent,
                     QObject::tr("日志已清除"),
@@ -102,9 +108,7 @@ namespace ui::screen::settings {
         QObject::connect(&core::logging::LoggingSettingsService::instance(),
                          &core::logging::LoggingSettingsService::logSizeChanged,
                          sizeLabel,
-                         [sizeLabel]() {
-                             sizeLabel->setText(core::logging::LoggingSettingsService::instance().getFormattedLogSize());
-                         });
+                         refreshSize);
 
         return container;
     }

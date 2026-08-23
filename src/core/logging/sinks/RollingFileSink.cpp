@@ -131,4 +131,17 @@ namespace core::logging {
         }
     }
 
+    void RollingFileSink::reset() {
+        QMutexLocker locker(&m_mutex);
+        if (m_file.isOpen()) {
+            m_file.flush();
+            m_file.close();
+        }
+
+        m_file.setFileName(currentLogFilePath());
+        if (m_file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            m_currentFileSize = 0;
+        }
+    }
+
 } // namespace core::logging

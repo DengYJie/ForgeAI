@@ -126,6 +126,14 @@ namespace core::logging {
         }
     }
 
+    void LoggingService::resetSinks() {
+        flush();
+        QMutexLocker locker(&m_queueMutex);
+        for (auto &sink : m_sinks) {
+            if (sink) sink->reset();
+        }
+    }
+
     void LoggingService::startWorkerThread() {
         m_running = true;
         m_workerThread = std::unique_ptr<QThread>(QThread::create([this]() {

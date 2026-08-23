@@ -29,6 +29,11 @@ namespace core::logging {
          * @brief 立即刷新底层缓冲区
          */
         virtual void flush() = 0;
+
+        /**
+         * @brief 重置/清空底层输出目标资源（如安全截断日志文件）
+         */
+        virtual void reset() {}
     };
 
 } // namespace core::logging

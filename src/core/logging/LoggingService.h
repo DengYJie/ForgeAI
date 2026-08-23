@@ -37,6 +37,7 @@ namespace core::logging {
 
         void dispatch(LogRecord record);
         void flush();
+        void resetSinks();
 
         /**
          * @brief 显式停止后台工作线程并 flush 所有 sink。

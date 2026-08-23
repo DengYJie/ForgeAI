@@ -20,6 +20,7 @@ namespace core::logging {
         void write(const LogRecord &record) override;
         void writeBatch(const std::vector<LogRecord> &records) override;
         void flush() override;
+        void reset() override;
 
         QString logDirectory() const { return m_logDir; }
         QString currentLogFilePath() const;
