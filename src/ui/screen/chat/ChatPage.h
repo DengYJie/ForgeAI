@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/base/BasePage.h"
+#include "domain/conversation/Message.h"
 
 class QVBoxLayout;
 
@@ -16,6 +17,10 @@ namespace ui::widget::chat {
     class ChatHeader;
     class ChatAnchorBar;
     class ChatInputBox;
+}
+
+namespace ui::widget::message {
+    class MessageListView;
 }
 
 namespace ui::screen::chat {
@@ -47,7 +52,7 @@ namespace ui::screen::chat {
 
         ui::widget::chat::ChatHeader *m_header = nullptr;
         ui::widget::chat::ChatAnchorBar *m_anchorBar = nullptr;
-        QWidget *m_mainArea = nullptr;
+        ui::widget::message::MessageListView *m_messageListView = nullptr;
         QWidget *m_mainRight = nullptr;
         ui::widget::chat::ChatInputBox *m_inputBox = nullptr;
     };
