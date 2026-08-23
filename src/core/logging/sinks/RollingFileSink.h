@@ -12,7 +12,7 @@ namespace core::logging {
             const QString &logDir = QString(),
             const QString &baseFileName = QStringLiteral("app.log"),
             qint64 maxFileSize = 10 * 1024 * 1024,
-            int maxBackupFiles = 10
+            int maxBackupFiles = 5
         );
 
         ~RollingFileSink() override;
@@ -23,6 +23,7 @@ namespace core::logging {
 
         QString logDirectory() const { return m_logDir; }
         QString currentLogFilePath() const;
+        QString backupFilePath(int index) const;
 
     private:
         bool openCurrentFile();

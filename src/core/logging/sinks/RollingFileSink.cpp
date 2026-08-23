@@ -13,7 +13,7 @@ namespace core::logging {
         : m_logDir(logDir.isEmpty() ? (QDir::homePath() + QStringLiteral("/.forgeai/logs")) : logDir)
         , m_baseFileName(baseFileName.isEmpty() ? QStringLiteral("app.log") : baseFileName)
         , m_maxFileSize(maxFileSize > 0 ? maxFileSize : 10 * 1024 * 1024)
-        , m_maxBackupFiles(maxBackupFiles > 0 ? maxBackupFiles : 10) {
+        , m_maxBackupFiles(maxBackupFiles > 0 ? maxBackupFiles : 5) {
         
         QDir dir(m_logDir);
         if (!dir.exists()) {
@@ -49,6 +49,16 @@ namespace core::logging {
         return true;
     }
 
+    QString RollingFileSink::backupFilePath(int index) const {
+        QFileInfo info(m_baseFileName);
+        QString base = info.completeBaseName();
+        QString suffix = info.suffix();
+        if (suffix.isEmpty()) {
+            return QStringLiteral("%1/%2.%3").arg(m_logDir, base).arg(index);
+        }
+        return QStringLiteral("%1/%2.%3.%4").arg(m_logDir, base).arg(index).arg(suffix);
+    }
+
     void RollingFileSink::rotateIfNeeded() {
         if (!m_file.isOpen() || m_currentFileSize < m_maxFileSize) {
             return;
@@ -57,22 +67,21 @@ namespace core::logging {
         m_file.flush();
         m_file.close();
 
-        // 滚动历史文件: app.9.log -> app.10.log, ..., app.log -> app.1.log
-        QDir dir(m_logDir);
-        QString oldestFile = QStringLiteral("%1/%2.%3").arg(m_logDir, m_baseFileName).arg(m_maxBackupFiles);
+        // 标准日志滚动: app.4.log -> app.5.log, ..., app.log -> app.1.log
+        QString oldestFile = backupFilePath(m_maxBackupFiles);
         if (QFile::exists(oldestFile)) {
             QFile::remove(oldestFile);
         }
 
         for (int i = m_maxBackupFiles - 1; i >= 1; --i) {
-            QString src = QStringLiteral("%1/%2.%3").arg(m_logDir, m_baseFileName).arg(i);
-            QString dst = QStringLiteral("%1/%2.%3").arg(m_logDir, m_baseFileName).arg(i + 1);
+            QString src = backupFilePath(i);
+            QString dst = backupFilePath(i + 1);
             if (QFile::exists(src)) {
                 QFile::rename(src, dst);
             }
         }
 
-        QString firstBackup = QStringLiteral("%1/%2.1").arg(m_logDir, m_baseFileName);
+        QString firstBackup = backupFilePath(1);
         QFile::rename(currentLogFilePath(), firstBackup);
 
         openCurrentFile();
