@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 project(ForgeAI LANGUAGES C CXX)
 
 include(qt.cmake)
@@ -31,6 +32,36 @@ FetchContent_Declare(
         GIT_TAG 1.5.0
 )
 FetchContent_MakeAvailable(qwindowkit)
+
+set(CMARK_TESTS OFF CACHE BOOL "" FORCE)
+set(CMARK_SHARED OFF CACHE BOOL "" FORCE)
+set(CMARK_STATIC ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+        cmark-gfm
+        GIT_REPOSITORY https://github.com/github/cmark-gfm.git
+        GIT_TAG 0.29.0.gfm.13
+)
+FetchContent_GetProperties(cmark-gfm)
+if(NOT cmark-gfm_POPULATED)
+    FetchContent_Populate(cmark-gfm)
+    add_subdirectory(${cmark-gfm_SOURCE_DIR} ${cmark-gfm_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+
+if (MSVC)
+    if (TARGET libcmark-gfm_static)
+        target_compile_options(libcmark-gfm_static PRIVATE /WX-)
+    endif ()
+    if (TARGET libcmark-gfm-extensions_static)
+        target_compile_options(libcmark-gfm-extensions_static PRIVATE /WX-)
+    endif ()
+endif ()
+
+if (TARGET libcmark-gfm_static AND NOT TARGET cmark-gfm::cmark-gfm)
+    add_library(cmark-gfm::cmark-gfm ALIAS libcmark-gfm_static)
+endif ()
+if (TARGET libcmark-gfm-extensions_static AND NOT TARGET cmark-gfm::cmark-gfm-extensions)
+    add_library(cmark-gfm::cmark-gfm-extensions ALIAS libcmark-gfm-extensions_static)
+endif ()
 
 qt_standard_project_setup()
 
@@ -236,9 +267,19 @@ set_target_properties(${PROJECT_NAME}
         WIN32_EXECUTABLE TRUE
 )
 
+target_compile_definitions(${PROJECT_NAME}
+        PRIVATE
+        CMARK_GFM_STATIC_DEFINE
+        CMARK_GFM_EXTENSIONS_STATIC_DEFINE
+)
+
 target_include_directories(${PROJECT_NAME}
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${cmark-gfm_SOURCE_DIR}/src
+        ${cmark-gfm_SOURCE_DIR}/extensions
+        ${cmark-gfm_BINARY_DIR}/src
+        ${cmark-gfm_BINARY_DIR}/extensions
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -250,6 +291,8 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Sql
         QWindowKit::Widgets
         FluentQt::FluentQt
+        cmark-gfm::cmark-gfm
+        cmark-gfm::cmark-gfm-extensions
 )
 
 if (WIN32)
