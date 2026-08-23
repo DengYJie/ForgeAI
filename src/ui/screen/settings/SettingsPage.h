@@ -1,4 +1,5 @@
 #pragma once
+
 #include <QList>
 #include "ui/base/BasePage.h"
 
@@ -10,12 +11,20 @@ namespace fluent::textfields {
 
 namespace ui::screen::settings {
     class SettingsCardItem;
+    class SettingsViewModel;
+    struct SettingsState;
 
+    /**
+     * @brief 设置主界面 (纯 View)，接收注入的 SettingsViewModel
+     */
     class SettingsPage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
-        explicit SettingsPage(QWidget *parent = nullptr);
+        explicit SettingsPage(
+            SettingsViewModel *viewModel = nullptr,
+            QWidget *parent = nullptr
+        );
 
         ~SettingsPage() override = default;
 
@@ -27,6 +36,8 @@ namespace ui::screen::settings {
     private:
         void setupUi();
 
+        void render(const SettingsState &state);
+
         QWidget *createSectionHeader(const QString &title);
 
         QWidget *createSettingsCard(const QString &iconGlyph,
@@ -34,6 +45,7 @@ namespace ui::screen::settings {
                                     const QString &subtitle,
                                     QWidget *trailingWidget);
 
+        SettingsViewModel *m_viewModel = nullptr;
         QWidget *m_viewport = nullptr;
         QVBoxLayout *m_contentLayout = nullptr;
         fluent::textfields::Label *m_titleLabel = nullptr;

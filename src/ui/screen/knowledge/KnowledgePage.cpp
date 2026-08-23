@@ -6,10 +6,15 @@
 #include "KnowledgeViewModel.h"
 
 namespace ui::screen::knowledge {
-    KnowledgePage::KnowledgePage(QWidget *parent)
-        : BasePage(parent) {
+    KnowledgePage::KnowledgePage(
+        KnowledgeViewModel *viewModel,
+        QWidget *parent
+    ) : BasePage(parent),
+        m_viewModel(viewModel) {
         setupUi();
-        setupViewModel();
+        if (m_viewModel) {
+            m_viewModel->observe(this, &KnowledgePage::render);
+        }
     }
 
     void KnowledgePage::setupUi() {
@@ -30,11 +35,6 @@ namespace ui::screen::knowledge {
         m_rootLayout->addWidget(m_subtitleLabel);
 
         m_rootLayout->addStretch(1);
-    }
-
-    void KnowledgePage::setupViewModel() {
-        m_viewModel = new KnowledgeViewModel(this);
-        m_viewModel->observe(this, &KnowledgePage::render);
     }
 
     void KnowledgePage::render(const KnowledgeState &state) {

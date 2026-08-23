@@ -16,16 +16,22 @@ namespace ui::screen::work {
     class WorkViewModel;
     struct WorkState;
 
+    /**
+     * @brief 工作流主界面 (纯 View)，接收注入的 WorkViewModel
+     */
     class WorkPage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
-        explicit WorkPage(QWidget *parent = nullptr);
+        explicit WorkPage(
+            WorkViewModel *viewModel = nullptr,
+            QWidget *parent = nullptr
+        );
+
         ~WorkPage() override = default;
 
     private:
         void setupUi();
-        void setupViewModel();
 
         void render(const WorkState &state);
 

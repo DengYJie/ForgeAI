@@ -191,6 +191,8 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/SettingsUIRegistry.cpp
         src/ui/screen/settings/factories/CoreSettingsUIFactory.h
         src/ui/screen/settings/factories/CoreSettingsUIFactory.cpp
+        src/ui/screen/settings/SettingsViewModel.h
+        src/ui/screen/settings/SettingsViewModel.cpp
         src/ui/screen/settings/SettingsPage.h
         src/ui/screen/settings/SettingsPage.cpp
 
@@ -235,11 +237,17 @@ set(PROJECT_SOURCES
 
         src/domain/service/IChatService.h
         src/domain/service/IConversationService.h
+        src/domain/service/IModelService.h
+        src/domain/service/ISettingsService.h
 
         src/services/chat/ChatService.h
         src/services/chat/ChatService.cpp
         src/services/conversation/ConversationService.h
         src/services/conversation/ConversationService.cpp
+        src/services/model/ModelService.h
+        src/services/model/ModelService.cpp
+        src/services/settings/SettingsService.h
+        src/services/settings/SettingsService.cpp
 
         src/application/usecase/chat/ChatUseCases.h
         src/application/usecase/chat/SendMessageUseCase.h
@@ -254,6 +262,26 @@ set(PROJECT_SOURCES
         src/application/usecase/conversation/CreateSessionUseCase.cpp
         src/application/usecase/conversation/DeleteSessionUseCase.h
         src/application/usecase/conversation/DeleteSessionUseCase.cpp
+
+        src/application/usecase/work/WorkUseCases.h
+        src/application/usecase/work/StartTaskUseCase.h
+        src/application/usecase/work/StartTaskUseCase.cpp
+        src/application/usecase/work/CancelTaskUseCase.h
+        src/application/usecase/work/CancelTaskUseCase.cpp
+
+        src/application/usecase/knowledge/KnowledgeUseCases.h
+        src/application/usecase/knowledge/SearchDocumentsUseCase.h
+        src/application/usecase/knowledge/SearchDocumentsUseCase.cpp
+        src/application/usecase/knowledge/AddDocumentUseCase.h
+        src/application/usecase/knowledge/AddDocumentUseCase.cpp
+
+        src/application/usecase/settings/SettingsUseCases.h
+        src/application/usecase/settings/LoadSettingsUseCase.h
+        src/application/usecase/settings/LoadSettingsUseCase.cpp
+        src/application/usecase/settings/SaveSettingUseCase.h
+        src/application/usecase/settings/SaveSettingUseCase.cpp
+        src/application/usecase/settings/GetModelsUseCase.h
+        src/application/usecase/settings/GetModelsUseCase.cpp
 
         src/app/ApplicationContext.h
         src/app/ApplicationContext.cpp

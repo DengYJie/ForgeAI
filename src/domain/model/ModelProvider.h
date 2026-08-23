@@ -26,7 +26,7 @@ namespace domain::model {
         QString icon;                         ///< 服务商图标路径或内置图标标识
         QString docUrl;                       ///< 官方文档或 API 说明地址
         QString envVarName;                   ///< 对应的环境变量名
-        ProviderType type;                    ///< 协议驱动类型
+        ProviderType type = ProviderType::OpenAICompatible; ///< 协议驱动类型
 
         QString baseUrl;                      ///< API 基础请求地址
         QString apiKey;                       ///< API 密钥
@@ -37,6 +37,8 @@ namespace domain::model {
 
         QList<Model> models;                  ///< 该服务商下注册的所有模型列表
         bool isEnabled = true;                ///< 是否全局启用该服务商
+
+        bool operator==(const ModelProvider &other) const = default;
     };
 
 } // namespace domain::model

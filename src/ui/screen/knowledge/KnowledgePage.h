@@ -12,17 +12,22 @@ namespace ui::screen::knowledge {
     class KnowledgeViewModel;
     struct KnowledgeState;
 
+    /**
+     * @brief 知识库主界面 (纯 View)，接收注入的 KnowledgeViewModel
+     */
     class KnowledgePage : public ui::base::BasePage {
         Q_OBJECT
 
     public:
-        explicit KnowledgePage(QWidget *parent = nullptr);
+        explicit KnowledgePage(
+            KnowledgeViewModel *viewModel = nullptr,
+            QWidget *parent = nullptr
+        );
 
         ~KnowledgePage() override = default;
 
     private:
         void setupUi();
-        void setupViewModel();
 
         void render(const KnowledgeState &state);
 

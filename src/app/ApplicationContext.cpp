@@ -2,12 +2,18 @@
 
 namespace app {
     ApplicationContext::ApplicationContext() {
-        // 1. 仓储与基础服务初始化
+        // 1. 仓储与基础组件初始化
         m_conversationRepo = std::make_unique<data::repository::SqliteConversationRepository>();
+        m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
+        m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
+
+        // 2. 领域服务层初始化
         m_conversationService = std::make_unique<services::conversation::ConversationService>(m_conversationRepo.get());
         m_chatService = std::make_unique<services::chat::ChatService>();
+        m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
+        m_settingsService = std::make_unique<services::settings::SettingsService>();
 
-        // 2. UseCase 业务用例编排初始化
+        // 3. 对话业务用例初始化
         m_sendMessageUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
             m_chatService.get(),
             m_conversationService.get()
@@ -28,8 +34,25 @@ namespace app {
             m_conversationService.get()
         );
 
-        // 3. ViewModel 表现层构造（直接注入 UseCases）
+        // 4. 工作流业务用例初始化
+        m_startTaskUseCase = std::make_unique<application::usecase::work::StartTaskUseCase>();
+        m_cancelTaskUseCase = std::make_unique<application::usecase::work::CancelTaskUseCase>();
+
+        // 5. 知识库业务用例初始化
+        m_searchDocumentsUseCase = std::make_unique<application::usecase::knowledge::SearchDocumentsUseCase>();
+        m_addDocumentUseCase = std::make_unique<application::usecase::knowledge::AddDocumentUseCase>();
+
+        // 6. 设置业务用例初始化
+        m_loadSettingsUseCase = std::make_unique<application::usecase::settings::LoadSettingsUseCase>(m_settingsService.get());
+        m_saveSettingUseCase = std::make_unique<application::usecase::settings::SaveSettingUseCase>(m_settingsService.get());
+        m_getModelsUseCase = std::make_unique<application::usecase::settings::GetModelsUseCase>(m_modelService.get());
+
+        // 7. ViewModels 表现层构造（直接注入对应域的 UseCase Bundle）
+        m_mainViewModel = std::make_unique<ui::screen::main::MainViewModel>();
         m_chatViewModel = std::make_unique<ui::screen::chat::ChatViewModel>(chatUseCases());
+        m_workViewModel = std::make_unique<ui::screen::work::WorkViewModel>(workUseCases());
+        m_knowledgeViewModel = std::make_unique<ui::screen::knowledge::KnowledgeViewModel>(knowledgeUseCases());
+        m_settingsViewModel = std::make_unique<ui::screen::settings::SettingsViewModel>(settingsUseCases());
     }
 
     ApplicationContext::~ApplicationContext() = default;
@@ -42,6 +65,14 @@ namespace app {
         return m_conversationRepo.get();
     }
 
+    domain::repository::IModelRepository *ApplicationContext::modelRepository() const {
+        return m_modelRepo.get();
+    }
+
+    core::model::ModelRegistry *ApplicationContext::modelRegistry() const {
+        return m_modelRegistry.get();
+    }
+
     domain::service::IConversationService *ApplicationContext::conversationService() const {
         return m_conversationService.get();
     }
@@ -50,28 +81,12 @@ namespace app {
         return m_chatService.get();
     }
 
-    application::usecase::chat::SendMessageUseCase *ApplicationContext::sendMessageUseCase() const {
-        return m_sendMessageUseCase.get();
+    domain::service::IModelService *ApplicationContext::modelService() const {
+        return m_modelService.get();
     }
 
-    application::usecase::chat::StopGenerationUseCase *ApplicationContext::stopGenerationUseCase() const {
-        return m_stopGenerationUseCase.get();
-    }
-
-    application::usecase::conversation::LoadSessionsUseCase *ApplicationContext::loadSessionsUseCase() const {
-        return m_loadSessionsUseCase.get();
-    }
-
-    application::usecase::conversation::LoadSessionDetailUseCase *ApplicationContext::loadSessionDetailUseCase() const {
-        return m_loadSessionDetailUseCase.get();
-    }
-
-    application::usecase::conversation::CreateSessionUseCase *ApplicationContext::createSessionUseCase() const {
-        return m_createSessionUseCase.get();
-    }
-
-    application::usecase::conversation::DeleteSessionUseCase *ApplicationContext::deleteSessionUseCase() const {
-        return m_deleteSessionUseCase.get();
+    domain::service::ISettingsService *ApplicationContext::settingsService() const {
+        return m_settingsService.get();
     }
 
     application::usecase::chat::ChatUseCases ApplicationContext::chatUseCases() const {
@@ -85,7 +100,45 @@ namespace app {
         return c;
     }
 
+    application::usecase::work::WorkUseCases ApplicationContext::workUseCases() const {
+        application::usecase::work::WorkUseCases w;
+        w.startTask = m_startTaskUseCase.get();
+        w.cancelTask = m_cancelTaskUseCase.get();
+        return w;
+    }
+
+    application::usecase::knowledge::KnowledgeUseCases ApplicationContext::knowledgeUseCases() const {
+        application::usecase::knowledge::KnowledgeUseCases k;
+        k.searchDocuments = m_searchDocumentsUseCase.get();
+        k.addDocument = m_addDocumentUseCase.get();
+        return k;
+    }
+
+    application::usecase::settings::SettingsUseCases ApplicationContext::settingsUseCases() const {
+        application::usecase::settings::SettingsUseCases s;
+        s.loadSettings = m_loadSettingsUseCase.get();
+        s.saveSetting = m_saveSettingUseCase.get();
+        s.getModels = m_getModelsUseCase.get();
+        return s;
+    }
+
+    ui::screen::main::MainViewModel *ApplicationContext::mainViewModel() const {
+        return m_mainViewModel.get();
+    }
+
     ui::screen::chat::ChatViewModel *ApplicationContext::chatViewModel() const {
         return m_chatViewModel.get();
+    }
+
+    ui::screen::work::WorkViewModel *ApplicationContext::workViewModel() const {
+        return m_workViewModel.get();
+    }
+
+    ui::screen::knowledge::KnowledgeViewModel *ApplicationContext::knowledgeViewModel() const {
+        return m_knowledgeViewModel.get();
+    }
+
+    ui::screen::settings::SettingsViewModel *ApplicationContext::settingsViewModel() const {
+        return m_settingsViewModel.get();
     }
 } // namespace app

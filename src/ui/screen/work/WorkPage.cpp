@@ -7,10 +7,15 @@
 #include "WorkViewModel.h"
 
 namespace ui::screen::work {
-    WorkPage::WorkPage(QWidget *parent)
-        : BasePage(parent) {
+    WorkPage::WorkPage(
+        WorkViewModel *viewModel,
+        QWidget *parent
+    ) : BasePage(parent),
+        m_viewModel(viewModel) {
         setupUi();
-        setupViewModel();
+        if (m_viewModel) {
+            m_viewModel->observe(this, &WorkPage::render);
+        }
     }
 
     void WorkPage::setupUi() {
@@ -65,11 +70,6 @@ namespace ui::screen::work {
         workPaneOptions.fill = true;
         workPaneOptions.minimumSize = 300;
         m_splitView->addPane(m_workAreaWidget, workPaneOptions);
-    }
-
-    void WorkPage::setupViewModel() {
-        m_viewModel = new WorkViewModel(this);
-        m_viewModel->observe(this, &WorkPage::render);
     }
 
     void WorkPage::render(const WorkState &state) {

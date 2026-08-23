@@ -12,6 +12,7 @@
 
 #include "core/settings/SettingsRegistry.h"
 #include "ui/screen/settings/SettingsUIRegistry.h"
+#include "SettingsViewModel.h"
 
 using namespace fluent;
 
@@ -140,11 +141,21 @@ namespace ui::screen::settings {
         bool m_stacked = false;
     };
 
-    SettingsPage::SettingsPage(QWidget *parent)
-        : BasePage(parent) {
+    SettingsPage::SettingsPage(
+        SettingsViewModel *viewModel,
+        QWidget *parent
+    ) : BasePage(parent),
+        m_viewModel(viewModel) {
         setObjectName(QStringLiteral("settingsPage"));
 
         setupUi();
+        if (m_viewModel) {
+            m_viewModel->observe(this, &SettingsPage::render);
+        }
+    }
+
+    void SettingsPage::render(const SettingsState &state) {
+        Q_UNUSED(state);
     }
 
     void SettingsPage::setupUi() {

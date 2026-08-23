@@ -19,6 +19,8 @@ namespace domain::model {
         bool enableThinking = true;           ///< 是否开启深度思考
         QString reasoningEffort;              ///< 推理强度 ("none", "low", "medium", "high", "max")
         int thinkingBudgetTokens = 4096;      ///< 思考 Token 预算上限
+
+        bool operator==(const ModelParameters &other) const = default;
     };
 
 } // namespace domain::model

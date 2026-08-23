@@ -13,13 +13,23 @@
 
 namespace ui::screen::main {
     MainWindow::MainWindow(
+        MainViewModel *mainViewModel,
         ui::screen::chat::ChatViewModel *chatViewModel,
+        ui::screen::work::WorkViewModel *workViewModel,
+        ui::screen::knowledge::KnowledgeViewModel *knowledgeViewModel,
+        ui::screen::settings::SettingsViewModel *settingsViewModel,
         QWidget *parent
     ) : NavigationWindow(parent),
-        m_chatViewModel(chatViewModel) {
+        m_viewModel(mainViewModel),
+        m_chatViewModel(chatViewModel),
+        m_workViewModel(workViewModel),
+        m_knowledgeViewModel(knowledgeViewModel),
+        m_settingsViewModel(settingsViewModel) {
         setupUi();
-        setupViewModel();
         setupConnections();
+        if (m_viewModel) {
+            m_viewModel->observe(this, &MainWindow::render);
+        }
     }
 
     MainWindow::~MainWindow() = default;
@@ -42,7 +52,7 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        auto *workPage = new ui::screen::work::WorkPage(this);
+        auto *workPage = new ui::screen::work::WorkPage(m_workViewModel, this);
         addSubInterface(
             QStringLiteral("work"),
             workPage,
@@ -52,7 +62,7 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        auto *knowledgePage = new ui::screen::knowledge::KnowledgePage(this);
+        auto *knowledgePage = new ui::screen::knowledge::KnowledgePage(m_knowledgeViewModel, this);
         addSubInterface(
             QStringLiteral("knowledge"),
             knowledgePage,
@@ -63,7 +73,7 @@ namespace ui::screen::main {
         );
 
         // 2. 注册底部设置项 (Settings)
-        auto *settingsPage = new ui::screen::settings::SettingsPage(this);
+        auto *settingsPage = new ui::screen::settings::SettingsPage(m_settingsViewModel, this);
         addSubInterface(
             QStringLiteral("settings"),
             settingsPage,
@@ -74,11 +84,6 @@ namespace ui::screen::main {
             true,
             std::make_shared<ui::animation::AnimatedSettingsVisualSource>()
         );
-    }
-
-    void MainWindow::setupViewModel() {
-        m_viewModel = new MainViewModel(this);
-        m_viewModel->observe(this, &MainWindow::render);
     }
 
     void MainWindow::setupConnections() {
