@@ -1,6 +1,4 @@
 #include "ChatViewModel.h"
-#include "domain/service/IChatService.h"
-#include "domain/service/IConversationService.h"
 #include <QDateTime>
 
 namespace ui::screen::chat {
@@ -31,24 +29,22 @@ namespace ui::screen::chat {
     } // namespace
 
     ChatViewModel::ChatViewModel(
-        domain::service::IChatService *chatService,
-        domain::service::IConversationService *conversationService,
+        const application::usecase::chat::ChatUseCases &useCases,
         QObject *parent
     ) : BaseViewModel<ChatViewModel, ChatState>(parent),
-        m_chatService(chatService),
-        m_conversationService(conversationService) {
-        setupServiceConnections();
+        m_useCases(useCases) {
+        setupUseCaseConnections();
 
         updateState([this](ChatState &s) {
-            if (m_conversationService) {
-                s.sessions = m_conversationService->loadSessions();
+            if (m_useCases.loadSessions) {
+                s.sessions = m_useCases.loadSessions->execute();
             }
             if (!s.sessions.isEmpty()) {
                 s.currentSessionId = s.sessions.first().id;
                 s.sessionTitle = s.sessions.first().title;
                 s.sessionTitleManuallyEdited = (s.sessionTitle != QStringLiteral("新对话"));
-                if (m_conversationService) {
-                    s.messages = m_conversationService->loadMessages(s.currentSessionId);
+                if (m_useCases.loadSessionDetail) {
+                    s.messages = m_useCases.loadSessionDetail->execute(s.currentSessionId);
                 }
             } else {
                 s.currentSessionId = QStringLiteral("session_1");
@@ -60,29 +56,37 @@ namespace ui::screen::chat {
 
     ChatViewModel::~ChatViewModel() = default;
 
-    void ChatViewModel::setupServiceConnections() {
-        if (!m_chatService) return;
+    void ChatViewModel::setupUseCaseConnections() {
+        if (!m_useCases.sendMessage) return;
 
-        connect(m_chatService, &domain::service::IChatService::messageGenerated, this, [this](const QString &sessionId, const QString &fullReply) {
-            updateState([this, sessionId, fullReply](ChatState &s) {
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::userMessageCreated,
+                this, [this](const QString &sessionId, const domain::conversation::Message &msg) {
+            updateState([this, sessionId, msg](ChatState &s) {
                 if (s.currentSessionId != sessionId) return;
+                const bool isFirstMessage = s.messages.isEmpty();
+                s.messages.append(msg);
+                s.isGenerating = true;
 
-                domain::conversation::Message assistantMsg;
-                assistantMsg.id = QUuid::createUuid();
-                assistantMsg.role = domain::MessageRole::Assistant;
-                assistantMsg.status = domain::MessageStatus::Sent;
-                assistantMsg.createdAt = QDateTime::currentDateTime();
-                assistantMsg.blocks.append(domain::conversation::MessageBlock(domain::BlockType::Text, domain::conversation::TextBlock{fullReply}));
-
-                s.messages.append(assistantMsg);
-                if (m_conversationService) {
-                    m_conversationService->saveMessages(s.currentSessionId, s.messages);
+                if (isFirstMessage && !s.sessionTitleManuallyEdited) {
+                    const QString newTitle = autoTitle(s.messages);
+                    s.sessionTitle = newTitle;
+                    syncSessionTitle(s, s.currentSessionId, newTitle);
                 }
                 recalculateAnchors(s);
             });
         });
 
-        connect(m_chatService, &domain::service::IChatService::generationFinished, this, [this](const QString &sessionId) {
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::replyGenerated,
+                this, [this](const QString &sessionId, const domain::conversation::Message &msg) {
+            updateState([sessionId, msg](ChatState &s) {
+                if (s.currentSessionId != sessionId) return;
+                s.messages.append(msg);
+                recalculateAnchors(s);
+            });
+        });
+
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::generationFinished,
+                this, [this](const QString &sessionId) {
             updateState([sessionId](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
@@ -91,7 +95,8 @@ namespace ui::screen::chat {
             });
         });
 
-        connect(m_chatService, &domain::service::IChatService::generationFailed, this, [this](const QString &sessionId, const QString &errorMessage) {
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::generationFailed,
+                this, [this](const QString &sessionId, const QString &errorMessage) {
             updateState([sessionId, errorMessage](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
@@ -116,8 +121,8 @@ namespace ui::screen::chat {
             s.sessionTitle = title;
             s.sessionTitleManuallyEdited = manuallyEdited;
             s.isGenerating = false;
-            if (m_conversationService) {
-                s.messages = m_conversationService->loadMessages(sessionId);
+            if (m_useCases.loadSessionDetail) {
+                s.messages = m_useCases.loadSessionDetail->execute(sessionId);
             } else {
                 s.messages.clear();
             }
@@ -127,15 +132,19 @@ namespace ui::screen::chat {
 
     void ChatViewModel::newSession() {
         updateState([this](ChatState &s) {
-            if (m_conversationService) {
-                const QString targetId = m_conversationService->reuseOrCreateSession(s.sessions, s.currentSessionId);
+            if (m_useCases.createSession) {
+                const QString targetId = m_useCases.createSession->execute(s.sessions, s.currentSessionId);
                 if (targetId == s.currentSessionId && s.messages.isEmpty()) {
                     return;
                 }
                 s.currentSessionId = targetId;
                 s.sessionTitle = QStringLiteral("新对话");
                 s.sessionTitleManuallyEdited = false;
-                s.messages = m_conversationService->loadMessages(targetId);
+                if (m_useCases.loadSessionDetail) {
+                    s.messages = m_useCases.loadSessionDetail->execute(targetId);
+                } else {
+                    s.messages.clear();
+                }
                 s.isGenerating = false;
                 recalculateAnchors(s);
             }
@@ -144,8 +153,8 @@ namespace ui::screen::chat {
 
     void ChatViewModel::deleteSession(const QString &sessionId) {
         updateState([this, sessionId](ChatState &s) {
-            if (m_conversationService) {
-                const QString nextId = m_conversationService->deleteSession(s.sessions, sessionId, s.currentSessionId);
+            if (m_useCases.deleteSession) {
+                const QString nextId = m_useCases.deleteSession->execute(s.sessions, sessionId, s.currentSessionId);
                 if (s.currentSessionId == sessionId) {
                     s.currentSessionId = nextId;
                     QString title = QStringLiteral("新对话");
@@ -157,7 +166,11 @@ namespace ui::screen::chat {
                     }
                     s.sessionTitle = title;
                     s.sessionTitleManuallyEdited = (title != QStringLiteral("新对话"));
-                    s.messages = m_conversationService->loadMessages(nextId);
+                    if (m_useCases.loadSessionDetail) {
+                        s.messages = m_useCases.loadSessionDetail->execute(nextId);
+                    } else {
+                        s.messages.clear();
+                    }
                     s.isGenerating = false;
                     recalculateAnchors(s);
                 }
@@ -169,39 +182,14 @@ namespace ui::screen::chat {
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return;
 
-        domain::conversation::Message userMsg;
-        userMsg.id = QUuid::createUuid();
-        userMsg.role = domain::MessageRole::User;
-        userMsg.status = domain::MessageStatus::Sent;
-        userMsg.createdAt = QDateTime::currentDateTime();
-        userMsg.blocks.append(domain::conversation::MessageBlock(domain::BlockType::Text, domain::conversation::TextBlock{trimmed}));
-
-        QString currentSess;
-        updateState([&](ChatState &s) {
-            const bool isFirstMessage = s.messages.isEmpty();
-            s.messages.append(userMsg);
-            s.isGenerating = true;
-            currentSess = s.currentSessionId;
-
-            if (isFirstMessage && !s.sessionTitleManuallyEdited) {
-                const QString newTitle = autoTitle(s.messages);
-                s.sessionTitle = newTitle;
-                syncSessionTitle(s, s.currentSessionId, newTitle);
-            }
-            if (m_conversationService) {
-                m_conversationService->saveMessages(s.currentSessionId, s.messages);
-            }
-            recalculateAnchors(s);
-        });
-
-        if (m_chatService) {
-            m_chatService->sendMessage(currentSess, trimmed);
+        if (m_useCases.sendMessage) {
+            m_useCases.sendMessage->execute(m_state.currentSessionId, trimmed);
         }
     }
 
     void ChatViewModel::stopGeneration() {
-        if (m_chatService) {
-            m_chatService->stopGeneration();
+        if (m_useCases.stopGeneration) {
+            m_useCases.stopGeneration->execute();
         }
         updateState([](ChatState &s) {
             s.isGenerating = false;

@@ -16,18 +16,16 @@ namespace ui::screen::chat {
     using namespace ui::widget::message;
 
     ChatPage::ChatPage(
-        domain::service::IChatService *chatService,
-        domain::service::IConversationService *conversationService,
+        const application::usecase::chat::ChatUseCases &useCases,
         QWidget *parent
     ) : BasePage(parent),
-        m_chatService(chatService),
-        m_conversationService(conversationService) {
+        m_useCases(useCases) {
         setupViewModel();
         setupUi();
     }
 
     void ChatPage::setupViewModel() {
-        m_viewModel = new ChatViewModel(m_chatService, m_conversationService, this);
+        m_viewModel = new ChatViewModel(m_useCases, this);
     }
 
     void ChatPage::setupUi() {

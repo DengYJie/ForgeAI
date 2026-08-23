@@ -4,14 +4,10 @@
 #include "domain/conversation/Message.h"
 #include "ui/widget/chat/ChatAnchorBar.h"
 #include "ChatSessionListModel.h"
+#include "application/usecase/chat/ChatUseCases.h"
 #include <QString>
 #include <QList>
 #include <QUuid>
-
-namespace domain::service {
-    class IChatService;
-    class IConversationService;
-}
 
 namespace ui::screen::chat {
     struct ChatState {
@@ -40,8 +36,7 @@ namespace ui::screen::chat {
 
     public:
         explicit ChatViewModel(
-            domain::service::IChatService *chatService,
-            domain::service::IConversationService *conversationService,
+            const application::usecase::chat::ChatUseCases &useCases,
             QObject *parent = nullptr
         );
 
@@ -70,14 +65,13 @@ namespace ui::screen::chat {
         void emitStateChanged() override;
 
     private:
-        void setupServiceConnections();
+        void setupUseCaseConnections();
 
         static void recalculateAnchors(ChatState &s);
 
         // 在会话列表中同步更新指定 session 的 title
         static void syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title);
 
-        domain::service::IChatService *m_chatService = nullptr;
-        domain::service::IConversationService *m_conversationService = nullptr;
+        application::usecase::chat::ChatUseCases m_useCases;
     };
 } // namespace ui::screen::chat

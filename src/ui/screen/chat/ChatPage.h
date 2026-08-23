@@ -2,6 +2,7 @@
 
 #include "ui/base/BasePage.h"
 #include "domain/conversation/Message.h"
+#include "application/usecase/chat/ChatUseCases.h"
 
 class QVBoxLayout;
 
@@ -23,11 +24,6 @@ namespace ui::widget::message {
     class MessageListView;
 }
 
-namespace domain::service {
-    class IChatService;
-    class IConversationService;
-}
-
 namespace ui::screen::chat {
     class ChatSidebar;
     class ChatViewModel;
@@ -38,8 +34,7 @@ namespace ui::screen::chat {
 
     public:
         explicit ChatPage(
-            domain::service::IChatService *chatService = nullptr,
-            domain::service::IConversationService *conversationService = nullptr,
+            const application::usecase::chat::ChatUseCases &useCases = {},
             QWidget *parent = nullptr
         );
 
@@ -52,8 +47,7 @@ namespace ui::screen::chat {
 
         void render(const ChatState &state);
 
-        domain::service::IChatService *m_chatService = nullptr;
-        domain::service::IConversationService *m_conversationService = nullptr;
+        application::usecase::chat::ChatUseCases m_useCases;
 
         ChatViewModel *m_viewModel = nullptr;
         QVBoxLayout *m_rootLayout = nullptr;

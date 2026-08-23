@@ -34,8 +34,7 @@ namespace app {
 
     int Application::run() {
         m_mainWindow = std::make_unique<ui::screen::main::MainWindow>(
-            m_context.chatService(),
-            m_context.conversationService()
+            m_context.chatUseCases()
         );
         m_mainWindow->show();
         return m_qapp->exec();

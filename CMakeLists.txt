@@ -241,6 +241,20 @@ set(PROJECT_SOURCES
         src/services/conversation/ConversationService.h
         src/services/conversation/ConversationService.cpp
 
+        src/application/usecase/chat/ChatUseCases.h
+        src/application/usecase/chat/SendMessageUseCase.h
+        src/application/usecase/chat/SendMessageUseCase.cpp
+        src/application/usecase/chat/StopGenerationUseCase.h
+        src/application/usecase/chat/StopGenerationUseCase.cpp
+        src/application/usecase/conversation/LoadSessionsUseCase.h
+        src/application/usecase/conversation/LoadSessionsUseCase.cpp
+        src/application/usecase/conversation/LoadSessionDetailUseCase.h
+        src/application/usecase/conversation/LoadSessionDetailUseCase.cpp
+        src/application/usecase/conversation/CreateSessionUseCase.h
+        src/application/usecase/conversation/CreateSessionUseCase.cpp
+        src/application/usecase/conversation/DeleteSessionUseCase.h
+        src/application/usecase/conversation/DeleteSessionUseCase.cpp
+
         src/app/ApplicationContext.h
         src/app/ApplicationContext.cpp
         src/app/Application.h
