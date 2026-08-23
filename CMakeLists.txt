@@ -105,6 +105,14 @@ set(PROJECT_SOURCES
         
         src/application/ports/IChatModelGateway.h
         src/application/ports/IModelDiscoveryGateway.h
+        src/llm/runtime/RequestState.h
+        src/llm/runtime/TimeoutPolicy.h
+        src/llm/runtime/RetryPolicy.h
+        src/llm/runtime/RetryDecision.h
+        src/llm/runtime/RetryDecision.cpp
+        src/llm/runtime/RequestMetrics.h
+        src/llm/runtime/ChatOperation.h
+        src/llm/runtime/ChatOperation.cpp
         src/llm/ModelProviderService.h
         src/llm/ModelProviderService.cpp
         src/llm/ModelDiscoveryService.h

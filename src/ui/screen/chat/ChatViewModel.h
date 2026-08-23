@@ -2,12 +2,14 @@
 
 #include "ui/base/BaseViewModel.h"
 #include "domain/conversation/Message.h"
+#include "domain/llm/ChatError.h"
 #include "ui/widget/chat/ChatAnchorBar.h"
 #include "ChatSessionListModel.h"
 #include "application/usecase/chat/ChatUseCases.h"
 #include <QString>
 #include <QList>
 #include <QUuid>
+#include <optional>
 
 namespace ui::screen::chat {
     /**
@@ -24,6 +26,7 @@ namespace ui::screen::chat {
         QString currentModelName = QStringLiteral("DeepSeek-R1"); ///< 当前激活的模型名称
         bool isGenerating = false;                          ///< 当前是否处于大模型回复生成中
         QString statusMessage;                              ///< 底部状态栏展示的状态/错误消息
+        std::optional<domain::llm::ChatError> lastError;    ///< 最近一次请求遭遇的错误上下文与行动指引
 
         // 核心领域实体列表（单向权威数据源）
         QList<domain::conversation::Message> messages;      ///< 当前会话的完整消息流列表

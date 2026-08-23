@@ -28,7 +28,12 @@ namespace application::usecase::chat {
         
         // 1. 获取模型配置
         if (!m_modelService || !m_chatGateway) {
-            emit generationFailed(sessionId, "System dependencies are not ready.");
+            domain::llm::ChatError err;
+            err.category = domain::llm::ChatErrorCategory::Configuration;
+            err.code = QStringLiteral("MissingDependencies");
+            err.message = QStringLiteral("System dependencies are not ready.");
+            err.userMessage = QStringLiteral("系统服务依赖未就绪。");
+            emit generationFailed(sessionId, err);
             return;
         }
         
@@ -37,7 +42,13 @@ namespace application::usecase::chat {
         domain::model::ModelProvider provider;
         auto providers = m_modelService->getActiveProviders();
         if (providers.isEmpty()) {
-            emit generationFailed(sessionId, "No model provider configured.");
+            domain::llm::ChatError err;
+            err.category = domain::llm::ChatErrorCategory::Configuration;
+            err.code = QStringLiteral("NoActiveProvider");
+            err.message = QStringLiteral("No model provider configured.");
+            err.userMessage = QStringLiteral("未配置或启用任何模型提供商，请在设置中添加。");
+            err.suggestedAction = QStringLiteral("OpenSettings");
+            emit generationFailed(sessionId, err);
             return;
         }
         provider = providers.first(); // 真实逻辑应是获取当前激活的 provider
@@ -201,7 +212,53 @@ namespace application::usecase::chat {
                 }
                 m_currentSessionId.clear();
             } else if constexpr (std::is_same_v<T, domain::llm::EventError>) {
-                emit generationFailed(m_currentSessionId, arg.error.message);
+                bool isCancelled = (arg.error.category == domain::llm::ChatErrorCategory::Cancelled);
+                
+                // 如果在被取消或报错前已经接收到部分生成内容，保存并保留给用户
+                if (!m_replyBuffer.isEmpty() || !m_thoughtBuffer.isEmpty() || !m_activeToolCalls.isEmpty()) {
+                    domain::conversation::Message partialMsg;
+                    partialMsg.id = QUuid::createUuid();
+                    partialMsg.role = domain::MessageRole::Assistant;
+                    partialMsg.status = isCancelled ? domain::MessageStatus::Interrupted : domain::MessageStatus::Failed;
+                    partialMsg.errorMessage = arg.error.userMessage.isEmpty() ? arg.error.message : arg.error.userMessage;
+                    partialMsg.createdAt = QDateTime::currentDateTime();
+
+                    if (!m_thoughtBuffer.isEmpty()) {
+                        partialMsg.blocks.append(domain::conversation::MessageBlock(
+                            domain::BlockType::Thought,
+                            domain::conversation::ThoughtBlock{m_thoughtBuffer, 0}
+                        ));
+                    }
+                    if (!m_replyBuffer.isEmpty()) {
+                        partialMsg.blocks.append(domain::conversation::MessageBlock(
+                            domain::BlockType::Text,
+                            domain::conversation::TextBlock{m_replyBuffer}
+                        ));
+                    }
+                    if (!m_activeToolCalls.isEmpty()) {
+                        domain::conversation::ToolCallBlock tcBlock;
+                        tcBlock.calls = m_activeToolCalls.values();
+                        partialMsg.blocks.append(domain::conversation::MessageBlock(
+                            domain::BlockType::ToolCall,
+                            tcBlock
+                        ));
+                    }
+
+                    if (m_conversationService) {
+                        auto history = m_conversationService->loadMessages(m_currentSessionId);
+                        history.append(partialMsg);
+                        m_conversationService->saveMessages(m_currentSessionId, history);
+                    }
+
+                    emit replyGenerated(m_currentSessionId, partialMsg);
+                }
+
+                if (isCancelled) {
+                    emit generationFinished(m_currentSessionId);
+                } else {
+                    emit generationFailed(m_currentSessionId, arg.error);
+                }
+
                 if (m_currentOp) {
                     m_currentOp->deleteLater();
                     m_currentOp = nullptr;

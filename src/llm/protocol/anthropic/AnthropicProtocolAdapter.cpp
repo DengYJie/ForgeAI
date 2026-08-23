@@ -120,18 +120,57 @@ namespace llm::protocol::anthropic {
 
     domain::llm::ChatError AnthropicProtocolAdapter::parseError(int httpStatusCode, const QByteArray &responseBody) const {
         domain::llm::ChatError error;
+        error.httpStatus = httpStatusCode;
         error.originalText = QString::fromUtf8(responseBody);
 
         switch (httpStatusCode) {
-            case 401: error.type = domain::llm::ChatErrorType::Unauthorized; break;
-            case 403: error.type = domain::llm::ChatErrorType::Unauthorized; break;
-            case 404: error.type = domain::llm::ChatErrorType::ModelNotFound; break;
-            case 429: error.type = domain::llm::ChatErrorType::RateLimited; break;
-            case 400: error.type = domain::llm::ChatErrorType::InvalidRequest; break;
+            case 400:
+                error.category = domain::llm::ChatErrorCategory::Request;
+                error.code = QStringLiteral("InvalidRequest");
+                error.userMessage = QStringLiteral("请求参数或消息格式不合规。");
+                break;
+            case 401:
+                error.category = domain::llm::ChatErrorCategory::Authentication;
+                error.code = QStringLiteral("ApiKeyInvalid");
+                error.userMessage = QStringLiteral("Anthropic API Key 无效或未授权。");
+                error.suggestedAction = QStringLiteral("OpenSettings");
+                break;
+            case 403:
+                error.category = domain::llm::ChatErrorCategory::Authorization;
+                error.code = QStringLiteral("Forbidden");
+                error.userMessage = QStringLiteral("无权访问该 Anthropic 资源或已被封禁。");
+                break;
+            case 404:
+                error.category = domain::llm::ChatErrorCategory::Model;
+                error.code = QStringLiteral("ModelNotFound");
+                error.userMessage = QStringLiteral("指定的 Claude 模型不存在或不可用。");
+                error.suggestedAction = QStringLiteral("ChangeModel");
+                break;
+            case 429:
+                error.category = domain::llm::ChatErrorCategory::RateLimit;
+                error.code = QStringLiteral("TooManyRequests");
+                error.userMessage = QStringLiteral("请求频率超限，正在退避重试...");
+                error.retryable = true;
+                error.suggestedAction = QStringLiteral("Retry");
+                break;
             default:
-                if (httpStatusCode >= 500) error.type = domain::llm::ChatErrorType::ServerError;
-                else if (httpStatusCode == 0) error.type = domain::llm::ChatErrorType::NetworkError;
-                else error.type = domain::llm::ChatErrorType::Unknown;
+                if (httpStatusCode >= 500) {
+                    error.category = domain::llm::ChatErrorCategory::Provider;
+                    error.code = QStringLiteral("ServerError");
+                    error.userMessage = QStringLiteral("Anthropic 服务端暂时过载或故障。");
+                    error.retryable = true;
+                    error.suggestedAction = QStringLiteral("Retry");
+                } else if (httpStatusCode == 0) {
+                    error.category = domain::llm::ChatErrorCategory::Network;
+                    error.code = QStringLiteral("NetworkError");
+                    error.userMessage = QStringLiteral("网络连接失败，请检查网络。");
+                    error.retryable = true;
+                } else {
+                    error.category = domain::llm::ChatErrorCategory::Unknown;
+                    error.code = QStringLiteral("Unknown");
+                    error.userMessage = QStringLiteral("请求遇到未知错误 (HTTP %1)。").arg(httpStatusCode);
+                }
+                break;
         }
 
         // 解析 Anthropic 错误格式 {"type": "error", "error": {"type": "...", "message": "..."}}
@@ -143,6 +182,23 @@ namespace llm::protocol::anthropic {
                 QJsonObject errObj = obj.value("error").toObject();
                 if (errObj.contains("message")) {
                     error.message = errObj.value("message").toString();
+                }
+                if (errObj.contains("type")) {
+                    error.providerErrorCode = errObj.value("type").toString();
+                    if (error.providerErrorCode == "overloaded_error") {
+                        error.category = domain::llm::ChatErrorCategory::Provider;
+                        error.code = QStringLiteral("Overloaded");
+                        error.userMessage = QStringLiteral("Anthropic 服务器当前负载过高，稍后自动重试。");
+                        error.retryable = true;
+                    }
+                }
+                if (error.message.contains("prompt is too long", Qt::CaseInsensitive) ||
+                    error.message.contains("maximum context length", Qt::CaseInsensitive)) {
+                    error.category = domain::llm::ChatErrorCategory::Context;
+                    error.code = QStringLiteral("ContextLengthExceeded");
+                    error.userMessage = QStringLiteral("当前会话内容已超出 Claude 最大上下文长度。");
+                    error.retryable = false;
+                    error.suggestedAction = QStringLiteral("CompressContext");
                 }
             }
         }

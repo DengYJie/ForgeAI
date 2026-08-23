@@ -144,18 +144,53 @@ namespace llm::protocol::gemini {
 
     domain::llm::ChatError GeminiProtocolAdapter::parseError(int httpStatusCode, const QByteArray &responseBody) const {
         domain::llm::ChatError error;
+        error.httpStatus = httpStatusCode;
         error.originalText = QString::fromUtf8(responseBody);
 
         switch (httpStatusCode) {
+            case 400:
+                error.category = domain::llm::ChatErrorCategory::Request;
+                error.code = QStringLiteral("InvalidRequest");
+                error.userMessage = QStringLiteral("Google Gemini 请求参数无效。");
+                break;
             case 401:
-            case 403: error.type = domain::llm::ChatErrorType::Unauthorized; break;
-            case 404: error.type = domain::llm::ChatErrorType::ModelNotFound; break;
-            case 429: error.type = domain::llm::ChatErrorType::RateLimited; break;
-            case 400: error.type = domain::llm::ChatErrorType::InvalidRequest; break;
+            case 403:
+                error.category = domain::llm::ChatErrorCategory::Authentication;
+                error.code = QStringLiteral("ApiKeyInvalid");
+                error.userMessage = QStringLiteral("Google Gemini API Key 无效或未启用 API。");
+                error.suggestedAction = QStringLiteral("OpenSettings");
+                break;
+            case 404:
+                error.category = domain::llm::ChatErrorCategory::Model;
+                error.code = QStringLiteral("ModelNotFound");
+                error.userMessage = QStringLiteral("指定的 Gemini 模型版本不存在。");
+                error.suggestedAction = QStringLiteral("ChangeModel");
+                break;
+            case 429:
+                error.category = domain::llm::ChatErrorCategory::RateLimit;
+                error.code = QStringLiteral("TooManyRequests");
+                error.userMessage = QStringLiteral("Gemini API 调用配额或频率超限，正在重试...");
+                error.retryable = true;
+                error.suggestedAction = QStringLiteral("Retry");
+                break;
             default:
-                if (httpStatusCode >= 500) error.type = domain::llm::ChatErrorType::ServerError;
-                else if (httpStatusCode == 0) error.type = domain::llm::ChatErrorType::NetworkError;
-                else error.type = domain::llm::ChatErrorType::Unknown;
+                if (httpStatusCode >= 500) {
+                    error.category = domain::llm::ChatErrorCategory::Provider;
+                    error.code = QStringLiteral("ServerError");
+                    error.userMessage = QStringLiteral("Google Gemini 服务器内部错误。");
+                    error.retryable = true;
+                    error.suggestedAction = QStringLiteral("Retry");
+                } else if (httpStatusCode == 0) {
+                    error.category = domain::llm::ChatErrorCategory::Network;
+                    error.code = QStringLiteral("NetworkError");
+                    error.userMessage = QStringLiteral("网络连接失败，请检查网络或代理。");
+                    error.retryable = true;
+                } else {
+                    error.category = domain::llm::ChatErrorCategory::Unknown;
+                    error.code = QStringLiteral("Unknown");
+                    error.userMessage = QStringLiteral("请求遇到未知错误 (HTTP %1)。").arg(httpStatusCode);
+                }
+                break;
         }
 
         // 解析 Gemini 错误 {"error": {"code": 400, "message": "...", "status": "..."}}
@@ -167,6 +202,15 @@ namespace llm::protocol::gemini {
                 QJsonObject errObj = obj.value("error").toObject();
                 if (errObj.contains("message")) {
                     error.message = errObj.value("message").toString();
+                }
+                if (errObj.contains("status")) {
+                    error.providerErrorCode = errObj.value("status").toString();
+                    if (error.providerErrorCode == "RESOURCE_EXHAUSTED") {
+                        error.category = domain::llm::ChatErrorCategory::Quota;
+                        error.code = QStringLiteral("QuotaExceeded");
+                        error.userMessage = QStringLiteral("Gemini 资源配额已耗尽。");
+                        error.retryable = false;
+                    }
                 }
             }
         }

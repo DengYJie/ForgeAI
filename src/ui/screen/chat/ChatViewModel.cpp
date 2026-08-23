@@ -91,16 +91,18 @@ namespace ui::screen::chat {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
                     s.statusMessage.clear();
+                    s.lastError.reset();
                 }
             });
         });
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::generationFailed,
-                this, [this](const QString &sessionId, const QString &errorMessage) {
-            updateState([sessionId, errorMessage](ChatState &s) {
+                this, [this](const QString &sessionId, const domain::llm::ChatError &error) {
+            updateState([sessionId, error](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
-                    s.statusMessage = errorMessage;
+                    s.lastError = error;
+                    s.statusMessage = error.userMessage.isEmpty() ? error.message : error.userMessage;
                 }
             });
         });
@@ -194,6 +196,7 @@ namespace ui::screen::chat {
         updateState([](ChatState &s) {
             s.isGenerating = false;
             s.statusMessage.clear();
+            s.lastError.reset();
         });
     }
 

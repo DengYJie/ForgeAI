@@ -98,17 +98,40 @@ namespace llm::protocol::ollama {
 
     domain::llm::ChatError OllamaProtocolAdapter::parseError(int httpStatusCode, const QByteArray &responseBody) const {
         domain::llm::ChatError error;
+        error.httpStatus = httpStatusCode;
         error.originalText = QString::fromUtf8(responseBody);
 
         switch (httpStatusCode) {
-            case 404: error.type = domain::llm::ChatErrorType::ModelNotFound; break;
-            case 401:
-            case 403: error.type = domain::llm::ChatErrorType::Unauthorized; break;
-            case 400: error.type = domain::llm::ChatErrorType::InvalidRequest; break;
+            case 404:
+                error.category = domain::llm::ChatErrorCategory::Model;
+                error.code = QStringLiteral("ModelNotFound");
+                error.userMessage = QStringLiteral("本地 Ollama 模型未找到，请检查模型名称或运行 ollama pull 拉取。");
+                error.suggestedAction = QStringLiteral("ChangeModel");
+                break;
+            case 400:
+                error.category = domain::llm::ChatErrorCategory::Request;
+                error.code = QStringLiteral("InvalidRequest");
+                error.userMessage = QStringLiteral("Ollama 请求参数不合法。");
+                break;
             default:
-                if (httpStatusCode >= 500) error.type = domain::llm::ChatErrorType::ServerError;
-                else if (httpStatusCode == 0) error.type = domain::llm::ChatErrorType::NetworkError;
-                else error.type = domain::llm::ChatErrorType::Unknown;
+                if (httpStatusCode >= 500) {
+                    error.category = domain::llm::ChatErrorCategory::Provider;
+                    error.code = QStringLiteral("ServerError");
+                    error.userMessage = QStringLiteral("Ollama 服务端执行出错。");
+                    error.retryable = true;
+                    error.suggestedAction = QStringLiteral("Retry");
+                } else if (httpStatusCode == 0) {
+                    error.category = domain::llm::ChatErrorCategory::Network;
+                    error.code = QStringLiteral("ConnectionRefused");
+                    error.userMessage = QStringLiteral("无法连接到本地 Ollama 服务，请确认 Ollama 正在运行 (http://localhost:11434)。");
+                    error.retryable = true;
+                    error.suggestedAction = QStringLiteral("Retry");
+                } else {
+                    error.category = domain::llm::ChatErrorCategory::Unknown;
+                    error.code = QStringLiteral("Unknown");
+                    error.userMessage = QStringLiteral("Ollama 遇到未知错误 (HTTP %1)。").arg(httpStatusCode);
+                }
+                break;
         }
 
         // 解析 Ollama 错误 {"error": "model 'xxx' not found"}
@@ -118,6 +141,11 @@ namespace llm::protocol::ollama {
             QJsonObject obj = doc.object();
             if (obj.contains("error")) {
                 error.message = obj.value("error").toString();
+                if (error.message.contains("not found", Qt::CaseInsensitive)) {
+                    error.category = domain::llm::ChatErrorCategory::Model;
+                    error.code = QStringLiteral("ModelNotFound");
+                    error.userMessage = QStringLiteral("模型未安装或未找到：%1").arg(error.message);
+                }
             }
         }
 

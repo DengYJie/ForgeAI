@@ -52,7 +52,7 @@ namespace application::usecase::chat {
         void toolCallReceived(const QString &sessionId, const domain::agent::ToolCall &toolCall);
         void replyGenerated(const QString &sessionId, const domain::conversation::Message &message);
         void generationFinished(const QString &sessionId);
-        void generationFailed(const QString &sessionId, const QString &errorMessage);
+        void generationFailed(const QString &sessionId, const domain::llm::ChatError &error);
 
     private Q_SLOTS:
         void onChatEventReceived(const domain::llm::ChatEvent &event);

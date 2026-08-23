@@ -131,12 +131,15 @@ namespace llm::protocol::anthropic {
             events.append(domain::llm::EventFinished{"stop"});
         } else if (type == "error") {
             domain::llm::ChatError err;
-            err.type = domain::llm::ChatErrorType::ServerError;
+            err.category = domain::llm::ChatErrorCategory::Provider;
+            err.code = QStringLiteral("StreamError");
             if (obj.contains("error") && obj.value("error").isObject()) {
                 QJsonObject errObj = obj.value("error").toObject();
                 err.message = errObj.value("message").toString();
+                err.userMessage = err.message;
             } else {
                 err.message = "Anthropic API Stream Error";
+                err.userMessage = QStringLiteral("Anthropic 流式响应中返回错误。");
             }
             events.append(domain::llm::EventError{err});
         }

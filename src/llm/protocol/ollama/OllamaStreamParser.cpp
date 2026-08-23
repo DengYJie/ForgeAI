@@ -72,8 +72,10 @@ namespace llm::protocol::ollama {
         // 1. 错误处理
         if (obj.contains("error") && !obj.value("error").isNull()) {
             domain::llm::ChatError err;
-            err.type = domain::llm::ChatErrorType::ServerError;
+            err.category = domain::llm::ChatErrorCategory::Provider;
+            err.code = QStringLiteral("StreamError");
             err.message = obj.value("error").toString();
+            err.userMessage = err.message;
             events.append(domain::llm::EventError{err});
             return events;
         }

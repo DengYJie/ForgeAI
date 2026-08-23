@@ -44,15 +44,14 @@ namespace network {
 
     void QtHttpOperation::onErrorOccurred(QNetworkReply::NetworkError code) {
         if (m_isCancelled) {
-            // 被主动取消的情况，发出 failed 或特殊的 cancelled 通知
-            // 这里为了简单，触发 failed 并通过 message 指示取消
-            emit failed(QStringLiteral("Cancelled"), 0);
+            emit failed(QStringLiteral("Cancelled"), 0, {}, static_cast<int>(code));
             return;
         }
 
         int httpStatusCode = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         QString errorMsg = m_reply->errorString();
-        emit failed(errorMsg, httpStatusCode);
+        QByteArray responseBody = m_reply->readAll();
+        emit failed(errorMsg, httpStatusCode, responseBody, static_cast<int>(code));
     }
 
     // ==========================================

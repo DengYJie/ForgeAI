@@ -35,8 +35,10 @@ namespace network {
          * @brief 请求失败或被异常终止
          * @param errorMessage 错误消息说明
          * @param httpStatusCode HTTP 状态码（若有）
+         * @param responseBody 错误响应体（若有）
+         * @param networkErrorCode 底层网络错误码 (例如 QNetworkReply::NetworkError 转为 int)
          */
-        void failed(const QString &errorMessage, int httpStatusCode);
+        void failed(const QString &errorMessage, int httpStatusCode, const QByteArray &responseBody = {}, int networkErrorCode = 0);
     };
 
 } // namespace network

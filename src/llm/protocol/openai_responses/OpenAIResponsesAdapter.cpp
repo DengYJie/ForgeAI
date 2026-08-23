@@ -95,18 +95,57 @@ namespace llm::protocol::openai_responses {
 
     domain::llm::ChatError OpenAIResponsesAdapter::parseError(int httpStatusCode, const QByteArray &responseBody) const {
         domain::llm::ChatError error;
+        error.httpStatus = httpStatusCode;
         error.originalText = QString::fromUtf8(responseBody);
 
         switch (httpStatusCode) {
+            case 400:
+                error.category = domain::llm::ChatErrorCategory::Request;
+                error.code = QStringLiteral("InvalidRequest");
+                error.userMessage = QStringLiteral("OpenAI Responses 请求参数无效。");
+                break;
             case 401:
-            case 403: error.type = domain::llm::ChatErrorType::Unauthorized; break;
-            case 429: error.type = domain::llm::ChatErrorType::RateLimited; break;
-            case 404: error.type = domain::llm::ChatErrorType::ModelNotFound; break;
-            case 400: error.type = domain::llm::ChatErrorType::InvalidRequest; break;
+                error.category = domain::llm::ChatErrorCategory::Authentication;
+                error.code = QStringLiteral("ApiKeyInvalid");
+                error.userMessage = QStringLiteral("API Key 无效或缺失。");
+                error.suggestedAction = QStringLiteral("OpenSettings");
+                break;
+            case 403:
+                error.category = domain::llm::ChatErrorCategory::Authorization;
+                error.code = QStringLiteral("Forbidden");
+                error.userMessage = QStringLiteral("无权访问该 OpenAI 资源。");
+                break;
+            case 404:
+                error.category = domain::llm::ChatErrorCategory::Model;
+                error.code = QStringLiteral("ModelNotFound");
+                error.userMessage = QStringLiteral("指定的模型不存在。");
+                error.suggestedAction = QStringLiteral("ChangeModel");
+                break;
+            case 429:
+                error.category = domain::llm::ChatErrorCategory::RateLimit;
+                error.code = QStringLiteral("TooManyRequests");
+                error.userMessage = QStringLiteral("请求频率过高，正在重试...");
+                error.retryable = true;
+                error.suggestedAction = QStringLiteral("Retry");
+                break;
             default:
-                if (httpStatusCode >= 500) error.type = domain::llm::ChatErrorType::ServerError;
-                else if (httpStatusCode == 0) error.type = domain::llm::ChatErrorType::NetworkError;
-                else error.type = domain::llm::ChatErrorType::Unknown;
+                if (httpStatusCode >= 500) {
+                    error.category = domain::llm::ChatErrorCategory::Provider;
+                    error.code = QStringLiteral("ServerError");
+                    error.userMessage = QStringLiteral("OpenAI 服务端故障。");
+                    error.retryable = true;
+                    error.suggestedAction = QStringLiteral("Retry");
+                } else if (httpStatusCode == 0) {
+                    error.category = domain::llm::ChatErrorCategory::Network;
+                    error.code = QStringLiteral("NetworkError");
+                    error.userMessage = QStringLiteral("网络连接失败。");
+                    error.retryable = true;
+                } else {
+                    error.category = domain::llm::ChatErrorCategory::Unknown;
+                    error.code = QStringLiteral("Unknown");
+                    error.userMessage = QStringLiteral("遇到未知错误 (HTTP %1)。").arg(httpStatusCode);
+                }
+                break;
         }
 
         QJsonParseError parseErr;
@@ -117,6 +156,19 @@ namespace llm::protocol::openai_responses {
                 QJsonObject errObj = obj.value("error").toObject();
                 if (errObj.contains("message")) {
                     error.message = errObj.value("message").toString();
+                }
+                if (errObj.contains("code")) {
+                    error.providerErrorCode = errObj.value("code").toVariant().toString();
+                }
+                if (errObj.contains("type")) {
+                    QString errType = errObj.value("type").toString();
+                    if (errType == "insufficient_quota") {
+                        error.category = domain::llm::ChatErrorCategory::Quota;
+                        error.code = QStringLiteral("InsufficientQuota");
+                        error.userMessage = QStringLiteral("OpenAI 账户额度不足或欠费。");
+                        error.retryable = false;
+                        error.suggestedAction = QStringLiteral("OpenSettings");
+                    }
                 }
             }
         }
