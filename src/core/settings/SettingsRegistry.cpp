@@ -7,11 +7,6 @@
 #include <QFileSystemWatcher>
 
 namespace core::settings {
-    SettingsRegistry &SettingsRegistry::instance() {
-        static SettingsRegistry registry;
-        return registry;
-    }
-
     SettingsRegistry::SettingsRegistry(QObject *parent) : QObject(parent) {
         m_saveTimer = new QTimer(this);
         m_saveTimer->setSingleShot(true);

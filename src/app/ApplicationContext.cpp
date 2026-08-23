@@ -8,6 +8,9 @@
 #include "llm/protocol/gemini/GeminiProtocolAdapter.h"
 #include "llm/protocol/ollama/OllamaProtocolAdapter.h"
 #include "llm/protocol/openai_responses/OpenAIResponsesAdapter.h"
+#include "ui/screen/settings/appearance/AppearanceSettingsUIFactory.h"
+#include "ui/screen/settings/logging/LoggingSettingsUIFactory.h"
+#include "ui/screen/settings/model/ModelSettingsUIFactory.h"
 #include <QSysInfo>
 #include <QUuid>
 
@@ -31,7 +34,17 @@ namespace app {
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
         m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
 
-        // 1.5 网络与 LLM 协议注册
+        // 1.5 设置系统持久化与 Providers 初始化
+        m_settingsRegistry = std::make_unique<core::settings::SettingsRegistry>();
+        m_appearanceSettingsProvider = std::make_shared<core::settings::AppearanceSettingsProvider>();
+        m_loggingSettingsProvider = std::make_shared<core::settings::LoggingSettingsProvider>();
+        m_modelSettingsProvider = std::make_shared<core::settings::ModelSettingsProvider>();
+
+        m_settingsRegistry->registerProvider(m_appearanceSettingsProvider);
+        m_settingsRegistry->registerProvider(m_loggingSettingsProvider);
+        m_settingsRegistry->registerProvider(m_modelSettingsProvider);
+
+        // 1.8 网络与 LLM 协议注册
         m_httpClient = std::make_shared<network::QtHttpClient>();
         m_protocolRegistry = std::make_shared<llm::ProtocolRegistry>();
         
@@ -63,7 +76,7 @@ namespace app {
         // 2. 领域服务层初始化
         m_conversationService = std::make_unique<services::conversation::ConversationService>(m_conversationRepo.get());
         m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
-        m_settingsService = std::make_unique<services::settings::SettingsService>();
+        m_settingsService = std::make_unique<services::settings::SettingsService>(m_settingsRegistry.get());
 
         // 3. 对话业务用例初始化
         m_sendMessageUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
@@ -104,18 +117,64 @@ namespace app {
             m_modelRegistry
         );
 
-        // 7. ViewModels 表现层构造（直接注入对应域的 UseCase Bundle）
+        // 7. ViewModels 表现层构造
         m_mainViewModel = std::make_unique<ui::screen::main::MainViewModel>();
         m_chatViewModel = std::make_unique<ui::screen::chat::ChatViewModel>(chatUseCases());
         m_workViewModel = std::make_unique<ui::screen::work::WorkViewModel>(workUseCases());
         m_knowledgeViewModel = std::make_unique<ui::screen::knowledge::KnowledgeViewModel>(knowledgeUseCases());
+
+        // 7.5 设置系统局部 ViewModels、Coordinator 与页面 ViewModel
+        m_appearanceSettingsViewModel = std::make_unique<ui::screen::settings::AppearanceSettingsViewModel>(m_appearanceSettingsProvider.get());
+        m_loggingSettingsViewModel = std::make_unique<ui::screen::settings::LoggingSettingsViewModel>(m_loggingSettingsProvider.get());
+        m_modelSettingsViewModel = std::make_unique<ui::screen::settings::ModelSettingsViewModel>();
         m_settingsViewModel = std::make_unique<ui::screen::settings::SettingsViewModel>(settingsUseCases());
+
+        m_settingsCoordinator = std::make_unique<ui::screen::settings::SettingsCoordinator>(
+            m_modelRegistry.get(),
+            m_refreshModelsUseCase.get()
+        );
+
+        // 监听模型设置触发打开弹窗信号
+        QObject::connect(m_modelSettingsViewModel.get(), &ui::screen::settings::ModelSettingsViewModel::modelManagerRequested,
+                         [this]() {
+                             if (m_settingsCoordinator) {
+                                 m_settingsCoordinator->openModelManager();
+                             }
+                         });
+
+        // 8. 显式 DI 注册所有 Settings UIFactories
+        registerSettings();
     }
 
     ApplicationContext::~ApplicationContext() {
         auto &logger = core::logging::LoggingService::instance();
         logger.info(core::logging::Category::AppLifecycle, QStringLiteral("ForgeAI shutting down..."));
         logger.flush();
+    }
+
+    void ApplicationContext::registerSettings() {
+        m_settingsUiRegistry = std::make_unique<ui::screen::settings::SettingsUIRegistry>();
+
+        m_settingsUiRegistry->registerFactory(
+            std::make_shared<ui::screen::settings::ModelSettingsUIFactory>(m_modelSettingsViewModel.get())
+        );
+
+        m_settingsUiRegistry->registerFactory(
+            std::make_shared<ui::screen::settings::AppearanceSettingsUIFactory>(m_appearanceSettingsViewModel.get())
+        );
+
+        m_settingsUiRegistry->registerFactory(
+            std::make_shared<ui::screen::settings::LoggingLevelSettingsUIFactory>(m_loggingSettingsViewModel.get())
+        );
+        m_settingsUiRegistry->registerFactory(
+            std::make_shared<ui::screen::settings::LoggingStorageSettingsUIFactory>(m_loggingSettingsViewModel.get())
+        );
+        m_settingsUiRegistry->registerFactory(
+            std::make_shared<ui::screen::settings::LoggingOpenDirSettingsUIFactory>(m_loggingSettingsViewModel.get())
+        );
+        m_settingsUiRegistry->registerFactory(
+            std::make_shared<ui::screen::settings::LoggingExportSettingsUIFactory>(m_loggingSettingsViewModel.get())
+        );
     }
 
     data::sqlite::DatabaseManager &ApplicationContext::dbManager() {
@@ -132,6 +191,18 @@ namespace app {
 
     core::model::ModelRegistry *ApplicationContext::modelRegistry() const {
         return m_modelRegistry.get();
+    }
+
+    core::settings::SettingsRegistry *ApplicationContext::settingsRegistry() const {
+        return m_settingsRegistry.get();
+    }
+
+    ui::screen::settings::SettingsUIRegistry *ApplicationContext::settingsUiRegistry() const {
+        return m_settingsUiRegistry.get();
+    }
+
+    ui::screen::settings::SettingsCoordinator *ApplicationContext::settingsCoordinator() const {
+        return m_settingsCoordinator.get();
     }
 
     domain::service::IConversationService *ApplicationContext::conversationService() const {
@@ -199,6 +270,18 @@ namespace app {
 
     ui::screen::knowledge::KnowledgeViewModel *ApplicationContext::knowledgeViewModel() const {
         return m_knowledgeViewModel.get();
+    }
+
+    ui::screen::settings::AppearanceSettingsViewModel *ApplicationContext::appearanceSettingsViewModel() const {
+        return m_appearanceSettingsViewModel.get();
+    }
+
+    ui::screen::settings::LoggingSettingsViewModel *ApplicationContext::loggingSettingsViewModel() const {
+        return m_loggingSettingsViewModel.get();
+    }
+
+    ui::screen::settings::ModelSettingsViewModel *ApplicationContext::modelSettingsViewModel() const {
+        return m_modelSettingsViewModel.get();
     }
 
     ui::screen::settings::SettingsViewModel *ApplicationContext::settingsViewModel() const {

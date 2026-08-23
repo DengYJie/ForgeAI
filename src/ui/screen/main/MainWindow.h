@@ -16,6 +16,8 @@ namespace ui::screen::knowledge {
 
 namespace ui::screen::settings {
     class SettingsViewModel;
+    class SettingsUIRegistry;
+    class SettingsCoordinator;
 }
 
 namespace ui::screen::main {
@@ -35,6 +37,8 @@ namespace ui::screen::main {
             ui::screen::work::WorkViewModel *workViewModel = nullptr,
             ui::screen::knowledge::KnowledgeViewModel *knowledgeViewModel = nullptr,
             ui::screen::settings::SettingsViewModel *settingsViewModel = nullptr,
+            ui::screen::settings::SettingsUIRegistry *settingsUiRegistry = nullptr,
+            ui::screen::settings::SettingsCoordinator *settingsCoordinator = nullptr,
             QWidget *parent = nullptr
         );
 
@@ -54,5 +58,7 @@ namespace ui::screen::main {
         ui::screen::work::WorkViewModel *m_workViewModel = nullptr;
         ui::screen::knowledge::KnowledgeViewModel *m_knowledgeViewModel = nullptr;
         ui::screen::settings::SettingsViewModel *m_settingsViewModel = nullptr;
+        ui::screen::settings::SettingsUIRegistry *m_settingsUiRegistry = nullptr;
+        ui::screen::settings::SettingsCoordinator *m_settingsCoordinator = nullptr;
     };
 } // namespace ui::screen::main

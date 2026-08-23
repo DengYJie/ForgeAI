@@ -6,7 +6,8 @@
 namespace core::settings {
 
     /**
-     * @brief 日志与诊断配置项持久化 Provider
+     * @brief 日志与诊断配置项持久化提供者
+     * @details 维护运行时日志过滤级别并持久化到配置中
      */
     class LoggingSettingsProvider : public BaseSettingsProvider {
         Q_OBJECT

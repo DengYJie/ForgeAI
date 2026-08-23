@@ -1,12 +1,11 @@
-#include "CoreSettingsProvider.h"
-#include "core/settings/SettingsRegistry.h"
+#include "AppearanceSettingsProvider.h"
 #include <QGuiApplication>
 #include <QSettings>
 #include <QPalette>
 #include "compatibility/QtCompat.h"
 
 namespace core::settings {
-    CoreSettingsProvider::CoreSettingsProvider(QObject *parent) : BaseSettingsProvider(parent) {
+    AppearanceSettingsProvider::AppearanceSettingsProvider(QObject *parent) : BaseSettingsProvider(parent) {
         fluentConnectSystemColorSchemeChanged(this, [this]() {
             if (get(ThemeModeKey) == ThemeMode::System) {
                 applyTheme();
@@ -14,7 +13,7 @@ namespace core::settings {
         });
     }
 
-    fluent::FluentElement::Theme CoreSettingsProvider::resolveSystemTheme() {
+    fluent::FluentElement::Theme AppearanceSettingsProvider::resolveSystemTheme() {
         const FluentSystemColorScheme scheme = fluentSystemColorScheme();
         if (scheme == FluentSystemColorScheme::Dark)
             return fluent::FluentElement::Dark;
@@ -40,17 +39,17 @@ namespace core::settings {
         return fluent::FluentElement::Dark;
     }
 
-    void CoreSettingsProvider::onSettingChanged(const QString &key) {
+    void AppearanceSettingsProvider::onSettingChanged(const QString &key) {
         if (key == ThemeModeKey.name) {
             applyTheme();
         }
     }
 
-    void CoreSettingsProvider::onSettingsLoaded() {
+    void AppearanceSettingsProvider::onSettingsLoaded() {
         applyTheme();
     }
 
-    void CoreSettingsProvider::applyTheme() const {
+    void AppearanceSettingsProvider::applyTheme() const {
         ThemeMode currentMode = get(ThemeModeKey);
         fluent::FluentElement::Theme effective = fluent::FluentElement::Dark;
         if (currentMode == ThemeMode::System) {
@@ -63,5 +62,3 @@ namespace core::settings {
         fluent::FluentElement::setThemeDeferred(effective);
     }
 } // namespace core::settings
-
-REGISTER_SETTINGS_PROVIDER (core::settings::CoreSettingsProvider)

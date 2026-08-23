@@ -5,6 +5,7 @@ namespace core::settings {
 
     /**
      * @brief 模型与服务商设置提供者
+     * @details 提供模型模块在 Settings 系统中的 Provider 接入点
      */
     class ModelSettingsProvider : public BaseSettingsProvider {
         Q_OBJECT

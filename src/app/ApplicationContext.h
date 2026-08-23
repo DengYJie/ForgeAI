@@ -5,6 +5,10 @@
 #include "data/repository/SqliteConversationRepository.h"
 #include "data/repository/SqliteModelRepository.h"
 #include "core/model/ModelRegistry.h"
+#include "core/settings/SettingsRegistry.h"
+#include "core/settings/providers/AppearanceSettingsProvider.h"
+#include "core/settings/providers/LoggingSettingsProvider.h"
+#include "core/settings/providers/ModelSettingsProvider.h"
 #include "services/conversation/ConversationService.h"
 #include "services/model/ModelService.h"
 #include "services/settings/SettingsService.h"
@@ -21,6 +25,11 @@
 #include "ui/screen/work/WorkViewModel.h"
 #include "ui/screen/knowledge/KnowledgeViewModel.h"
 #include "ui/screen/settings/SettingsViewModel.h"
+#include "ui/screen/settings/SettingsUIRegistry.h"
+#include "ui/screen/settings/SettingsCoordinator.h"
+#include "ui/screen/settings/appearance/AppearanceSettingsViewModel.h"
+#include "ui/screen/settings/logging/LoggingSettingsViewModel.h"
+#include "ui/screen/settings/model/ModelSettingsViewModel.h"
 
 namespace app {
     /**
@@ -42,6 +51,9 @@ namespace app {
 
         // 3. 全局核心注册中心
         core::model::ModelRegistry *modelRegistry() const;
+        core::settings::SettingsRegistry *settingsRegistry() const;
+        ui::screen::settings::SettingsUIRegistry *settingsUiRegistry() const;
+        ui::screen::settings::SettingsCoordinator *settingsCoordinator() const;
 
         // 4. 服务层
         domain::service::IConversationService *conversationService() const;
@@ -61,13 +73,25 @@ namespace app {
         ui::screen::chat::ChatViewModel *chatViewModel() const;
         ui::screen::work::WorkViewModel *workViewModel() const;
         ui::screen::knowledge::KnowledgeViewModel *knowledgeViewModel() const;
+
+        ui::screen::settings::AppearanceSettingsViewModel *appearanceSettingsViewModel() const;
+        ui::screen::settings::LoggingSettingsViewModel *loggingSettingsViewModel() const;
+        ui::screen::settings::ModelSettingsViewModel *modelSettingsViewModel() const;
         ui::screen::settings::SettingsViewModel *settingsViewModel() const;
 
     private:
+        void registerSettings();
+
         // 仓储与基础组件
         std::unique_ptr<data::repository::SqliteConversationRepository> m_conversationRepo;
         std::shared_ptr<data::repository::SqliteModelRepository> m_modelRepo;
         std::shared_ptr<core::model::ModelRegistry> m_modelRegistry;
+
+        // 设置持久化与提供者
+        std::unique_ptr<core::settings::SettingsRegistry> m_settingsRegistry;
+        std::shared_ptr<core::settings::AppearanceSettingsProvider> m_appearanceSettingsProvider;
+        std::shared_ptr<core::settings::LoggingSettingsProvider> m_loggingSettingsProvider;
+        std::shared_ptr<core::settings::ModelSettingsProvider> m_modelSettingsProvider;
 
         // 网络与 LLM 网关
         std::shared_ptr<network::QtHttpClient> m_httpClient;
@@ -107,6 +131,13 @@ namespace app {
         std::unique_ptr<ui::screen::chat::ChatViewModel> m_chatViewModel;
         std::unique_ptr<ui::screen::work::WorkViewModel> m_workViewModel;
         std::unique_ptr<ui::screen::knowledge::KnowledgeViewModel> m_knowledgeViewModel;
+
+        // 设置体系 ViewModels & UI Registry & Coordinator
+        std::unique_ptr<ui::screen::settings::AppearanceSettingsViewModel> m_appearanceSettingsViewModel;
+        std::unique_ptr<ui::screen::settings::LoggingSettingsViewModel> m_loggingSettingsViewModel;
+        std::unique_ptr<ui::screen::settings::ModelSettingsViewModel> m_modelSettingsViewModel;
         std::unique_ptr<ui::screen::settings::SettingsViewModel> m_settingsViewModel;
+        std::unique_ptr<ui::screen::settings::SettingsCoordinator> m_settingsCoordinator;
+        std::unique_ptr<ui::screen::settings::SettingsUIRegistry> m_settingsUiRegistry;
     };
 } // namespace app

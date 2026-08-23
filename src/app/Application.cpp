@@ -32,7 +32,9 @@ namespace app {
     }
 
     void Application::initializeSettings() {
-        core::settings::SettingsRegistry::instance().loadAll();
+        if (m_context && m_context->settingsRegistry()) {
+            m_context->settingsRegistry()->loadAll();
+        }
     }
 
     void Application::initializeDatabase() {
@@ -54,7 +56,9 @@ namespace app {
             m_context->chatViewModel(),
             m_context->workViewModel(),
             m_context->knowledgeViewModel(),
-            m_context->settingsViewModel()
+            m_context->settingsViewModel(),
+            m_context->settingsUiRegistry(),
+            m_context->settingsCoordinator()
         );
         m_mainWindow->show();
         return m_qapp->exec();

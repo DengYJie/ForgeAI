@@ -1,6 +1,4 @@
 #include "ModelSettingsProvider.h"
-#include "core/settings/ISettingsProvider.h"
-#include "core/settings/SettingsRegistry.h"
 
 namespace core::settings {
 
@@ -17,5 +15,3 @@ namespace core::settings {
     }
 
 } // namespace core::settings
-
-REGISTER_SETTINGS_PROVIDER(core::settings::ModelSettingsProvider)

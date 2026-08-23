@@ -1,5 +1,4 @@
 #include "LoggingSettingsProvider.h"
-#include "core/settings/SettingsRegistry.h"
 #include "core/logging/LoggingService.h"
 
 namespace core::settings {
@@ -41,5 +40,3 @@ namespace core::settings {
     }
 
 } // namespace core::settings
-
-REGISTER_SETTINGS_PROVIDER(core::settings::LoggingSettingsProvider)

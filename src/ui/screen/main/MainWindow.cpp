@@ -18,13 +18,17 @@ namespace ui::screen::main {
         ui::screen::work::WorkViewModel *workViewModel,
         ui::screen::knowledge::KnowledgeViewModel *knowledgeViewModel,
         ui::screen::settings::SettingsViewModel *settingsViewModel,
+        ui::screen::settings::SettingsUIRegistry *settingsUiRegistry,
+        ui::screen::settings::SettingsCoordinator *settingsCoordinator,
         QWidget *parent
     ) : NavigationWindow(parent),
         m_viewModel(mainViewModel),
         m_chatViewModel(chatViewModel),
         m_workViewModel(workViewModel),
         m_knowledgeViewModel(knowledgeViewModel),
-        m_settingsViewModel(settingsViewModel) {
+        m_settingsViewModel(settingsViewModel),
+        m_settingsUiRegistry(settingsUiRegistry),
+        m_settingsCoordinator(settingsCoordinator) {
         setupUi();
         setupConnections();
         if (m_viewModel) {
@@ -73,7 +77,12 @@ namespace ui::screen::main {
         );
 
         // 2. 注册底部设置项 (Settings)
-        auto *settingsPage = new ui::screen::settings::SettingsPage(m_settingsViewModel, this);
+        auto *settingsPage = new ui::screen::settings::SettingsPage(
+            m_settingsViewModel,
+            m_settingsUiRegistry,
+            m_settingsCoordinator,
+            this
+        );
         addSubInterface(
             QStringLiteral("settings"),
             settingsPage,

@@ -252,8 +252,9 @@ set(PROJECT_SOURCES
         src/core/settings/SettingsRegistry.h
         src/core/settings/SettingsRegistry.cpp
         src/core/settings/ISettingsProvider.h
-        src/core/settings/providers/CoreSettingsProvider.h
-        src/core/settings/providers/CoreSettingsProvider.cpp
+        src/core/settings/BaseSettingsProvider.h
+        src/core/settings/providers/AppearanceSettingsProvider.h
+        src/core/settings/providers/AppearanceSettingsProvider.cpp
         src/core/settings/providers/LoggingSettingsProvider.h
         src/core/settings/providers/LoggingSettingsProvider.cpp
         src/core/settings/providers/ModelSettingsProvider.h
@@ -261,12 +262,20 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/ISettingsUIFactory.h
         src/ui/screen/settings/SettingsUIRegistry.h
         src/ui/screen/settings/SettingsUIRegistry.cpp
-        src/ui/screen/settings/factories/CoreSettingsUIFactory.h
-        src/ui/screen/settings/factories/CoreSettingsUIFactory.cpp
-        src/ui/screen/settings/factories/LoggingSettingsUIFactory.h
-        src/ui/screen/settings/factories/LoggingSettingsUIFactory.cpp
-        src/ui/screen/settings/factories/ModelManagerSettingsUIFactory.h
-        src/ui/screen/settings/factories/ModelManagerSettingsUIFactory.cpp
+        src/ui/screen/settings/SettingsCoordinator.h
+        src/ui/screen/settings/SettingsCoordinator.cpp
+        src/ui/screen/settings/appearance/AppearanceSettingsViewModel.h
+        src/ui/screen/settings/appearance/AppearanceSettingsViewModel.cpp
+        src/ui/screen/settings/appearance/AppearanceSettingsUIFactory.h
+        src/ui/screen/settings/appearance/AppearanceSettingsUIFactory.cpp
+        src/ui/screen/settings/logging/LoggingSettingsViewModel.h
+        src/ui/screen/settings/logging/LoggingSettingsViewModel.cpp
+        src/ui/screen/settings/logging/LoggingSettingsUIFactory.h
+        src/ui/screen/settings/logging/LoggingSettingsUIFactory.cpp
+        src/ui/screen/settings/model/ModelSettingsViewModel.h
+        src/ui/screen/settings/model/ModelSettingsViewModel.cpp
+        src/ui/screen/settings/model/ModelSettingsUIFactory.h
+        src/ui/screen/settings/model/ModelSettingsUIFactory.cpp
         src/ui/screen/settings/model_manager/ModelItemCard.h
         src/ui/screen/settings/model_manager/ModelItemCard.cpp
         src/ui/screen/settings/model_manager/ProviderNavigationItem.h

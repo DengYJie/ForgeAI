@@ -3,6 +3,7 @@
 #include <QVBoxLayout>
 #include <QGridLayout>
 #include <QPalette>
+#include <algorithm>
 
 #include <FluentQt/Design.h>
 #include <FluentQt/Foundation.h>
@@ -10,8 +11,8 @@
 #include <FluentQt/Layout.h>
 #include <FluentQt/TextFields.h>
 
-#include "core/settings/SettingsRegistry.h"
 #include "ui/screen/settings/SettingsUIRegistry.h"
+#include "ui/screen/settings/SettingsCoordinator.h"
 #include "SettingsViewModel.h"
 
 using namespace fluent;
@@ -143,9 +144,13 @@ namespace ui::screen::settings {
 
     SettingsPage::SettingsPage(
         SettingsViewModel *viewModel,
+        SettingsUIRegistry *uiRegistry,
+        SettingsCoordinator *coordinator,
         QWidget *parent
     ) : BasePage(parent),
-        m_viewModel(viewModel) {
+        m_viewModel(viewModel),
+        m_uiRegistry(uiRegistry),
+        m_coordinator(coordinator) {
         setObjectName(QStringLiteral("settingsPage"));
 
         setupUi();
@@ -187,30 +192,43 @@ namespace ui::screen::settings {
         m_contentLayout->addSpacing(12);
 
         // 2. 动态分组与加载设置项
-        QMap<QString, QList<std::shared_ptr<ISettingsUIFactory> > > groupedFactories;
-        auto factories = SettingsUIRegistry::instance().allFactories();
-        for (const auto &factory: factories) {
-            auto provider = core::settings::SettingsRegistry::instance().getProvider(factory->targetProviderId());
-            if (provider) {
-                groupedFactories[provider->category()].append(factory);
-            }
-        }
+        if (m_uiRegistry) {
+            auto factories = m_uiRegistry->sortedFactories();
 
-        for (auto it = groupedFactories.begin(); it != groupedFactories.end(); ++it) {
-            // 生成分组标题
-            m_contentLayout->addWidget(createSectionHeader(it.key()));
+            struct CategoryGroup {
+                QString categoryId;
+                QString categoryDisplayName;
+                QList<std::shared_ptr<ISettingsUIFactory>> factories;
+            };
 
-            // 渲染该分组下的所有控制卡片
-            for (const auto &factory: it.value()) {
-                QWidget *control = factory->createControlWidget(m_viewport);
-                m_contentLayout->addWidget(createSettingsCard(
-                    factory->iconGlyph(),
-                    factory->title(),
-                    factory->subtitle(),
-                    control
-                ));
+            QList<CategoryGroup> groups;
+            for (const auto &factory: factories) {
+                auto it = std::find_if(groups.begin(), groups.end(), [&](const CategoryGroup &g) {
+                    return g.categoryId == factory->categoryId();
+                });
+                if (it != groups.end()) {
+                    it->factories.append(factory);
+                } else {
+                    groups.append({factory->categoryId(), factory->categoryDisplayName(), {factory}});
+                }
             }
-            m_contentLayout->addSpacing(12);
+
+            for (const auto &group: groups) {
+                // 生成分组标题
+                m_contentLayout->addWidget(createSectionHeader(group.categoryDisplayName));
+
+                // 渲染该分组下的所有控制卡片
+                for (const auto &factory: group.factories) {
+                    QWidget *control = factory->createControlWidget(m_viewport);
+                    m_contentLayout->addWidget(createSettingsCard(
+                        factory->iconGlyph(),
+                        factory->title(),
+                        factory->subtitle(),
+                        control
+                    ));
+                }
+                m_contentLayout->addSpacing(12);
+            }
         }
 
         m_contentLayout->addStretch(1);

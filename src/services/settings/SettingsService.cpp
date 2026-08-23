@@ -2,15 +2,19 @@
 #include "core/settings/SettingsRegistry.h"
 
 namespace services::settings {
-    SettingsService::SettingsService(QObject *parent)
-        : ISettingsService(parent) {
+    SettingsService::SettingsService(core::settings::SettingsRegistry *registry, QObject *parent)
+        : ISettingsService(parent), m_registry(registry) {
     }
 
     void SettingsService::loadAll() {
-        core::settings::SettingsRegistry::instance().loadAll();
+        if (m_registry) {
+            m_registry->loadAll();
+        }
     }
 
     void SettingsService::saveAllSync() {
-        core::settings::SettingsRegistry::instance().saveAllSync();
+        if (m_registry) {
+            m_registry->saveAllSync();
+        }
     }
 } // namespace services::settings

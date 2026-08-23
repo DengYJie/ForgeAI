@@ -1,8 +1,4 @@
 #include "LoggingSettingsUIFactory.h"
-#include "core/settings/SettingsRegistry.h"
-#include "core/settings/providers/LoggingSettingsProvider.h"
-#include "core/logging/LoggingSettingsService.h"
-#include "ui/screen/settings/SettingsUIRegistry.h"
 
 #include <QHBoxLayout>
 #include <QFileDialog>
@@ -13,6 +9,18 @@
 #include <FluentQt/StatusInfo.h>
 
 namespace ui::screen::settings {
+
+    // ==========================================
+    // 1. LoggingLevelSettingsUIFactory
+    // ==========================================
+
+    LoggingLevelSettingsUIFactory::LoggingLevelSettingsUIFactory(LoggingSettingsViewModel *viewModel)
+        : m_viewModel(viewModel) {
+    }
+
+    QString LoggingLevelSettingsUIFactory::categoryDisplayName() const {
+        return QObject::tr("日志与诊断");
+    }
 
     QString LoggingLevelSettingsUIFactory::iconGlyph() const {
         return Typography::Icons::Document;
@@ -27,32 +35,43 @@ namespace ui::screen::settings {
     }
 
     QWidget *LoggingLevelSettingsUIFactory::createControlWidget(QWidget *parent) {
-        auto providerBase = core::settings::SettingsRegistry::instance().getProvider("logging");
-        auto provider = std::dynamic_pointer_cast<core::settings::LoggingSettingsProvider>(providerBase);
+        if (!m_viewModel) return new QWidget(parent);
 
         auto *combo = new fluent::basicinput::ComboBox(parent);
         combo->addItems({QObject::tr("普通"), QObject::tr("详细"), QObject::tr("调试")});
         combo->setMinimumWidth(130);
 
-        if (provider) {
-            int currentLevel = provider->get(core::settings::LoggingSettingsProvider::LogLevelKey);
-            combo->setCurrentIndex(currentLevel);
+        int currentLevel = m_viewModel->logLevel();
+        combo->setCurrentIndex(currentLevel);
 
-            QObject::connect(combo, qOverload<int>(&fluent::basicinput::ComboBox::currentIndexChanged),
-                             [provider](int idx) {
-                                 provider->set(core::settings::LoggingSettingsProvider::LogLevelKey, idx);
-                             });
+        auto *vm = m_viewModel;
+        QObject::connect(combo, qOverload<int>(&fluent::basicinput::ComboBox::currentIndexChanged),
+                         [vm](int idx) {
+                             if (vm) {
+                                 vm->setLogLevel(idx);
+                             }
+                         });
 
-            QObject::connect(provider.get(), &core::settings::ISettingsProvider::dataChanged, combo,
-                             [combo, provider]() {
-                                 int index = provider->get(core::settings::LoggingSettingsProvider::LogLevelKey);
-                                 if (combo->currentIndex() != index) {
-                                     combo->setCurrentIndex(index);
-                                 }
-                             });
-        }
+        QObject::connect(m_viewModel, &LoggingSettingsViewModel::logLevelChanged, combo,
+                         [combo](int level) {
+                             if (combo->currentIndex() != level) {
+                                 combo->setCurrentIndex(level);
+                             }
+                         });
 
         return combo;
+    }
+
+    // ==========================================
+    // 2. LoggingStorageSettingsUIFactory
+    // ==========================================
+
+    LoggingStorageSettingsUIFactory::LoggingStorageSettingsUIFactory(LoggingSettingsViewModel *viewModel)
+        : m_viewModel(viewModel) {
+    }
+
+    QString LoggingStorageSettingsUIFactory::categoryDisplayName() const {
+        return QObject::tr("日志与诊断");
     }
 
     QString LoggingStorageSettingsUIFactory::iconGlyph() const {
@@ -68,13 +87,15 @@ namespace ui::screen::settings {
     }
 
     QWidget *LoggingStorageSettingsUIFactory::createControlWidget(QWidget *parent) {
+        if (!m_viewModel) return new QWidget(parent);
+
         auto *container = new QWidget(parent);
         auto *layout = new QHBoxLayout(container);
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(16);
 
         auto *sizeLabel = new fluent::textfields::Label(
-            core::logging::LoggingSettingsService::instance().getFormattedLogSize(),
+            m_viewModel->formattedLogSize(),
             container
         );
         sizeLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
@@ -87,16 +108,11 @@ namespace ui::screen::settings {
         layout->addWidget(sizeLabel, 0, Qt::AlignVCenter);
         layout->addWidget(clearBtn, 0, Qt::AlignVCenter);
 
-        auto refreshSize = [sizeLabel]() {
-            if (sizeLabel) {
-                sizeLabel->setText(core::logging::LoggingSettingsService::instance().getFormattedLogSize());
-            }
-        };
-
-        QObject::connect(clearBtn, &fluent::basicinput::Button::clicked, parent, [parent, refreshSize]() {
-            bool ok = core::logging::LoggingSettingsService::instance().clearLogs();
+        auto *vm = m_viewModel;
+        QObject::connect(clearBtn, &fluent::basicinput::Button::clicked, parent, [parent, vm]() {
+            if (!vm) return;
+            bool ok = vm->clearLogs();
             if (ok) {
-                refreshSize();
                 fluent::status_info::Toast::showToast(
                     parent,
                     QObject::tr("日志已清除"),
@@ -105,12 +121,26 @@ namespace ui::screen::settings {
             }
         });
 
-        QObject::connect(&core::logging::LoggingSettingsService::instance(),
-                         &core::logging::LoggingSettingsService::logSizeChanged,
-                         sizeLabel,
-                         refreshSize);
+        QObject::connect(m_viewModel, &LoggingSettingsViewModel::logSizeChanged, sizeLabel,
+                         [sizeLabel](const QString &formattedSize) {
+                             if (sizeLabel) {
+                                 sizeLabel->setText(formattedSize);
+                             }
+                         });
 
         return container;
+    }
+
+    // ==========================================
+    // 3. LoggingOpenDirSettingsUIFactory
+    // ==========================================
+
+    LoggingOpenDirSettingsUIFactory::LoggingOpenDirSettingsUIFactory(LoggingSettingsViewModel *viewModel)
+        : m_viewModel(viewModel) {
+    }
+
+    QString LoggingOpenDirSettingsUIFactory::categoryDisplayName() const {
+        return QObject::tr("日志与诊断");
     }
 
     QString LoggingOpenDirSettingsUIFactory::iconGlyph() const {
@@ -130,11 +160,26 @@ namespace ui::screen::settings {
         btn->setText(QObject::tr("打开日志目录"));
         btn->setMinimumWidth(130);
 
-        QObject::connect(btn, &fluent::basicinput::Button::clicked, []() {
-            core::logging::LoggingSettingsService::instance().openLogDirectory();
+        auto *vm = m_viewModel;
+        QObject::connect(btn, &fluent::basicinput::Button::clicked, [vm]() {
+            if (vm) {
+                vm->openLogDirectory();
+            }
         });
 
         return btn;
+    }
+
+    // ==========================================
+    // 4. LoggingExportSettingsUIFactory
+    // ==========================================
+
+    LoggingExportSettingsUIFactory::LoggingExportSettingsUIFactory(LoggingSettingsViewModel *viewModel)
+        : m_viewModel(viewModel) {
+    }
+
+    QString LoggingExportSettingsUIFactory::categoryDisplayName() const {
+        return QObject::tr("日志与诊断");
     }
 
     QString LoggingExportSettingsUIFactory::iconGlyph() const {
@@ -154,7 +199,9 @@ namespace ui::screen::settings {
         btn->setText(QObject::tr("导出诊断日志"));
         btn->setMinimumWidth(130);
 
-        QObject::connect(btn, &fluent::basicinput::Button::clicked, parent, [parent]() {
+        auto *vm = m_viewModel;
+        QObject::connect(btn, &fluent::basicinput::Button::clicked, parent, [parent, vm]() {
+            if (!vm) return;
             QString defaultName = QStringLiteral("forgeai-diagnostics-") +
                                   QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")) +
                                   QStringLiteral(".zip");
@@ -170,7 +217,7 @@ namespace ui::screen::settings {
                 return;
             }
 
-            bool success = core::logging::LoggingSettingsService::instance().exportDiagnostics(savePath);
+            bool success = vm->exportDiagnostics(savePath);
             if (success) {
                 fluent::status_info::Toast::showToast(
                     parent,
@@ -190,8 +237,3 @@ namespace ui::screen::settings {
     }
 
 } // namespace ui::screen::settings
-
-REGISTER_SETTINGS_UI(ui::screen::settings::LoggingLevelSettingsUIFactory)
-REGISTER_SETTINGS_UI(ui::screen::settings::LoggingStorageSettingsUIFactory)
-REGISTER_SETTINGS_UI(ui::screen::settings::LoggingOpenDirSettingsUIFactory)
-REGISTER_SETTINGS_UI(ui::screen::settings::LoggingExportSettingsUIFactory)
