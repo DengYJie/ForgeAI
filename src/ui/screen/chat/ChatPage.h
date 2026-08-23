@@ -23,6 +23,11 @@ namespace ui::widget::message {
     class MessageListView;
 }
 
+namespace domain::service {
+    class IChatService;
+    class IConversationService;
+}
+
 namespace ui::screen::chat {
     class ChatSidebar;
     class ChatViewModel;
@@ -32,7 +37,11 @@ namespace ui::screen::chat {
         Q_OBJECT
 
     public:
-        explicit ChatPage(QWidget *parent = nullptr);
+        explicit ChatPage(
+            domain::service::IChatService *chatService = nullptr,
+            domain::service::IConversationService *conversationService = nullptr,
+            QWidget *parent = nullptr
+        );
 
         ~ChatPage() override = default;
 
@@ -42,6 +51,9 @@ namespace ui::screen::chat {
         void setupViewModel();
 
         void render(const ChatState &state);
+
+        domain::service::IChatService *m_chatService = nullptr;
+        domain::service::IConversationService *m_conversationService = nullptr;
 
         ChatViewModel *m_viewModel = nullptr;
         QVBoxLayout *m_rootLayout = nullptr;

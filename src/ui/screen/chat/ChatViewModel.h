@@ -8,6 +8,11 @@
 #include <QList>
 #include <QUuid>
 
+namespace domain::service {
+    class IChatService;
+    class IConversationService;
+}
+
 namespace ui::screen::chat {
     struct ChatState {
         // 会话列表
@@ -34,7 +39,11 @@ namespace ui::screen::chat {
         Q_OBJECT
 
     public:
-        explicit ChatViewModel(QObject *parent = nullptr);
+        explicit ChatViewModel(
+            domain::service::IChatService *chatService,
+            domain::service::IConversationService *conversationService,
+            QObject *parent = nullptr
+        );
 
         ~ChatViewModel() override;
 
@@ -61,9 +70,14 @@ namespace ui::screen::chat {
         void emitStateChanged() override;
 
     private:
+        void setupServiceConnections();
+
         static void recalculateAnchors(ChatState &s);
 
         // 在会话列表中同步更新指定 session 的 title
         static void syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title);
+
+        domain::service::IChatService *m_chatService = nullptr;
+        domain::service::IConversationService *m_conversationService = nullptr;
     };
 } // namespace ui::screen::chat

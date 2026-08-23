@@ -1,6 +1,7 @@
 #include <QtWidgets/QApplication>
 #include <FluentQt/FluentQt.h>
 #include "core/settings/SettingsRegistry.h"
+#include "app/ApplicationContext.h"
 #include "ui/screen/main/MainWindow.h"
 
 int main(int argc, char *argv[]) {
@@ -11,7 +12,13 @@ int main(int argc, char *argv[]) {
 
     core::settings::SettingsRegistry::instance().loadAll();
 
-    ui::screen::main::MainWindow mainWindow;
+    // 应用程序组合根 (Composition Root)
+    app::ApplicationContext context;
+
+    ui::screen::main::MainWindow mainWindow(
+        context.chatService(),
+        context.conversationService()
+    );
     mainWindow.show();
     return app.exec();
 }

@@ -2,6 +2,11 @@
 
 #include "ui/window/NavigationWindow.h"
 
+namespace domain::service {
+    class IChatService;
+    class IConversationService;
+}
+
 namespace ui::screen::main {
     class MainViewModel;
     struct MainState;
@@ -10,7 +15,11 @@ namespace ui::screen::main {
         Q_OBJECT
 
     public:
-        explicit MainWindow(QWidget *parent = nullptr);
+        explicit MainWindow(
+            domain::service::IChatService *chatService = nullptr,
+            domain::service::IConversationService *conversationService = nullptr,
+            QWidget *parent = nullptr
+        );
 
         ~MainWindow() override;
 
@@ -25,6 +34,8 @@ namespace ui::screen::main {
 
         void render(const MainState &state);
 
+        domain::service::IChatService *m_chatService = nullptr;
+        domain::service::IConversationService *m_conversationService = nullptr;
         MainViewModel *m_viewModel = nullptr;
     };
 } // namespace ui::screen::main

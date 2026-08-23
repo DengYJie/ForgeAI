@@ -12,8 +12,13 @@
 #include "ui/window/TitleBar.h"
 
 namespace ui::screen::main {
-    MainWindow::MainWindow(QWidget *parent)
-        : NavigationWindow(parent) {
+    MainWindow::MainWindow(
+        domain::service::IChatService *chatService,
+        domain::service::IConversationService *conversationService,
+        QWidget *parent
+    ) : NavigationWindow(parent),
+        m_chatService(chatService),
+        m_conversationService(conversationService) {
         setupUi();
         setupViewModel();
         setupConnections();
@@ -29,7 +34,7 @@ namespace ui::screen::main {
         navigationView()->setPaneOpen(false);
         
         // 1. 注册顶部导航项：对话、工作、知识库
-        auto *chatPage = new ui::screen::chat::ChatPage(this);
+        auto *chatPage = new ui::screen::chat::ChatPage(m_chatService, m_conversationService, this);
         addSubInterface(
             QStringLiteral("chat"),
             chatPage,

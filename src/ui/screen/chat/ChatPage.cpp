@@ -15,14 +15,19 @@ namespace ui::screen::chat {
     using namespace ui::widget::chat;
     using namespace ui::widget::message;
 
-    ChatPage::ChatPage(QWidget *parent)
-        : BasePage(parent) {
+    ChatPage::ChatPage(
+        domain::service::IChatService *chatService,
+        domain::service::IConversationService *conversationService,
+        QWidget *parent
+    ) : BasePage(parent),
+        m_chatService(chatService),
+        m_conversationService(conversationService) {
         setupViewModel();
         setupUi();
     }
 
     void ChatPage::setupViewModel() {
-        m_viewModel = new ChatViewModel(this);
+        m_viewModel = new ChatViewModel(m_chatService, m_conversationService, this);
     }
 
     void ChatPage::setupUi() {

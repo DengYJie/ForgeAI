@@ -219,6 +219,7 @@ set(PROJECT_SOURCES
         src/data/sqlite/DatabaseManager.h
         src/data/sqlite/DatabaseManager.cpp
         src/data/repository/SqliteConversationRepository.h
+        src/data/repository/SqliteConversationRepository.cpp
         src/data/repository/SqliteProjectRepository.h
         src/data/repository/SqliteModelRepository.h
         src/data/repository/SqliteModelRepository.cpp
@@ -231,6 +232,17 @@ set(PROJECT_SOURCES
         src/core/context/PromptBuilder.cpp
         src/core/model/ModelRegistry.h
         src/core/model/ModelRegistry.cpp
+
+        src/domain/service/IChatService.h
+        src/domain/service/IConversationService.h
+
+        src/services/chat/ChatService.h
+        src/services/chat/ChatService.cpp
+        src/services/conversation/ConversationService.h
+        src/services/conversation/ConversationService.cpp
+
+        src/app/ApplicationContext.h
+        src/app/ApplicationContext.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
