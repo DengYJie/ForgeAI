@@ -6,9 +6,11 @@
 #include "data/repository/SqliteModelRepository.h"
 #include "core/model/ModelRegistry.h"
 #include "services/conversation/ConversationService.h"
-#include "services/chat/ChatService.h"
 #include "services/model/ModelService.h"
 #include "services/settings/SettingsService.h"
+#include "network/QtHttpClient.h"
+#include "llm/ProtocolRegistry.h"
+#include "llm/ModelProviderService.h"
 #include "application/usecase/chat/ChatUseCases.h"
 #include "application/usecase/work/WorkUseCases.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
@@ -42,9 +44,10 @@ namespace app {
 
         // 4. 服务层
         domain::service::IConversationService *conversationService() const;
-        domain::service::IChatService *chatService() const;
         domain::service::IModelService *modelService() const;
         domain::service::ISettingsService *settingsService() const;
+        
+        application::ports::IChatModelGateway *chatModelGateway() const;
 
         // 5. UseCase 聚合包
         application::usecase::chat::ChatUseCases chatUseCases() const;
@@ -65,9 +68,13 @@ namespace app {
         std::shared_ptr<data::repository::SqliteModelRepository> m_modelRepo;
         std::shared_ptr<core::model::ModelRegistry> m_modelRegistry;
 
+        // 网络与 LLM 网关
+        std::shared_ptr<network::QtHttpClient> m_httpClient;
+        std::shared_ptr<llm::ProtocolRegistry> m_protocolRegistry;
+        std::unique_ptr<llm::ModelProviderService> m_chatGateway;
+
         // 领域服务
         std::unique_ptr<services::conversation::ConversationService> m_conversationService;
-        std::unique_ptr<services::chat::ChatService> m_chatService;
         std::unique_ptr<services::model::ModelService> m_modelService;
         std::unique_ptr<services::settings::SettingsService> m_settingsService;
 

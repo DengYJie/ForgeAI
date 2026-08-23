@@ -1,4 +1,9 @@
 #include "ApplicationContext.h"
+#include "llm/protocol/openai/OpenAIChatCompletionsAdapter.h"
+#include "llm/protocol/anthropic/AnthropicProtocolAdapter.h"
+#include "llm/protocol/gemini/GeminiProtocolAdapter.h"
+#include "llm/protocol/ollama/OllamaProtocolAdapter.h"
+#include "llm/protocol/openai_responses/OpenAIResponsesAdapter.h"
 
 namespace app {
     ApplicationContext::ApplicationContext() {
@@ -7,19 +12,47 @@ namespace app {
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
         m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
 
+        // 1.5 网络与 LLM 协议注册
+        m_httpClient = std::make_shared<network::QtHttpClient>();
+        m_protocolRegistry = std::make_shared<llm::ProtocolRegistry>();
+        
+        // 注册各协议适配器
+        m_protocolRegistry->registerAdapter(
+            domain::model::ProviderType::OpenAIChatCompletionsCompatible,
+            std::make_shared<llm::protocol::openai::OpenAIChatCompletionsAdapter>()
+        );
+        m_protocolRegistry->registerAdapter(
+            domain::model::ProviderType::OpenAIResponses,
+            std::make_shared<llm::protocol::openai_responses::OpenAIResponsesAdapter>()
+        );
+        m_protocolRegistry->registerAdapter(
+            domain::model::ProviderType::Anthropic,
+            std::make_shared<llm::protocol::anthropic::AnthropicProtocolAdapter>()
+        );
+        m_protocolRegistry->registerAdapter(
+            domain::model::ProviderType::GoogleGemini,
+            std::make_shared<llm::protocol::gemini::GeminiProtocolAdapter>()
+        );
+        m_protocolRegistry->registerAdapter(
+            domain::model::ProviderType::Ollama,
+            std::make_shared<llm::protocol::ollama::OllamaProtocolAdapter>()
+        );
+
+        m_chatGateway = std::make_unique<llm::ModelProviderService>(m_httpClient, m_protocolRegistry);
+
         // 2. 领域服务层初始化
         m_conversationService = std::make_unique<services::conversation::ConversationService>(m_conversationRepo.get());
-        m_chatService = std::make_unique<services::chat::ChatService>();
         m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
         m_settingsService = std::make_unique<services::settings::SettingsService>();
 
         // 3. 对话业务用例初始化
         m_sendMessageUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
-            m_chatService.get(),
-            m_conversationService.get()
+            m_chatGateway.get(),
+            m_conversationService.get(),
+            m_modelService.get()
         );
         m_stopGenerationUseCase = std::make_unique<application::usecase::chat::StopGenerationUseCase>(
-            m_chatService.get()
+            m_sendMessageUseCase.get()
         );
         m_loadSessionsUseCase = std::make_unique<application::usecase::conversation::LoadSessionsUseCase>(
             m_conversationService.get()
@@ -77,8 +110,8 @@ namespace app {
         return m_conversationService.get();
     }
 
-    domain::service::IChatService *ApplicationContext::chatService() const {
-        return m_chatService.get();
+    application::ports::IChatModelGateway *ApplicationContext::chatModelGateway() const {
+        return m_chatGateway.get();
     }
 
     domain::service::IModelService *ApplicationContext::modelService() const {

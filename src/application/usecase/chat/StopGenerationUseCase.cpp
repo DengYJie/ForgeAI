@@ -1,16 +1,18 @@
 #include "StopGenerationUseCase.h"
-#include "domain/service/IChatService.h"
+#include "SendMessageUseCase.h"
 
 namespace application::usecase::chat {
+
     StopGenerationUseCase::StopGenerationUseCase(
-        domain::service::IChatService *chatService,
+        SendMessageUseCase *sendMessageUseCase,
         QObject *parent
-    ) : QObject(parent), m_chatService(chatService) {
+    ) : QObject(parent), m_sendMessageUseCase(sendMessageUseCase) {
     }
 
     void StopGenerationUseCase::execute() {
-        if (m_chatService) {
-            m_chatService->stopGeneration();
+        if (m_sendMessageUseCase) {
+            m_sendMessageUseCase->cancelCurrent();
         }
     }
+
 } // namespace application::usecase::chat

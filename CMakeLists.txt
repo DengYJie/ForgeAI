@@ -68,6 +68,44 @@ qt_standard_project_setup()
 set(PROJECT_SOURCES
         src/main.cpp
         
+        src/network/HttpRequest.h
+        src/network/HttpOperation.h
+        src/network/IHttpClient.h
+        src/network/QtHttpClient.h
+        src/network/QtHttpClient.cpp
+        
+        src/llm/ProtocolRegistry.h
+        src/llm/ProtocolRegistry.cpp
+        src/llm/protocol/IStreamParser.h
+        src/llm/protocol/IProtocolAdapter.h
+        src/llm/protocol/openai/OpenAIStreamParser.h
+        src/llm/protocol/openai/OpenAIStreamParser.cpp
+        src/llm/protocol/openai/OpenAIChatCompletionsAdapter.h
+        src/llm/protocol/openai/OpenAIChatCompletionsAdapter.cpp
+
+        src/llm/protocol/openai_responses/OpenAIResponsesStreamParser.h
+        src/llm/protocol/openai_responses/OpenAIResponsesStreamParser.cpp
+        src/llm/protocol/openai_responses/OpenAIResponsesAdapter.h
+        src/llm/protocol/openai_responses/OpenAIResponsesAdapter.cpp
+
+        src/llm/protocol/anthropic/AnthropicStreamParser.h
+        src/llm/protocol/anthropic/AnthropicStreamParser.cpp
+        src/llm/protocol/anthropic/AnthropicProtocolAdapter.h
+        src/llm/protocol/anthropic/AnthropicProtocolAdapter.cpp
+
+        src/llm/protocol/gemini/GeminiStreamParser.h
+        src/llm/protocol/gemini/GeminiStreamParser.cpp
+        src/llm/protocol/gemini/GeminiProtocolAdapter.h
+        src/llm/protocol/gemini/GeminiProtocolAdapter.cpp
+
+        src/llm/protocol/ollama/OllamaStreamParser.h
+        src/llm/protocol/ollama/OllamaStreamParser.cpp
+        src/llm/protocol/ollama/OllamaProtocolAdapter.h
+        src/llm/protocol/ollama/OllamaProtocolAdapter.cpp
+        
+        src/application/ports/IChatModelGateway.h
+        src/llm/ModelProviderService.h
+        src/llm/ModelProviderService.cpp
         src/ui/animation/AnimatedGlobalNavVisualSource.h
         src/ui/animation/AnimatedBackVisualSource.h
         src/ui/animation/AnimatedPanelLeftVisualSource.h
@@ -209,6 +247,10 @@ set(PROJECT_SOURCES
         src/domain/model/ModelParameters.h
         src/domain/model/Model.h
         src/domain/model/ModelProvider.h
+        src/domain/llm/ChatError.h
+        src/domain/llm/ChatMessage.h
+        src/domain/llm/ChatRequest.h
+        src/domain/llm/ChatEvent.h
         src/domain/repository/IConversationRepository.h
         src/domain/repository/IMessageTranscriptRepository.h
         src/domain/repository/IProjectRepository.h
@@ -235,13 +277,10 @@ set(PROJECT_SOURCES
         src/core/model/ModelRegistry.h
         src/core/model/ModelRegistry.cpp
 
-        src/domain/service/IChatService.h
         src/domain/service/IConversationService.h
         src/domain/service/IModelService.h
         src/domain/service/ISettingsService.h
 
-        src/services/chat/ChatService.h
-        src/services/chat/ChatService.cpp
         src/services/conversation/ConversationService.h
         src/services/conversation/ConversationService.cpp
         src/services/model/ModelService.h
