@@ -20,8 +20,8 @@ namespace app {
          */
         int run();
 
-        ApplicationContext &context() { return m_context; }
-        const ApplicationContext &context() const { return m_context; }
+        ApplicationContext &context() { return *m_context; }
+        const ApplicationContext &context() const { return *m_context; }
 
     private:
         void initializeResources();
@@ -29,7 +29,7 @@ namespace app {
         void initializeDatabase();
 
         std::unique_ptr<QApplication> m_qapp;
-        ApplicationContext m_context;
+        std::unique_ptr<ApplicationContext> m_context;
         std::unique_ptr<ui::screen::main::MainWindow> m_mainWindow;
     };
 } // namespace app
