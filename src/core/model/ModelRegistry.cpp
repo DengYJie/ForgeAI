@@ -151,7 +151,7 @@ namespace core::model {
     }
 
     void ModelRegistry::deleteProvider(const QString &providerId) {
-        if (m_providers.remove(providerId) > 0) {
+        if (m_providers.remove(providerId)) {
             if (m_repository) {
                 m_repository->deleteProvider(providerId);
             }
@@ -186,6 +186,59 @@ namespace core::model {
             return it.value().capabilities.testFlag(cap);
         }
         return false;
+    }
+
+    QList<domain::model::Model> ModelRegistry::hydrateDiscoveredModels(
+        const QString &providerId,
+        const QList<domain::model::Model> &discoveredModels) const {
+        
+        QList<domain::model::Model> result;
+        QHash<QString, domain::model::Model> existingMap;
+
+        auto providerIt = m_providers.find(providerId);
+        if (providerIt != m_providers.end()) {
+            for (const auto &m : providerIt.value().models) {
+                existingMap.insert(m.id, m);
+            }
+        }
+
+        for (const auto &raw : discoveredModels) {
+            domain::model::Model hydrated;
+
+            // 1. 优先匹配本地内置预设模板库
+            auto templateIt = m_presetTemplates.find(raw.id);
+            if (templateIt != m_presetTemplates.end()) {
+                hydrated = templateIt.value();
+                hydrated.providerId = providerId;
+                if (!raw.displayName.isEmpty() && raw.displayName != raw.id) {
+                    hydrated.displayName = raw.displayName;
+                }
+            } else if (existingMap.contains(raw.id)) {
+                // 2. 复用该服务商已有配置
+                hydrated = existingMap.value(raw.id);
+            } else {
+                // 3. 全新未知模型，赋予安全默认配置
+                hydrated = raw;
+                hydrated.providerId = providerId;
+                if (hydrated.displayName.isEmpty()) {
+                    hydrated.displayName = raw.id;
+                }
+                hydrated.capabilities = domain::model::ModelCapability::Chat |
+                                        domain::model::ModelCapability::Streaming;
+                hydrated.limits.context = 128000;
+                hydrated.limits.maxInput = 128000;
+                hydrated.limits.maxOutput = 4096;
+            }
+
+            // 4. 保留用户本地开关状态
+            if (existingMap.contains(raw.id)) {
+                hydrated.isEnabled = existingMap.value(raw.id).isEnabled;
+            }
+
+            result.append(hydrated);
+        }
+
+        return result;
     }
 
     void ModelRegistry::scanLocalOllamaModels(const QString &ollamaBaseUrl) {

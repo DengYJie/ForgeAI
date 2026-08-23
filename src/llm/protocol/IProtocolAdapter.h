@@ -40,6 +40,24 @@ namespace llm::protocol {
         virtual domain::llm::ChatError parseError(
             int httpStatusCode,
             const QByteArray &responseBody) const = 0;
+
+        /**
+         * @brief 检查该协议是否支持模型自动发现
+         */
+        virtual bool supportsModelDiscovery() const { return true; }
+
+        /**
+         * @brief 构建查询远程模型列表的 HTTP 请求
+         */
+        virtual network::HttpRequest buildListModelsRequest(
+            const domain::model::ModelProvider &provider) const = 0;
+
+        /**
+         * @brief 解析远程模型列表响应
+         */
+        virtual QList<domain::model::Model> parseListModelsResponse(
+            const QByteArray &responseBody,
+            const QString &providerId) const = 0;
     };
 
 } // namespace llm::protocol

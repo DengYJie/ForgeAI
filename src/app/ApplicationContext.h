@@ -11,6 +11,7 @@
 #include "network/QtHttpClient.h"
 #include "llm/ProtocolRegistry.h"
 #include "llm/ModelProviderService.h"
+#include "llm/ModelDiscoveryService.h"
 #include "application/usecase/chat/ChatUseCases.h"
 #include "application/usecase/work/WorkUseCases.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
@@ -72,6 +73,7 @@ namespace app {
         std::shared_ptr<network::QtHttpClient> m_httpClient;
         std::shared_ptr<llm::ProtocolRegistry> m_protocolRegistry;
         std::unique_ptr<llm::ModelProviderService> m_chatGateway;
+        std::unique_ptr<llm::ModelDiscoveryService> m_discoveryGateway;
 
         // 领域服务
         std::unique_ptr<services::conversation::ConversationService> m_conversationService;
@@ -98,6 +100,7 @@ namespace app {
         std::unique_ptr<application::usecase::settings::LoadSettingsUseCase> m_loadSettingsUseCase;
         std::unique_ptr<application::usecase::settings::SaveSettingUseCase> m_saveSettingUseCase;
         std::unique_ptr<application::usecase::settings::GetModelsUseCase> m_getModelsUseCase;
+        std::unique_ptr<application::usecase::settings::RefreshModelsUseCase> m_refreshModelsUseCase;
 
         // 全局 ViewModels
         std::unique_ptr<ui::screen::main::MainViewModel> m_mainViewModel;

@@ -104,8 +104,11 @@ set(PROJECT_SOURCES
         src/llm/protocol/ollama/OllamaProtocolAdapter.cpp
         
         src/application/ports/IChatModelGateway.h
+        src/application/ports/IModelDiscoveryGateway.h
         src/llm/ModelProviderService.h
         src/llm/ModelProviderService.cpp
+        src/llm/ModelDiscoveryService.h
+        src/llm/ModelDiscoveryService.cpp
         src/ui/animation/AnimatedGlobalNavVisualSource.h
         src/ui/animation/AnimatedBackVisualSource.h
         src/ui/animation/AnimatedPanelLeftVisualSource.h
@@ -321,6 +324,8 @@ set(PROJECT_SOURCES
         src/application/usecase/settings/SaveSettingUseCase.cpp
         src/application/usecase/settings/GetModelsUseCase.h
         src/application/usecase/settings/GetModelsUseCase.cpp
+        src/application/usecase/settings/RefreshModelsUseCase.h
+        src/application/usecase/settings/RefreshModelsUseCase.cpp
 
         src/app/ApplicationContext.h
         src/app/ApplicationContext.cpp

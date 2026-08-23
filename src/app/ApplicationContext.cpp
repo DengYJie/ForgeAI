@@ -39,6 +39,7 @@ namespace app {
         );
 
         m_chatGateway = std::make_unique<llm::ModelProviderService>(m_httpClient, m_protocolRegistry);
+        m_discoveryGateway = std::make_unique<llm::ModelDiscoveryService>(m_httpClient, m_protocolRegistry);
 
         // 2. 领域服务层初始化
         m_conversationService = std::make_unique<services::conversation::ConversationService>(m_conversationRepo.get());
@@ -79,6 +80,10 @@ namespace app {
         m_loadSettingsUseCase = std::make_unique<application::usecase::settings::LoadSettingsUseCase>(m_settingsService.get());
         m_saveSettingUseCase = std::make_unique<application::usecase::settings::SaveSettingUseCase>(m_settingsService.get());
         m_getModelsUseCase = std::make_unique<application::usecase::settings::GetModelsUseCase>(m_modelService.get());
+        m_refreshModelsUseCase = std::make_unique<application::usecase::settings::RefreshModelsUseCase>(
+            m_discoveryGateway.get(),
+            m_modelRegistry
+        );
 
         // 7. ViewModels 表现层构造（直接注入对应域的 UseCase Bundle）
         m_mainViewModel = std::make_unique<ui::screen::main::MainViewModel>();
@@ -152,6 +157,7 @@ namespace app {
         s.loadSettings = m_loadSettingsUseCase.get();
         s.saveSetting = m_saveSettingUseCase.get();
         s.getModels = m_getModelsUseCase.get();
+        s.refreshModels = m_refreshModelsUseCase.get();
         return s;
     }
 

@@ -101,4 +101,55 @@ namespace llm::protocol::ollama {
         return error;
     }
 
+    network::HttpRequest OllamaProtocolAdapter::buildListModelsRequest(const domain::model::ModelProvider &provider) const {
+        network::HttpRequest netReq;
+        QString baseUrl = provider.baseUrl.isEmpty() ? "http://localhost:11434" : provider.baseUrl;
+        if (baseUrl.endsWith('/')) baseUrl.chop(1);
+        netReq.url = baseUrl + "/api/tags";
+        netReq.method = network::HttpMethod::Get;
+        netReq.timeoutMs = provider.timeoutMs;
+
+        if (!provider.apiKey.isEmpty()) {
+            netReq.headers.insert("Authorization", "Bearer " + provider.apiKey);
+        }
+        for (auto it = provider.customHeaders.constBegin(); it != provider.customHeaders.constEnd(); ++it) {
+            netReq.headers.insert(it.key(), it.value());
+        }
+
+        return netReq;
+    }
+
+    QList<domain::model::Model> OllamaProtocolAdapter::parseListModelsResponse(
+        const QByteArray &responseBody,
+        const QString &providerId) const {
+        
+        QList<domain::model::Model> models;
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            return models;
+        }
+
+        QJsonObject rootObj = doc.object();
+        QJsonArray modelsArray = rootObj.value("models").toArray();
+        for (const auto &val : modelsArray) {
+            if (!val.isObject()) continue;
+            QJsonObject mObj = val.toObject();
+            QString name = mObj.value("name").toString();
+            if (name.isEmpty()) {
+                name = mObj.value("model").toString();
+            }
+            if (name.isEmpty()) continue;
+
+            domain::model::Model model;
+            model.id = name;
+            model.providerId = providerId;
+            model.displayName = name;
+            model.openWeights = true;
+            models.append(model);
+        }
+
+        return models;
+    }
+
 } // namespace llm::protocol::ollama

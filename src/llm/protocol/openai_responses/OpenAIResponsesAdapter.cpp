@@ -99,4 +99,51 @@ namespace llm::protocol::openai_responses {
         return error;
     }
 
+    network::HttpRequest OpenAIResponsesAdapter::buildListModelsRequest(const domain::model::ModelProvider &provider) const {
+        network::HttpRequest netReq;
+        QString baseUrl = provider.baseUrl.isEmpty() ? "https://api.openai.com" : provider.baseUrl;
+        if (baseUrl.endsWith('/')) baseUrl.chop(1);
+        netReq.url = baseUrl + "/v1/models";
+        netReq.method = network::HttpMethod::Get;
+        netReq.timeoutMs = provider.timeoutMs;
+
+        if (!provider.apiKey.isEmpty()) {
+            netReq.headers.insert("Authorization", "Bearer " + provider.apiKey);
+        }
+        for (auto it = provider.customHeaders.constBegin(); it != provider.customHeaders.constEnd(); ++it) {
+            netReq.headers.insert(it.key(), it.value());
+        }
+
+        return netReq;
+    }
+
+    QList<domain::model::Model> OpenAIResponsesAdapter::parseListModelsResponse(
+        const QByteArray &responseBody,
+        const QString &providerId) const {
+        
+        QList<domain::model::Model> models;
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            return models;
+        }
+
+        QJsonObject rootObj = doc.object();
+        QJsonArray dataArray = rootObj.value("data").toArray();
+        for (const auto &val : dataArray) {
+            if (!val.isObject()) continue;
+            QJsonObject mObj = val.toObject();
+            QString id = mObj.value("id").toString();
+            if (id.isEmpty()) continue;
+
+            domain::model::Model model;
+            model.id = id;
+            model.providerId = providerId;
+            model.displayName = id;
+            models.append(model);
+        }
+
+        return models;
+    }
+
 } // namespace llm::protocol::openai_responses

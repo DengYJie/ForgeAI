@@ -123,4 +123,55 @@ namespace llm::protocol::gemini {
         return error;
     }
 
+    network::HttpRequest GeminiProtocolAdapter::buildListModelsRequest(const domain::model::ModelProvider &provider) const {
+        network::HttpRequest netReq;
+        QString baseUrl = provider.baseUrl.isEmpty() ? "https://generativelanguage.googleapis.com" : provider.baseUrl;
+        if (baseUrl.endsWith('/')) baseUrl.chop(1);
+        netReq.url = baseUrl + "/v1beta/models";
+        netReq.method = network::HttpMethod::Get;
+        netReq.timeoutMs = provider.timeoutMs;
+
+        if (!provider.apiKey.isEmpty()) {
+            netReq.headers.insert("x-goog-api-key", provider.apiKey);
+        }
+        for (auto it = provider.customHeaders.constBegin(); it != provider.customHeaders.constEnd(); ++it) {
+            netReq.headers.insert(it.key(), it.value());
+        }
+
+        return netReq;
+    }
+
+    QList<domain::model::Model> GeminiProtocolAdapter::parseListModelsResponse(
+        const QByteArray &responseBody,
+        const QString &providerId) const {
+        
+        QList<domain::model::Model> models;
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            return models;
+        }
+
+        QJsonObject rootObj = doc.object();
+        QJsonArray modelsArray = rootObj.value("models").toArray();
+        for (const auto &val : modelsArray) {
+            if (!val.isObject()) continue;
+            QJsonObject mObj = val.toObject();
+            QString rawName = mObj.value("name").toString();
+            if (rawName.isEmpty()) continue;
+
+            // 去除 "models/" 前缀
+            QString id = rawName.startsWith("models/") ? rawName.mid(7) : rawName;
+            
+            domain::model::Model model;
+            model.id = id;
+            model.providerId = providerId;
+            model.displayName = mObj.value("displayName").toString(id);
+            model.description = mObj.value("description").toString();
+            models.append(model);
+        }
+
+        return models;
+    }
+
 } // namespace llm::protocol::gemini

@@ -67,6 +67,16 @@ namespace core::model {
         bool hasCapability(const QString &modelId, domain::model::ModelCapability cap) const;
 
         /**
+         * @brief 将发现的模型列表与本地预设模板 (models.json) 及已存在配置进行智能匹配并补充元数据
+         * @param providerId 归属服务商 ID
+         * @param discoveredModels 远端探测到的轻量模型实体
+         * @return 经过元数据补全并保留用户配置的完整模型列表
+         */
+        QList<domain::model::Model> hydrateDiscoveredModels(
+            const QString &providerId,
+            const QList<domain::model::Model> &discoveredModels) const;
+
+        /**
          * @brief 自动探测并注册本地 Ollama 实例中已下载的模型列表
          */
         void scanLocalOllamaModels(const QString &ollamaBaseUrl = QStringLiteral("http://localhost:11434"));

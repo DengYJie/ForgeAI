@@ -3,6 +3,7 @@
 #include "application/usecase/settings/LoadSettingsUseCase.h"
 #include "application/usecase/settings/SaveSettingUseCase.h"
 #include "application/usecase/settings/GetModelsUseCase.h"
+#include "application/usecase/settings/RefreshModelsUseCase.h"
 
 namespace application::usecase::settings {
     /**
@@ -12,5 +13,6 @@ namespace application::usecase::settings {
         LoadSettingsUseCase *loadSettings = nullptr;
         SaveSettingUseCase *saveSetting = nullptr;
         GetModelsUseCase *getModels = nullptr;
+        RefreshModelsUseCase *refreshModels = nullptr;
     };
 } // namespace application::usecase::settings

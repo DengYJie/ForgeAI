@@ -20,6 +20,13 @@ namespace llm::protocol::anthropic {
         domain::llm::ChatError parseError(
             int httpStatusCode,
             const QByteArray &responseBody) const override;
+
+        network::HttpRequest buildListModelsRequest(
+            const domain::model::ModelProvider &provider) const override;
+
+        QList<domain::model::Model> parseListModelsResponse(
+            const QByteArray &responseBody,
+            const QString &providerId) const override;
     };
 
 } // namespace llm::protocol::anthropic
