@@ -31,7 +31,7 @@ namespace core::logging {
     }
 
     LoggingService::~LoggingService() {
-        stopWorkerThread();
+        shutdown();
     }
 
     void LoggingService::addSink(std::shared_ptr<ILogSink> sink) {
@@ -59,6 +59,12 @@ namespace core::logging {
 
     void LoggingService::installQtMessageHandler() {
         qInstallMessageHandler(customQtMessageHandler);
+    }
+
+    void LoggingService::shutdown() {
+        // 还原 Qt 消息处理器，避免 QApplication 析构后再触发日志调用
+        qInstallMessageHandler(nullptr);
+        stopWorkerThread();
     }
 
     void LoggingService::log(

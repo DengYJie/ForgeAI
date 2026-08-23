@@ -38,6 +38,14 @@ namespace core::logging {
         void dispatch(LogRecord record);
         void flush();
 
+        /**
+         * @brief 显式停止后台工作线程并 flush 所有 sink。
+         *
+         * 必须在 QApplication 析构前调用，保证工作线程完全退出。
+         * 析构函数会自动调用本方法，但显式提前调用可控制顺序。
+         */
+        void shutdown();
+
         void installQtMessageHandler();
 
     private:

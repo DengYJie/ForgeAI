@@ -1,5 +1,6 @@
 #include "Application.h"
 #include <FluentQt/FluentQt.h>
+#include "core/logging/LoggingService.h"
 #include "core/settings/SettingsRegistry.h"
 #include "data/repository/SqliteConversationRepository.h"
 #include "data/repository/SqliteModelRepository.h"
@@ -19,6 +20,7 @@ namespace app {
     Application::~Application() {
         m_mainWindow.reset();
         m_context.reset();
+        core::logging::LoggingService::instance().shutdown();
         m_qapp.reset();
     }
 
