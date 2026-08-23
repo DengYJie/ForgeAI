@@ -303,6 +303,8 @@ set(PROJECT_SOURCES
         src/data/repository/SqliteModelRepository.cpp
         src/data/repository/JsonlMessageRepository.h
         src/data/repository/JsonlMessageRepository.cpp
+        src/data/importer/ModelsDevImporter.h
+        src/data/importer/ModelsDevImporter.cpp
 
         src/core/context/ContextManager.h
         src/core/context/ContextManager.cpp

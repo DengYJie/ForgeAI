@@ -98,9 +98,10 @@ namespace core::model {
 
         std::shared_ptr<domain::repository::IModelRepository> m_repository;
 
-        QHash<QString, domain::model::ModelProvider> m_providers; ///< providerId -> Provider
-        QHash<QString, domain::model::Model> m_models;           ///< modelId -> Model
-        QHash<QString, domain::model::Model> m_presetTemplates;  ///< 内置只读预设模板
+        QHash<QString, domain::model::ModelProvider> m_providers;       ///< providerId -> Provider
+        QHash<QString, domain::model::Model> m_models;                 ///< modelId -> Model
+        QHash<QString, domain::model::ModelProvider> m_presetProviders; ///< 内置只读服务商预设模板
+        QHash<QString, domain::model::Model> m_presetTemplates;        ///< 内置只读模型预设模板
     };
 
 } // namespace core::model

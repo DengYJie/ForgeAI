@@ -1,6 +1,7 @@
 #include "SqliteModelRepository.h"
 #include "data/sqlite/SqlTransaction.h"
 #include "data/sqlite/SqlHelper.h"
+#include "data/importer/ModelsDevImporter.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
@@ -109,6 +110,8 @@ namespace data::repository {
             return false;
         }
 
+        auto parseResult = data::importer::ModelsDevImporter::parseAll(doc.object());
+
         auto db = getDatabase();
         data::sqlite::SqlTransaction tx(db);
         if (!tx.isStarted()) {
@@ -132,120 +135,50 @@ namespace data::repository {
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
         ).arg(overwriteExisting ? QStringLiteral("REPLACE") : QStringLiteral("IGNORE")));
 
-        QJsonObject rootObj = doc.object();
-        for (auto providerIt = rootObj.begin(); providerIt != rootObj.end(); ++providerIt) {
-            QString providerId = providerIt.key();
-            QJsonObject providerObj = providerIt.value().toObject();
-
-            QString providerName = providerObj.value(QStringLiteral("name")).toString(providerId);
-            QString docUrl = providerObj.value(QStringLiteral("doc")).toString();
-            QString baseUrl = providerObj.value(QStringLiteral("api")).toString();
-
-            QString envVarName;
-            QJsonArray envArray = providerObj.value(QStringLiteral("env")).toArray();
-            if (!envArray.isEmpty()) {
-                envVarName = envArray.first().toString();
-            }
-
-            int providerType = 0; // 默认为 OpenAICompatible
-            QString npmDriver = providerObj.value(QStringLiteral("npm")).toString();
-            if (providerId.contains(QStringLiteral("anthropic"))) {
-                providerType = 1;
-            } else if (providerId.contains(QStringLiteral("ollama"))) {
-                providerType = 2;
-            } else if (providerId.contains(QStringLiteral("google")) || providerId.contains(QStringLiteral("gemini"))) {
-                providerType = 3;
-            }
-
-            providerQuery.bindValue(0, providerId);
-            providerQuery.bindValue(1, providerName);
-            providerQuery.bindValue(2, QString()); // icon
-            providerQuery.bindValue(3, docUrl);
-            providerQuery.bindValue(4, envVarName);
-            providerQuery.bindValue(5, providerType);
-            providerQuery.bindValue(6, baseUrl);
-            providerQuery.bindValue(7, QString()); // api_key 初始为空
-            providerQuery.bindValue(8, QStringLiteral("{}")); // custom_headers
-            providerQuery.bindValue(9, QVariant()); // proxy_url
-            providerQuery.bindValue(10, 60000); // timeout_ms
-            providerQuery.bindValue(11, 1); // is_enabled
+        for (const auto &provider : parseResult.providers) {
+            providerQuery.bindValue(0, provider.id);
+            providerQuery.bindValue(1, provider.name);
+            providerQuery.bindValue(2, provider.icon);
+            providerQuery.bindValue(3, provider.docUrl);
+            providerQuery.bindValue(4, provider.envVarName);
+            providerQuery.bindValue(5, static_cast<int>(provider.type));
+            providerQuery.bindValue(6, provider.baseUrl);
+            providerQuery.bindValue(7, provider.apiKey);
+            providerQuery.bindValue(8, QStringLiteral("{}"));
+            providerQuery.bindValue(9, provider.proxyUrl.has_value() ? QVariant(provider.proxyUrl.value()) : QVariant());
+            providerQuery.bindValue(10, provider.timeoutMs);
+            providerQuery.bindValue(11, provider.isEnabled ? 1 : 0);
             providerQuery.exec();
+        }
 
-            QJsonObject modelsObj = providerObj.value(QStringLiteral("models")).toObject();
-            for (auto modelIt = modelsObj.begin(); modelIt != modelsObj.end(); ++modelIt) {
-                QString modelKey = modelIt.key();
-                QJsonObject modelObj = modelIt.value().toObject();
-
-                QString modelId = modelObj.value(QStringLiteral("id")).toString(modelKey);
-                QString displayName = modelObj.value(QStringLiteral("name")).toString(modelId);
-                QString description = modelObj.value(QStringLiteral("description")).toString();
-                QString family = modelObj.value(QStringLiteral("family")).toString();
-
-                QJsonObject limitObj = modelObj.value(QStringLiteral("limit")).toObject();
-                int contextLimit = limitObj.value(QStringLiteral("context")).toInt(128000);
-                int maxInputLimit = limitObj.value(QStringLiteral("input")).toInt(contextLimit);
-                int maxOutputLimit = limitObj.value(QStringLiteral("output")).toInt(8192);
-
-                int caps = static_cast<int>(domain::model::ModelCapability::Chat);
-                if (modelObj.value(QStringLiteral("tool_call")).toBool(false)) {
-                    caps |= static_cast<int>(domain::model::ModelCapability::ToolCalling);
-                }
-                if (modelObj.value(QStringLiteral("reasoning")).toBool(false)) {
-                    caps |= static_cast<int>(domain::model::ModelCapability::Thinking);
-                }
-                if (modelObj.value(QStringLiteral("structured_output")).toBool(false)) {
-                    caps |= static_cast<int>(domain::model::ModelCapability::StructuredOutputs);
-                }
-
-                QJsonObject modalitiesObj = modelObj.value(QStringLiteral("modalities")).toObject();
-                QJsonArray inputArray = modalitiesObj.value(QStringLiteral("input")).toArray();
-                for (const auto &val : inputArray) {
-                    QString mod = val.toString();
-                    if (mod == QStringLiteral("image")) caps |= static_cast<int>(domain::model::ModelCapability::Vision);
-                    else if (mod == QStringLiteral("audio")) caps |= static_cast<int>(domain::model::ModelCapability::Audio);
-                    else if (mod == QStringLiteral("video")) caps |= static_cast<int>(domain::model::ModelCapability::Video);
-                    else if (mod == QStringLiteral("pdf")) caps |= static_cast<int>(domain::model::ModelCapability::Pdf);
-                }
-
-                QJsonObject costObj = modelObj.value(QStringLiteral("cost")).toObject();
-                double inputCost = costObj.value(QStringLiteral("input")).toDouble(0.0);
-                double outputCost = costObj.value(QStringLiteral("output")).toDouble(0.0);
-                double cacheReadCost = costObj.value(QStringLiteral("cache_read")).toDouble(0.0);
-                double cacheWriteCost = costObj.value(QStringLiteral("cache_write")).toDouble(0.0);
-
-                QJsonObject interleavedObj = modelObj.value(QStringLiteral("interleaved")).toObject();
-                QString reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
-                bool openWeights = modelObj.value(QStringLiteral("open_weights")).toBool(false);
-                QString knowledgeCutoff = modelObj.value(QStringLiteral("knowledge")).toString();
-
-                modelQuery.bindValue(0, modelId);
-                modelQuery.bindValue(1, providerId);
-                modelQuery.bindValue(2, displayName);
-                modelQuery.bindValue(3, description);
-                modelQuery.bindValue(4, family);
-                modelQuery.bindValue(5, providerName); // group_name
-                modelQuery.bindValue(6, contextLimit);
-                modelQuery.bindValue(7, maxInputLimit);
-                modelQuery.bindValue(8, maxOutputLimit);
-                modelQuery.bindValue(9, caps);
-                modelQuery.bindValue(10, 0.7); // default_temperature
-                modelQuery.bindValue(11, 1.0); // default_top_p
-                modelQuery.bindValue(12, QVariant()); // default_max_output_tokens
-                modelQuery.bindValue(13, 1); // default_enable_thinking
-                modelQuery.bindValue(14, QString()); // default_reasoning_effort
-                modelQuery.bindValue(15, 4096); // default_thinking_budget_tokens
-                modelQuery.bindValue(16, inputCost);
-                modelQuery.bindValue(17, outputCost);
-                modelQuery.bindValue(18, cacheReadCost);
-                modelQuery.bindValue(19, cacheWriteCost);
-                modelQuery.bindValue(20, QStringLiteral("USD"));
-                modelQuery.bindValue(21, reasoningField);
-                modelQuery.bindValue(22, openWeights ? 1 : 0);
-                modelQuery.bindValue(23, knowledgeCutoff);
-                modelQuery.bindValue(24, 1); // is_enabled
-                modelQuery.bindValue(25, 0); // is_custom
-                modelQuery.exec();
-            }
+        for (const auto &model : parseResult.models) {
+            modelQuery.bindValue(0, model.id);
+            modelQuery.bindValue(1, model.providerId);
+            modelQuery.bindValue(2, model.displayName);
+            modelQuery.bindValue(3, model.description);
+            modelQuery.bindValue(4, model.family);
+            modelQuery.bindValue(5, model.group);
+            modelQuery.bindValue(6, model.limits.context);
+            modelQuery.bindValue(7, model.limits.maxInput);
+            modelQuery.bindValue(8, model.limits.maxOutput);
+            modelQuery.bindValue(9, static_cast<int>(model.capabilities.toInt()));
+            modelQuery.bindValue(10, model.defaultParams.temperature);
+            modelQuery.bindValue(11, model.defaultParams.topP);
+            modelQuery.bindValue(12, model.defaultParams.maxOutputTokens.has_value() ? QVariant(model.defaultParams.maxOutputTokens.value()) : QVariant());
+            modelQuery.bindValue(13, model.defaultParams.enableThinking ? 1 : 0);
+            modelQuery.bindValue(14, model.defaultParams.reasoningEffort);
+            modelQuery.bindValue(15, model.defaultParams.thinkingBudgetTokens);
+            modelQuery.bindValue(16, model.pricing.inputPrice);
+            modelQuery.bindValue(17, model.pricing.outputPrice);
+            modelQuery.bindValue(18, model.pricing.cacheReadPrice);
+            modelQuery.bindValue(19, model.pricing.cacheWritePrice);
+            modelQuery.bindValue(20, model.pricing.currency);
+            modelQuery.bindValue(21, model.reasoningField);
+            modelQuery.bindValue(22, model.openWeights ? 1 : 0);
+            modelQuery.bindValue(23, model.knowledgeCutoff);
+            modelQuery.bindValue(24, model.isEnabled ? 1 : 0);
+            modelQuery.bindValue(25, model.isCustom ? 1 : 0);
+            modelQuery.exec();
         }
 
         return tx.commit();

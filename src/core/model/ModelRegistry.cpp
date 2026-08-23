@@ -1,4 +1,5 @@
 #include "ModelRegistry.h"
+#include "data/importer/ModelsDevImporter.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -45,69 +46,12 @@ namespace core::model {
             return;
         }
 
-        QJsonObject rootObj = doc.object();
-        for (auto providerIt = rootObj.begin(); providerIt != rootObj.end(); ++providerIt) {
-            QString providerId = providerIt.key();
-            QJsonObject providerObj = providerIt.value().toObject();
-
-            QJsonObject modelsObj = providerObj.value(QStringLiteral("models")).toObject();
-            for (auto modelIt = modelsObj.begin(); modelIt != modelsObj.end(); ++modelIt) {
-                QString modelKey = modelIt.key();
-                QJsonObject modelObj = modelIt.value().toObject();
-
-                domain::model::Model model;
-                model.id = modelObj.value(QStringLiteral("id")).toString(modelKey);
-                model.providerId = providerId;
-                model.displayName = modelObj.value(QStringLiteral("name")).toString(model.id);
-                model.description = modelObj.value(QStringLiteral("description")).toString();
-                model.family = modelObj.value(QStringLiteral("family")).toString();
-                model.group = providerObj.value(QStringLiteral("name")).toString(providerId);
-
-                // 上下文限制
-                QJsonObject limitObj = modelObj.value(QStringLiteral("limit")).toObject();
-                model.limits.context = limitObj.value(QStringLiteral("context")).toInt(128000);
-                model.limits.maxInput = limitObj.value(QStringLiteral("input")).toInt(model.limits.context);
-                model.limits.maxOutput = limitObj.value(QStringLiteral("output")).toInt(8192);
-
-                // 能力标志解析
-                domain::model::ModelCapabilities caps = domain::model::ModelCapability::Chat;
-                if (modelObj.value(QStringLiteral("tool_call")).toBool(false)) {
-                    caps |= domain::model::ModelCapability::ToolCalling;
-                }
-                if (modelObj.value(QStringLiteral("reasoning")).toBool(false)) {
-                    caps |= domain::model::ModelCapability::Thinking;
-                }
-                if (modelObj.value(QStringLiteral("structured_output")).toBool(false)) {
-                    caps |= domain::model::ModelCapability::StructuredOutputs;
-                }
-
-                QJsonObject modalitiesObj = modelObj.value(QStringLiteral("modalities")).toObject();
-                QJsonArray inputArray = modalitiesObj.value(QStringLiteral("input")).toArray();
-                for (const auto &val : inputArray) {
-                    QString mod = val.toString();
-                    if (mod == QStringLiteral("image")) caps |= domain::model::ModelCapability::Vision;
-                    else if (mod == QStringLiteral("audio")) caps |= domain::model::ModelCapability::Audio;
-                    else if (mod == QStringLiteral("video")) caps |= domain::model::ModelCapability::Video;
-                    else if (mod == QStringLiteral("pdf")) caps |= domain::model::ModelCapability::Pdf;
-                }
-                model.capabilities = caps;
-
-                // 计费解析
-                QJsonObject costObj = modelObj.value(QStringLiteral("cost")).toObject();
-                model.pricing.inputPrice = costObj.value(QStringLiteral("input")).toDouble(0.0);
-                model.pricing.outputPrice = costObj.value(QStringLiteral("output")).toDouble(0.0);
-                model.pricing.cacheReadPrice = costObj.value(QStringLiteral("cache_read")).toDouble(0.0);
-                model.pricing.cacheWritePrice = costObj.value(QStringLiteral("cache_write")).toDouble(0.0);
-                model.pricing.currency = QStringLiteral("USD");
-
-                // 思考流字段与发布信息
-                QJsonObject interleavedObj = modelObj.value(QStringLiteral("interleaved")).toObject();
-                model.reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
-                model.openWeights = modelObj.value(QStringLiteral("open_weights")).toBool(false);
-                model.knowledgeCutoff = modelObj.value(QStringLiteral("knowledge")).toString();
-
-                m_presetTemplates.insert(model.id, model);
-            }
+        auto parseResult = data::importer::ModelsDevImporter::parseAll(doc.object());
+        for (const auto &provider : parseResult.providers) {
+            m_presetProviders.insert(provider.id, provider);
+        }
+        for (const auto &model : parseResult.models) {
+            m_presetTemplates.insert(model.id, model);
         }
     }
 

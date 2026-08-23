@@ -15,7 +15,9 @@ namespace domain::model {
         OpenAIResponses,                 ///< OpenAI 原生 Responses API
         Anthropic,                       ///< Anthropic 原生 Messages 协议
         Ollama,                          ///< 本地 Ollama 协议 (支持模型检测与拉取)
-        GoogleGemini                     ///< Google Gemini 原生协议
+        GoogleGemini,                    ///< Google Gemini 原生协议
+        AzureOpenAI,                     ///< Azure OpenAI 专用协议
+        AmazonBedrock                    ///< Amazon Bedrock 原生协议
     };
 
     /**
