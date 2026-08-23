@@ -52,6 +52,7 @@ namespace domain::model {
         QString knowledgeCutoff;              ///< 知识库截止日期
 
         bool isEnabled = true;                ///< 用户是否在列表中启用
+        bool isCustom = false;                ///< 是否为用户自定义添加的模型
 
         bool operator==(const Model &other) const = default;
     };
