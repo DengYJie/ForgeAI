@@ -11,6 +11,8 @@ namespace domain::conversation {
      */
     struct TextBlock {
         QString text;
+
+        bool operator==(const TextBlock &other) const = default;
     };
 
     /**
@@ -19,6 +21,8 @@ namespace domain::conversation {
     struct ThoughtBlock {
         QString thought; ///< 思考过程正文
         qint64 durationMs = 0; ///< 思考总耗时（毫秒）
+
+        bool operator==(const ThoughtBlock &other) const = default;
     };
 
     /**
@@ -27,6 +31,8 @@ namespace domain::conversation {
     struct ImageBlock {
         QString urlOrLocalPath; ///< 本地缓存路径或远程 URL
         QString mimeType; ///< 图片 MIME 类型 (如 "image/png")
+
+        bool operator==(const ImageBlock &other) const = default;
     };
 
     /**
@@ -34,6 +40,8 @@ namespace domain::conversation {
      */
     struct ToolCallBlock {
         QList<domain::agent::ToolCall> calls; ///< 包含的工具调用列表（可能同时并发调用多个工具）
+
+        bool operator==(const ToolCallBlock &other) const = default;
     };
 
     /**
@@ -41,6 +49,8 @@ namespace domain::conversation {
      */
     struct ToolResultBlock {
         QList<domain::agent::ToolResult> results; ///< 对应工具调用的执行结果列表
+
+        bool operator==(const ToolResultBlock &other) const = default;
     };
 
     /**
@@ -60,5 +70,7 @@ namespace domain::conversation {
         bool isImage() const { return std::holds_alternative<ImageBlock>(payload); }
         bool isToolCall() const { return std::holds_alternative<ToolCallBlock>(payload); }
         bool isToolResult() const { return std::holds_alternative<ToolResultBlock>(payload); }
+
+        bool operator==(const MessageBlock &other) const = default;
     };
 } // namespace domain::conversation

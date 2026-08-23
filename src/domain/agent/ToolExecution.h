@@ -9,6 +9,8 @@ namespace domain::agent {
         QString id; ///< 调用的唯一标识符 (如 "call_abc123")
         QString name; ///< 调用的工具名 (如 "get_weather")
         QString arguments; ///< 参数 JSON 字符串 (如 "{\"location\":\"Beijing\"}")
+
+        bool operator==(const ToolCall &other) const = default;
     };
 
     /**
@@ -18,5 +20,7 @@ namespace domain::agent {
         QString toolCallId; ///< 对应的 ToolCall 标识符
         QString content; ///< 工具执行产出的结果文本或 JSON 串
         bool isError = false; ///< 是否执行失败（便于模型自主进行错误重试/修正）
+
+        bool operator==(const ToolResult &other) const = default;
     };
 } // namespace domain::agent

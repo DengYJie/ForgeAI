@@ -25,5 +25,7 @@ namespace domain::conversation {
         QJsonObject turnOptions; ///< 快照冻结生成该条消息时的上下文参数（如模型ID、Temperature、启用的工具等）
 
         QDateTime createdAt; ///< 消息创建时间
+
+        bool operator==(const Message &other) const = default;
     };
 } // namespace domain::conversation
