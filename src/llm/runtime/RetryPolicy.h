@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 namespace llm::runtime {
 
@@ -13,7 +13,7 @@ namespace llm::runtime {
         double backoffFactor = 2.0;      ///< 指数退避乘数
         double jitterFactor = 0.2;       ///< 抖动因子 (+/- 20%)
 
-        bool operator==(const RetryPolicy &other) const = default;
+        bool operator==(const RetryPolicy& other) const = default;
     };
 
 } // namespace llm::runtime

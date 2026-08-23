@@ -64,6 +64,7 @@ namespace application::usecase::chat {
         
         ports::IChatOperation *m_currentOp = nullptr;
         QString m_currentSessionId;
+        QString m_currentOperationId;
         
         QString m_replyBuffer;
         QString m_thoughtBuffer;

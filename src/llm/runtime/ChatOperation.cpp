@@ -1,5 +1,7 @@
 #include "ChatOperation.h"
 #include "RetryDecision.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 #include <QVariant>
 #include <QUuid>
 
@@ -21,7 +23,7 @@ namespace llm::runtime {
         , m_timeoutPolicy(timeoutPolicy)
         , m_retryPolicy(retryPolicy) {
         
-        m_metrics.requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_metrics.requestId = QStringLiteral("req_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
         m_metrics.providerId = provider.id;
         m_metrics.modelId = request.model;
         m_metrics.createdAt = QDateTime::currentMSecsSinceEpoch();
@@ -139,6 +141,16 @@ namespace llm::runtime {
         m_metrics.connectedAt = QDateTime::currentMSecsSinceEpoch();
         setState(RequestState::WaitingFirstToken);
 
+        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("Chat request started"), {
+            {QStringLiteral("req"), m_metrics.requestId},
+            {QStringLiteral("provider"), m_provider.id},
+            {QStringLiteral("model"), m_request.model},
+            {QStringLiteral("stream"), m_request.stream ? QStringLiteral("true") : QStringLiteral("false")},
+            {QStringLiteral("messages"), QString::number(m_request.messages.size())},
+            {QStringLiteral("tools"), QString::number(m_request.tools.has_value() ? m_request.tools->size() : 0)},
+            {QStringLiteral("attempt"), QString::number(m_currentAttempt)}
+        });
+
         if (m_timeoutPolicy.firstTokenTimeoutMs > 0) {
             m_firstTokenTimer->start(m_timeoutPolicy.firstTokenTimeoutMs);
         }
@@ -149,9 +161,13 @@ namespace llm::runtime {
             return;
         }
 
+        m_metrics.chunkCount++;
+        m_metrics.receivedBytes += data.size();
+
         if (!m_currentParser) return;
 
         auto events = m_currentParser->feed(data);
+        m_metrics.eventCount += events.size();
         for (const auto &evt : events) {
             std::visit([this](const auto &arg) {
                 using T = std::decay_t<decltype(arg)>;
@@ -164,6 +180,11 @@ namespace llm::runtime {
                         m_firstTokenTimer->stop();
                         m_metrics.firstTokenAt = QDateTime::currentMSecsSinceEpoch();
                         setState(RequestState::Streaming);
+
+                        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("First token received"), {
+                            {QStringLiteral("req"), m_metrics.requestId},
+                            {QStringLiteral("ttft"), QStringLiteral("%1ms").arg(m_metrics.ttftMs())}
+                        });
                     }
 
                     if (m_state == RequestState::Streaming && m_timeoutPolicy.idleTimeoutMs > 0) {
@@ -237,6 +258,14 @@ namespace llm::runtime {
             setState(RequestState::WaitingRetry);
             m_metrics.retryCount++;
 
+            core::logging::LoggingService::instance().warning(core::logging::Category::LlmRetry, QStringLiteral("Request retry scheduled"), {
+                {QStringLiteral("req"), m_metrics.requestId},
+                {QStringLiteral("attempt"), QString::number(m_currentAttempt)},
+                {QStringLiteral("delay"), QStringLiteral("%1ms").arg(decision.delayMs)},
+                {QStringLiteral("reason"), decision.reason},
+                {QStringLiteral("errorCode"), err.code}
+            });
+
             if (m_currentHttpOp) {
                 m_currentHttpOp->disconnect(this);
                 m_currentHttpOp->deleteLater();
@@ -270,6 +299,13 @@ namespace llm::runtime {
             setState(RequestState::WaitingRetry);
             m_metrics.retryCount++;
 
+            core::logging::LoggingService::instance().warning(core::logging::Category::LlmRetry, QStringLiteral("Request retry scheduled on first token timeout"), {
+                {QStringLiteral("req"), m_metrics.requestId},
+                {QStringLiteral("attempt"), QString::number(m_currentAttempt)},
+                {QStringLiteral("delay"), QStringLiteral("%1ms").arg(decision.delayMs)},
+                {QStringLiteral("reason"), decision.reason}
+            });
+
             if (m_currentHttpOp) {
                 m_currentHttpOp->disconnect(this);
                 m_currentHttpOp->cancel();
@@ -281,6 +317,11 @@ namespace llm::runtime {
             m_retryTimer->start(decision.delayMs);
             return;
         }
+
+        core::logging::LoggingService::instance().warning(core::logging::Category::LlmTimeout, QStringLiteral("First token timeout"), {
+            {QStringLiteral("req"), m_metrics.requestId},
+            {QStringLiteral("timeoutMs"), QString::number(m_timeoutPolicy.firstTokenTimeoutMs)}
+        });
 
         finalizeRequest(RequestState::TimedOut, err);
     }
@@ -298,6 +339,11 @@ namespace llm::runtime {
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
 
+        core::logging::LoggingService::instance().warning(core::logging::Category::LlmTimeout, QStringLiteral("Stream idle timeout"), {
+            {QStringLiteral("req"), m_metrics.requestId},
+            {QStringLiteral("idleTimeoutMs"), QString::number(m_timeoutPolicy.idleTimeoutMs)}
+        });
+
         finalizeRequest(RequestState::TimedOut, err);
     }
 
@@ -310,6 +356,11 @@ namespace llm::runtime {
         err.providerId = m_provider.id;
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
+
+        core::logging::LoggingService::instance().warning(core::logging::Category::LlmTimeout, QStringLiteral("Overall request timeout"), {
+            {QStringLiteral("req"), m_metrics.requestId},
+            {QStringLiteral("overallTimeoutMs"), QString::number(m_timeoutPolicy.overallTimeoutMs)}
+        });
 
         finalizeRequest(RequestState::TimedOut, err);
     }
@@ -335,6 +386,39 @@ namespace llm::runtime {
         m_currentParser.reset();
         m_metrics.finishedAt = QDateTime::currentMSecsSinceEpoch();
         setState(finalState);
+
+        auto &logger = core::logging::LoggingService::instance();
+        if (finalState == RequestState::Completed) {
+            logger.info(core::logging::Category::LlmRequest, QStringLiteral("Chat request completed"), {
+                {QStringLiteral("req"), m_metrics.requestId},
+                {QStringLiteral("status"), QStringLiteral("completed")},
+                {QStringLiteral("ttft"), QStringLiteral("%1ms").arg(m_metrics.ttftMs())},
+                {QStringLiteral("duration"), QStringLiteral("%1ms").arg(m_metrics.totalLatencyMs())},
+                {QStringLiteral("chunks"), QString::number(m_metrics.chunkCount)},
+                {QStringLiteral("bytes"), QString::number(m_metrics.receivedBytes)},
+                {QStringLiteral("events"), QString::number(m_metrics.eventCount)},
+                {QStringLiteral("retryCount"), QString::number(m_metrics.retryCount)}
+            });
+        } else if (finalState == RequestState::Cancelled) {
+            logger.info(core::logging::Category::LlmRequest, QStringLiteral("Chat request cancelled"), {
+                {QStringLiteral("req"), m_metrics.requestId},
+                {QStringLiteral("status"), QStringLiteral("cancelled")},
+                {QStringLiteral("duration"), QStringLiteral("%1ms").arg(m_metrics.totalLatencyMs())},
+                {QStringLiteral("chunks"), QString::number(m_metrics.chunkCount)},
+                {QStringLiteral("bytes"), QString::number(m_metrics.receivedBytes)}
+            });
+        } else if (error.has_value()) {
+            logger.error(core::logging::Category::LlmRequest, QStringLiteral("Chat request failed"), {
+                {QStringLiteral("req"), m_metrics.requestId},
+                {QStringLiteral("status"), QStringLiteral("failed")},
+                {QStringLiteral("errorCode"), error->code},
+                {QStringLiteral("httpStatus"), QString::number(error->httpStatus)},
+                {QStringLiteral("duration"), QStringLiteral("%1ms").arg(m_metrics.totalLatencyMs())},
+                {QStringLiteral("chunks"), QString::number(m_metrics.chunkCount)},
+                {QStringLiteral("bytes"), QString::number(m_metrics.receivedBytes)},
+                {QStringLiteral("retryCount"), QString::number(m_metrics.retryCount)}
+            });
+        }
 
         if (error.has_value()) {
             emit eventReceived(domain::llm::EventError{*error});

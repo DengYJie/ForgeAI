@@ -1,12 +1,31 @@
 #include "ApplicationContext.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/sinks/ConsoleSink.h"
+#include "core/logging/sinks/RollingFileSink.h"
+#include "core/logging/LogCategory.h"
 #include "llm/protocol/openai/OpenAIChatCompletionsAdapter.h"
 #include "llm/protocol/anthropic/AnthropicProtocolAdapter.h"
 #include "llm/protocol/gemini/GeminiProtocolAdapter.h"
 #include "llm/protocol/ollama/OllamaProtocolAdapter.h"
 #include "llm/protocol/openai_responses/OpenAIResponsesAdapter.h"
+#include <QSysInfo>
+#include <QUuid>
 
 namespace app {
     ApplicationContext::ApplicationContext() {
+        auto &logger = core::logging::LoggingService::instance();
+        logger.addSink(std::make_shared<core::logging::ConsoleSink>(true));
+        logger.addSink(std::make_shared<core::logging::RollingFileSink>());
+        logger.installQtMessageHandler();
+
+        QString appSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        logger.info(core::logging::Category::AppLifecycle, QStringLiteral("ForgeAI starting..."), {
+            {QStringLiteral("sessionId"), appSessionId},
+            {QStringLiteral("qtVersion"), QString::fromLatin1(qVersion())},
+            {QStringLiteral("os"), QSysInfo::prettyProductName()},
+            {QStringLiteral("arch"), QSysInfo::currentCpuArchitecture()}
+        });
+
         // 1. 仓储与基础组件初始化
         m_conversationRepo = std::make_unique<data::repository::SqliteConversationRepository>();
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
@@ -93,7 +112,11 @@ namespace app {
         m_settingsViewModel = std::make_unique<ui::screen::settings::SettingsViewModel>(settingsUseCases());
     }
 
-    ApplicationContext::~ApplicationContext() = default;
+    ApplicationContext::~ApplicationContext() {
+        auto &logger = core::logging::LoggingService::instance();
+        logger.info(core::logging::Category::AppLifecycle, QStringLiteral("ForgeAI shutting down..."));
+        logger.flush();
+    }
 
     data::sqlite::DatabaseManager &ApplicationContext::dbManager() {
         return data::sqlite::DatabaseManager::instance();

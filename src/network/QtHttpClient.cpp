@@ -1,4 +1,7 @@
 #include "QtHttpClient.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
+#include "core/logging/SensitiveDataFilter.h"
 #include <QNetworkRequest>
 #include <QTimer>
 
@@ -73,21 +76,33 @@ namespace network {
             netReq.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
         }
 
+        QString methodStr = QStringLiteral("GET");
         QNetworkReply *reply = nullptr;
         switch (request.method) {
             case HttpMethod::Get:
+                methodStr = QStringLiteral("GET");
                 reply = m_nam->get(netReq);
                 break;
             case HttpMethod::Post:
+                methodStr = QStringLiteral("POST");
                 reply = m_nam->post(netReq, request.body);
                 break;
             case HttpMethod::Put:
+                methodStr = QStringLiteral("PUT");
                 reply = m_nam->put(netReq, request.body);
                 break;
             case HttpMethod::Delete:
+                methodStr = QStringLiteral("DELETE");
                 reply = m_nam->deleteResource(netReq);
                 break;
         }
+
+        QString cleanUrl = core::logging::SensitiveDataFilter::sanitizeUrl(request.url);
+        core::logging::LoggingService::instance().debug(core::logging::Category::NetworkHttp, QStringLiteral("HTTP dispatch"), {
+            {QStringLiteral("method"), methodStr},
+            {QStringLiteral("url"), cleanUrl},
+            {QStringLiteral("bytes"), QString::number(request.body.size())}
+        });
 
         return new QtHttpOperation(reply);
     }

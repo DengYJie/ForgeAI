@@ -68,6 +68,21 @@ qt_standard_project_setup()
 set(PROJECT_SOURCES
         src/main.cpp
         
+        src/core/logging/LogLevel.h
+        src/core/logging/LogCategory.h
+        src/core/logging/LogRecord.h
+        src/core/logging/LogContext.h
+        src/core/logging/SensitiveDataFilter.h
+        src/core/logging/LogFormatter.h
+        src/core/logging/sinks/ILogSink.h
+        src/core/logging/sinks/ConsoleSink.h
+        src/core/logging/sinks/ConsoleSink.cpp
+        src/core/logging/sinks/RollingFileSink.h
+        src/core/logging/sinks/RollingFileSink.cpp
+        src/core/logging/ILogger.h
+        src/core/logging/LoggingService.h
+        src/core/logging/LoggingService.cpp
+
         src/network/HttpRequest.h
         src/network/HttpOperation.h
         src/network/IHttpClient.h

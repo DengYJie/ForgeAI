@@ -2,6 +2,8 @@
 #include "domain/service/IConversationService.h"
 #include "domain/service/IModelService.h"
 #include "domain/llm/ChatRequest.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 #include <QDateTime>
 #include <QUuid>
 
@@ -37,8 +39,6 @@ namespace application::usecase::chat {
             return;
         }
         
-        // 假设这里我们总是使用选定的那个 provider (默认或从 settings/model service 拿)
-        // MVP 阶段这里暂时硬编码获取第一个启用的 Provider
         domain::model::ModelProvider provider;
         auto providers = m_modelService->getActiveProviders();
         if (providers.isEmpty()) {
@@ -72,6 +72,15 @@ namespace application::usecase::chat {
         } else {
             history.append(userMsg);
         }
+
+        m_currentOperationId = QStringLiteral("op_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+
+        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("User message submitted"), {
+            {QStringLiteral("op"), m_currentOperationId},
+            {QStringLiteral("session"), sessionId},
+            {QStringLiteral("charCount"), QString::number(trimmed.length())},
+            {QStringLiteral("historySize"), QString::number(history.size())}
+        });
 
         emit userMessageCreated(sessionId, userMsg);
         

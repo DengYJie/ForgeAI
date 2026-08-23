@@ -1,7 +1,7 @@
-#pragma once
-#include <QString>
+﻿#pragma once
 #include "domain/llm/ChatError.h"
 #include "RetryPolicy.h"
+#include <QString>
 
 namespace llm::runtime {
 
@@ -16,8 +16,8 @@ namespace llm::runtime {
         QString reason;
 
         static RetryDecision evaluate(
-            const domain::llm::ChatError &error,
-            const RetryPolicy &policy,
+            const domain::llm::ChatError& error,
+            const RetryPolicy& policy,
             int currentAttempt,
             bool hasEmittedVisibleTokens);
     };

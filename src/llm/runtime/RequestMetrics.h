@@ -16,6 +16,9 @@ namespace llm::runtime {
 
         int retryCount = 0;         ///< 发生重试的次数
         int totalTokens = 0;        ///< 产生的总 Token 估计数
+        int chunkCount = 0;         ///< 接收的流式数据块分片总数
+        qint64 receivedBytes = 0;   ///< 接收的总字节数
+        int eventCount = 0;         ///< 解析出的流式事件总数
 
         qint64 ttftMs() const {
             return (firstTokenAt > 0 && createdAt > 0) ? (firstTokenAt - createdAt) : 0;
