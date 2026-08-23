@@ -58,8 +58,7 @@ qt_standard_project_setup()
 
 set(PROJECT_SOURCES
         src/main.cpp
-
-
+        
         src/ui/animation/AnimatedGlobalNavVisualSource.h
         src/ui/animation/AnimatedBackVisualSource.h
         src/ui/animation/AnimatedPanelLeftVisualSource.h
@@ -78,6 +77,33 @@ set(PROJECT_SOURCES
         src/ui/widget/MarkdownStyle.cpp
         src/ui/widget/MarkdownView.h
         src/ui/widget/MarkdownView.cpp
+
+        src/ui/widget/message/MessageCardWidget.h
+        src/ui/widget/message/MessageCardWidget.cpp
+        src/ui/widget/message/MessageListView.h
+        src/ui/widget/message/MessageListView.cpp
+        src/ui/widget/message/ProcessGroupWidget.h
+        src/ui/widget/message/ProcessGroupWidget.cpp
+        src/ui/widget/message/blocks/ThinkingBlockWidget.h
+        src/ui/widget/message/blocks/ThinkingBlockWidget.cpp
+        src/ui/widget/message/blocks/AbstractToolBlockWidget.h
+        src/ui/widget/message/blocks/AbstractToolBlockWidget.cpp
+        src/ui/widget/message/blocks/ToolWidgetFactory.h
+        src/ui/widget/message/blocks/ToolWidgetFactory.cpp
+        src/ui/widget/message/blocks/tools/BashToolWidget.h
+        src/ui/widget/message/blocks/tools/BashToolWidget.cpp
+        src/ui/widget/message/blocks/tools/FileReadToolWidget.h
+        src/ui/widget/message/blocks/tools/FileReadToolWidget.cpp
+        src/ui/widget/message/blocks/tools/FileDiffToolWidget.h
+        src/ui/widget/message/blocks/tools/FileDiffToolWidget.cpp
+        src/ui/widget/message/blocks/tools/GenericToolWidget.h
+        src/ui/widget/message/blocks/tools/GenericToolWidget.cpp
+        src/ui/widget/message/blocks/ImageBlockWidget.h
+        src/ui/widget/message/blocks/ImageBlockWidget.cpp
+        src/ui/widget/message/blocks/ErrorBlockWidget.h
+        src/ui/widget/message/blocks/ErrorBlockWidget.cpp
+        src/ui/widget/message/blocks/FlatExpander.h
+        src/ui/widget/message/blocks/FlatExpander.cpp
 
         src/core/markdown/MarkdownRenderer.h
         src/core/markdown/MarkdownRenderer.cpp
@@ -135,6 +161,32 @@ set(PROJECT_SOURCES
         src/ui/screen/chat/ChatAnchorBar.cpp
         src/ui/screen/chat/ChatInputBox.h
         src/ui/screen/chat/ChatInputBox.cpp
+        src/ui/widget/message/MessageCardWidget.h
+        src/ui/widget/message/MessageCardWidget.cpp
+        src/ui/widget/message/MessageListView.h
+        src/ui/widget/message/MessageListView.cpp
+        src/ui/widget/message/ProcessGroupWidget.h
+        src/ui/widget/message/ProcessGroupWidget.cpp
+        src/ui/widget/message/blocks/ThinkingBlockWidget.h
+        src/ui/widget/message/blocks/ThinkingBlockWidget.cpp
+        src/ui/widget/message/blocks/AbstractToolBlockWidget.h
+        src/ui/widget/message/blocks/AbstractToolBlockWidget.cpp
+        src/ui/widget/message/blocks/ToolWidgetFactory.h
+        src/ui/widget/message/blocks/ToolWidgetFactory.cpp
+        src/ui/widget/message/blocks/tools/BashToolWidget.h
+        src/ui/widget/message/blocks/tools/BashToolWidget.cpp
+        src/ui/widget/message/blocks/tools/FileReadToolWidget.h
+        src/ui/widget/message/blocks/tools/FileReadToolWidget.cpp
+        src/ui/widget/message/blocks/tools/FileDiffToolWidget.h
+        src/ui/widget/message/blocks/tools/FileDiffToolWidget.cpp
+        src/ui/widget/message/blocks/tools/GenericToolWidget.h
+        src/ui/widget/message/blocks/tools/GenericToolWidget.cpp
+        src/ui/widget/message/blocks/ImageBlockWidget.h
+        src/ui/widget/message/blocks/ImageBlockWidget.cpp
+        src/ui/widget/message/blocks/ErrorBlockWidget.h
+        src/ui/widget/message/blocks/ErrorBlockWidget.cpp
+        src/ui/widget/message/blocks/FlatExpander.h
+        src/ui/widget/message/blocks/FlatExpander.cpp
         src/ui/screen/chat/ChatPage.h
         src/ui/screen/chat/ChatPage.cpp
 
@@ -163,7 +215,6 @@ set(PROJECT_SOURCES
 
         src/domain/Types.h
         src/domain/conversation/Conversation.h
-        src/domain/conversation/Turn.h
         src/domain/conversation/MessageBlock.h
         src/domain/conversation/Message.h
         src/domain/agent/Agent.h
@@ -251,3 +302,4 @@ if (WIN32)
             COMMENT "Running windeployqt to copy dependencies..."
     )
 endif ()
+
