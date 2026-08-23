@@ -32,28 +32,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(qwindowkit)
 
-FetchContent_Declare(
-        md4c
-        GIT_REPOSITORY https://github.com/mity/md4c.git
-        GIT_TAG release-0.5.2
-)
-set(MD4C_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(md4c)
-FetchContent_GetProperties(md4c SOURCE_DIR md4c_SOURCE_DIR)
-
-FetchContent_Declare(
-        litehtml
-        GIT_REPOSITORY https://github.com/litehtml/litehtml.git
-        GIT_TAG v0.10
-        PATCH_COMMAND
-        ${GIT_EXECUTABLE} apply --whitespace=nowarn --ignore-space-change
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/litehtml-patches/0001-add-document-rebuild-render-tree.patch
-)
-set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(litehtml)
-
-add_subdirectory(third_party/qlitehtml)
-
 qt_standard_project_setup()
 
 set(PROJECT_SOURCES
@@ -104,9 +82,6 @@ set(PROJECT_SOURCES
         src/ui/widget/message/blocks/ErrorBlockWidget.cpp
         src/ui/widget/message/blocks/FlatExpander.h
         src/ui/widget/message/blocks/FlatExpander.cpp
-
-        src/core/markdown/MarkdownRenderer.h
-        src/core/markdown/MarkdownRenderer.cpp
 
         src/ui/navigation/NavigationWidget.h
         src/ui/navigation/NavigationWidget.cpp
@@ -264,7 +239,6 @@ set_target_properties(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME}
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${md4c_SOURCE_DIR}/src
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -276,9 +250,6 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Sql
         QWindowKit::Widgets
         FluentQt::FluentQt
-        qlitehtml
-        md4c
-        md4c-html
 )
 
 if (WIN32)
