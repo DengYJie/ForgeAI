@@ -18,11 +18,13 @@ namespace data::repository {
     namespace {
 
         domain::model::DataOrigin stringToOrigin(const QString &str) {
+            if (str == QStringLiteral("Discovered")) return domain::model::DataOrigin::Discovered;
             if (str == QStringLiteral("User")) return domain::model::DataOrigin::User;
             return domain::model::DataOrigin::BuiltIn;
         }
 
         QString originToString(domain::model::DataOrigin origin) {
+            if (origin == domain::model::DataOrigin::Discovered) return QStringLiteral("Discovered");
             if (origin == domain::model::DataOrigin::User) return QStringLiteral("User");
             return QStringLiteral("BuiltIn");
         }
@@ -192,7 +194,7 @@ namespace data::repository {
                 "  COALESCE(uo.is_enabled, cp.is_enabled, 0), uo.base_url_override, COALESCE(uo.api_key, cp.api_key), "
                 "  ucm.provider_id, ucm.remote_model_id, ucm.canonical_model_id, "
                 "  0.0, 0.0, 0.0, 0.0, 'USD', "
-                "  NULL, NULL, NULL, NULL, '', ucm.is_enabled, 1, 'User', "
+                "  NULL, NULL, NULL, NULL, '', ucm.is_enabled, 0, ucm.origin, "
                 "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
                 "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
                 "  cm.modalities_input, cm.modalities_output, "
@@ -364,6 +366,7 @@ namespace data::repository {
             "  display_name TEXT NOT NULL,"
             "  canonical_model_id TEXT,"
             "  is_enabled INTEGER DEFAULT 1,"
+            "  origin TEXT NOT NULL DEFAULT 'User',"
             "  PRIMARY KEY (provider_id, remote_model_id)"
             ");"
         ), db);
@@ -723,7 +726,7 @@ namespace data::repository {
         QSqlQuery queryB(db);
         queryB.prepare(QStringLiteral(
             "SELECT provider_id, remote_model_id, canonical_model_id, 0.0, 0.0, 0.0, 0.0, 'USD', "
-            "       NULL, NULL, NULL, NULL, '', is_enabled, 1, 'User' "
+            "       NULL, NULL, NULL, NULL, '', is_enabled, 0, origin "
             "FROM user_custom_models WHERE provider_id = ? "
             "ORDER BY remote_model_id ASC;"
         ));
@@ -745,18 +748,16 @@ namespace data::repository {
         presetBindingQuery.bindValue(1, binding.remoteModelId);
         const bool isPresetBinding = presetBindingQuery.exec() && presetBindingQuery.next();
 
-        // Discovery marks all fetched models as User. An existing preset binding
-        // only needs an enable-state override; newly discovered IDs are stored
-        // as user custom models.
-        if (!isPresetBinding && (binding.isCustom || binding.origin == domain::model::DataOrigin::User)) {
+        if (!isPresetBinding && (binding.isCustom || binding.origin == domain::model::DataOrigin::User
+            || binding.origin == domain::model::DataOrigin::Discovered)) {
             QSqlQuery q(db);
             q.prepare(QStringLiteral(
-                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, canonical_model_id, is_enabled) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, canonical_model_id, is_enabled, origin) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(provider_id, remote_model_id) DO UPDATE SET "
                 "  display_name = excluded.display_name, "
                 "  canonical_model_id = excluded.canonical_model_id, "
-                "  is_enabled = excluded.is_enabled;"
+                "  is_enabled = excluded.is_enabled, origin = excluded.origin;"
             ));
             q.bindValue(0, binding.providerId);
             q.bindValue(1, binding.remoteModelId);
@@ -764,6 +765,7 @@ namespace data::repository {
             q.bindValue(3, binding.canonicalModelId.has_value()
                 ? QVariant(binding.canonicalModelId.value()) : QVariant());
             q.bindValue(4, binding.isEnabled ? 1 : 0);
+            q.bindValue(5, originToString(binding.origin));
             if (!q.exec()) qWarning() << "[saveProviderModel] custom error:" << q.lastError().text();
         } else {
             QSqlQuery q(db);

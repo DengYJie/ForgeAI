@@ -58,6 +58,9 @@ namespace llm::protocol::ollama {
             msgsArray.append(msgObj);
         }
         bodyObj.insert("messages", msgsArray);
+        if (request.useDeepThinking) {
+            bodyObj.insert("think", true);
+        }
 
         if (request.tools.has_value() && !request.tools->isEmpty()) {
             QJsonArray toolsArr;

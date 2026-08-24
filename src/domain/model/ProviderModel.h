@@ -24,6 +24,7 @@ namespace domain::model {
      */
     enum class DataOrigin {
         BuiltIn,    ///< 系统内置预设
+        Discovered, ///< 已配置 Provider 的模型探测结果
         User        ///< 用户自定义
     };
 

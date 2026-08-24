@@ -128,6 +128,13 @@ namespace llm::protocol::gemini {
         if (request.maxTokens.has_value()) {
             genConfig.insert("maxOutputTokens", request.maxTokens.value());
         }
+        if (request.useDeepThinking) {
+            const QString effort = request.reasoningEffort;
+            const int budget = effort == QStringLiteral("low") ? 1024
+                : effort == QStringLiteral("high") ? 8192
+                : effort == QStringLiteral("max") ? 16384 : 4096;
+            genConfig.insert("thinkingConfig", QJsonObject{{"thinkingBudget", budget}});
+        }
         if (!genConfig.isEmpty()) {
             bodyObj.insert("generationConfig", genConfig);
         }

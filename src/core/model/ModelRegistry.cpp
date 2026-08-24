@@ -171,6 +171,8 @@ namespace core::model {
         for (const auto &raw : discoveredModels) {
             domain::model::ProviderModel pm = raw;
             pm.providerId = providerId;
+            pm.isCustom = false;
+            pm.origin = domain::model::DataOrigin::Discovered;
             if (m_repository) {
                 const auto exactMatch = canonicalIds.constFind(raw.remoteModelId);
                 if (exactMatch != canonicalIds.cend()) {

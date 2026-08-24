@@ -10,6 +10,7 @@ namespace llm::protocol::ollama {
     public:
         OllamaProtocolAdapter();
         ~OllamaProtocolAdapter() override;
+        bool supportsModelDiscovery() const override { return true; }
 
         network::HttpRequest buildChatRequest(
             const domain::model::ModelProvider &provider,

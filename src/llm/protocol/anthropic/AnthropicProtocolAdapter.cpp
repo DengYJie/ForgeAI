@@ -42,6 +42,13 @@ namespace llm::protocol::anthropic {
         if (request.temperature.has_value()) {
             bodyObj.insert("temperature", request.temperature.value());
         }
+        if (request.useDeepThinking) {
+            const QString effort = request.reasoningEffort;
+            const int budget = effort == QStringLiteral("low") ? 1024
+                : effort == QStringLiteral("high") ? 8192
+                : effort == QStringLiteral("max") ? 16384 : 4096;
+            bodyObj.insert("thinking", QJsonObject{{"type", "enabled"}, {"budget_tokens", budget}});
+        }
 
         // 分离 system prompt 与普通消息
         QString systemPrompt;

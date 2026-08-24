@@ -10,6 +10,7 @@ namespace llm::protocol::openai {
     public:
         OpenAIChatCompletionsAdapter();
         ~OpenAIChatCompletionsAdapter() override;
+        bool supportsModelDiscovery() const override { return true; }
 
         network::HttpRequest buildChatRequest(
             const domain::model::ModelProvider &provider,

@@ -73,6 +73,7 @@ namespace ui::widget::chat {
         m_clearButton->setCursor(Qt::PointingHandCursor);
         connect(m_clearButton, &QPushButton::clicked, this, &ChatHeader::clearChatRequested);
         m_rightLayout->addWidget(m_clearButton);
+        m_clearButton->hide();
 
         m_thirdPaneToggle = new fluent::basicinput::Button(this);
         m_thirdPaneToggle->setCheckable(true);
@@ -85,6 +86,7 @@ namespace ui::widget::chat {
         m_thirdPaneToggle->setCursor(Qt::PointingHandCursor);
         connect(m_thirdPaneToggle, &QPushButton::toggled, this, &ChatHeader::toggleThirdPaneRequested);
         m_rightLayout->addWidget(m_thirdPaneToggle);
+        m_thirdPaneToggle->hide();
 
         m_mainLayout->addLayout(m_rightLayout);
     }
