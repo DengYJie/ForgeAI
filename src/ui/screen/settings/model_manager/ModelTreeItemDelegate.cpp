@@ -3,8 +3,12 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QIcon>
+#include <QHelpEvent>
+#include <QGuiApplication>
+#include <QScreen>
 #include <FluentQt/Collections.h>
 #include <FluentQt/Design.h>
+#include <FluentQt/StatusInfo.h>
 
 #include "domain/model/ModelCapabilities.h"
 #include "ui/widget/badge/ModelCapabilityStyle.h"
@@ -53,7 +57,17 @@ namespace ui::screen::settings::model_manager {
     } // namespace
 
     ModelTreeItemDelegate::ModelTreeItemDelegate(fluent::collections::TreeView *treeView, QObject *parent)
-        : QStyledItemDelegate(parent), m_treeView(treeView) {}
+        : QStyledItemDelegate(parent), m_treeView(treeView) {
+        if (m_treeView && m_treeView->viewport()) {
+            m_treeView->viewport()->installEventFilter(this);
+        }
+    }
+
+    ModelTreeItemDelegate::~ModelTreeItemDelegate() {
+        if (m_tooltip) {
+            m_tooltip->deleteLater();
+        }
+    }
 
     QSize ModelTreeItemDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const {
         const auto spacing = themeSpacing();
@@ -235,6 +249,168 @@ namespace ui::screen::settings::model_manager {
         }
 
         painter->restore();
+    }
+
+    bool ModelTreeItemDelegate::eventFilter(QObject *watched, QEvent *event) {
+        if (event) {
+            switch (event->type()) {
+            case QEvent::Leave:
+            case QEvent::MouseButtonPress:
+            case QEvent::Wheel:
+            case QEvent::Hide:
+                hideToolTip();
+                break;
+            default:
+                break;
+            }
+        }
+        return QStyledItemDelegate::eventFilter(watched, event);
+    }
+
+    void ModelTreeItemDelegate::showToolTip(const QString &text, const QRect &targetRect, QWidget *sourceWidget) const {
+        if (text.isEmpty() || !sourceWidget) {
+            hideToolTip();
+            return;
+        }
+
+        if (m_tooltip && m_tooltip->isVisible() && m_activeToolTipText == text && m_activeToolTipRect == targetRect) {
+            return; // 已经在稳定显示同一文本和区域，避免频繁重置动画与位置
+        }
+
+        m_activeToolTipText = text;
+        m_activeToolTipRect = targetRect;
+
+        if (!m_tooltip) {
+            m_tooltip = new fluent::status_info::ToolTip(nullptr);
+            m_tooltip->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            m_tooltip->setAnimationEnabled(true);
+        }
+
+        m_tooltip->setText(text);
+        m_tooltip->setThemeSource(sourceWidget);
+        m_tooltip->adjustSize();
+
+        const int shadowMargin = m_tooltip->shadowMargin();
+        const QSize outerSize = m_tooltip->sizeHint().expandedTo(m_tooltip->size());
+        const QSize cardSize(qMax(0, outerSize.width() - 2 * shadowMargin),
+                             qMax(0, outerSize.height() - 2 * shadowMargin));
+
+        // 将 targetRect 映射为全局坐标
+        const QPoint globalTopLeft = sourceWidget->mapToGlobal(targetRect.topLeft());
+        const QRect globalTargetRect(globalTopLeft, targetRect.size());
+
+        QPoint visibleTopLeft(globalTargetRect.center().x() - cardSize.width() / 2,
+                              globalTargetRect.top() - 6 - cardSize.height());
+
+        QScreen *screen = QGuiApplication::screenAt(globalTargetRect.center());
+        if (!screen) {
+            screen = QGuiApplication::primaryScreen();
+        }
+        if (screen) {
+            const QRect avail = screen->availableGeometry();
+            // 若上方空间不足，则翻转到下方
+            if (visibleTopLeft.y() < avail.top()) {
+                visibleTopLeft.setY(globalTargetRect.bottom() + 6);
+            }
+            visibleTopLeft.setX(qBound(avail.left() + 4, visibleTopLeft.x(), avail.right() - cardSize.width() - 4));
+            visibleTopLeft.setY(qBound(avail.top() + 4, visibleTopLeft.y(), avail.bottom() - cardSize.height() - 4));
+        }
+
+        m_tooltip->move(visibleTopLeft - QPoint(shadowMargin, shadowMargin));
+        if (!m_tooltip->isVisible()) {
+            m_tooltip->setVisible(true);
+        }
+        m_tooltip->raise();
+    }
+
+    void ModelTreeItemDelegate::hideToolTip() const {
+        m_activeToolTipText.clear();
+        m_activeToolTipRect = QRect();
+        if (m_tooltip && m_tooltip->isVisible()) {
+            m_tooltip->setVisible(false);
+        }
+    }
+
+    bool ModelTreeItemDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view,
+                                          const QStyleOptionViewItem &option, const QModelIndex &index) {
+        if (!event || !view || !index.isValid()) {
+            hideToolTip();
+            return false;
+        }
+
+        QWidget *viewport = view->viewport() ? view->viewport() : view;
+        const bool isGroup = index.data(IsGroupRole).toBool();
+        const QPoint pos = event->pos();
+        const QRect rowRect = option.rect;
+        const auto spacing = themeSpacing();
+
+        if (isGroup) {
+            const QRect minusRect(rowRect.right() - spacing.standard - spacing.large,
+                                  rowRect.top(), spacing.large + spacing.small, rowRect.height());
+            if (minusRect.contains(pos)) {
+                showToolTip(tr("移除分组"), minusRect, viewport);
+                return true;
+            }
+            hideToolTip();
+            return false;
+        }
+
+        // 模型行
+        qreal rightCursor = rowRect.right() - spacing.standard;
+
+        // 1. 减号按钮 (-)
+        const QRect minusRect(static_cast<int>(rightCursor - spacing.standard - 4),
+                              rowRect.top(), spacing.standard + 8, rowRect.height());
+        if (minusRect.contains(pos)) {
+            showToolTip(tr("移除模型"), minusRect, viewport);
+            return true;
+        }
+        rightCursor -= spacing.large;
+
+        // 2. 齿轮设置按钮 (⚙)
+        const QRect settingsRect(static_cast<int>(rightCursor - spacing.standard - 4),
+                                 rowRect.top(), spacing.standard + 8, rowRect.height());
+        if (settingsRect.contains(pos)) {
+            showToolTip(tr("模型设置"), settingsRect, viewport);
+            return true;
+        }
+        rightCursor -= (spacing.large + spacing.gap.tight);
+
+        // 3. 能力徽标
+        const int caps = index.data(ModelCapabilitiesRole).toInt();
+        const auto &featuredCaps = ui::widget::badge::ModelCapabilityStyle::featuredBadgeCapabilities();
+
+        for (const auto cap : featuredCaps) {
+            if (caps & static_cast<int>(cap)) {
+                const QRect badgeRect(static_cast<int>(rightCursor - ui::widget::badge::ModelCapabilityStyle::kDefaultBadgeSize.width()),
+                                      static_cast<int>(rowRect.center().y() - (ui::widget::badge::ModelCapabilityStyle::kDefaultBadgeSize.height() / 2.0)),
+                                      static_cast<int>(ui::widget::badge::ModelCapabilityStyle::kDefaultBadgeSize.width()),
+                                      static_cast<int>(ui::widget::badge::ModelCapabilityStyle::kDefaultBadgeSize.height()));
+                if (badgeRect.contains(pos)) {
+                    const auto &visual = ui::widget::badge::ModelCapabilityStyle::visualRef(cap, this);
+                    showToolTip(visual.tooltip.isEmpty() ? visual.displayName : visual.tooltip, badgeRect, viewport);
+                    return true;
+                }
+                rightCursor -= (ui::widget::badge::ModelCapabilityStyle::kDefaultBadgeSize.width() + spacing.gap.normal);
+            }
+        }
+
+        // 4. 左侧模型名称区域
+        const QRectF iconRect(rowRect.left() + spacing.large, rowRect.center().y() - 11, 22, 22);
+        const qreal textLeft = iconRect.right() + spacing.gap.normal + 2;
+        const QRect textRect(static_cast<int>(textLeft), rowRect.top(),
+                             qMax(10, static_cast<int>(rightCursor - textLeft)), rowRect.height());
+        if (textRect.contains(pos)) {
+            const QString modelId = index.data(ModelIdRole).toString();
+            if (!modelId.isEmpty()) {
+                showToolTip(modelId, textRect, viewport);
+                return true;
+            }
+        }
+
+        hideToolTip();
+        event->ignore();
+        return true;
     }
 
 } // namespace ui::screen::settings::model_manager

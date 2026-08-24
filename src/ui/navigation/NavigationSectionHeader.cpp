@@ -29,7 +29,7 @@ namespace ui::navigation {
 
     QSize NavigationSectionHeader::sizeHint() const {
         if (m_orientation == Qt::Horizontal) {
-            QFont f = themeFont(Typography::FontRole::BodyStrong).toQFont();
+            QFont f = themeFont(Typography::FontRole::Caption).toQFont();
             QFontMetrics fm(f);
             // 文字宽度 + 两侧内边距
             return QSize(fm.horizontalAdvance(m_text) + themeSpacing().medium * 2, kTopBarItemHeight);
@@ -62,7 +62,7 @@ namespace ui::navigation {
         if (isCompacted())
             return;
 
-        painter.setFont(themeFont(Typography::FontRole::BodyStrong).toQFont());
+        painter.setFont(themeFont(Typography::FontRole::Caption).toQFont());
         painter.setPen(colorsRef().textSecondary);
 
         // Horizontal 采用普通边距，Vertical 与图标左边缘对齐

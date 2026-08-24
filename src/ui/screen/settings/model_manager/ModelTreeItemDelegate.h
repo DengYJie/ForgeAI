@@ -4,8 +4,13 @@
 #include <QPoint>
 #include <FluentQt/FluentQt.h>
 
+#include <QPointer>
+
 namespace fluent::collections {
     class TreeView;
+}
+namespace fluent::status_info {
+    class ToolTip;
 }
 
 namespace ui::screen::settings::model_manager {
@@ -26,17 +31,27 @@ namespace ui::screen::settings::model_manager {
 
     public:
         explicit ModelTreeItemDelegate(fluent::collections::TreeView *treeView, QObject *parent = nullptr);
-        ~ModelTreeItemDelegate() override = default;
+        ~ModelTreeItemDelegate() override;
 
         void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
         QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+        bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index) override;
 
     Q_SIGNALS:
         void modelSettingsRequested(const QString &modelId);
         void modelActionRequested(const QString &modelId);
 
+    protected:
+        bool eventFilter(QObject *watched, QEvent *event) override;
+
     private:
+        void showToolTip(const QString &text, const QRect &targetRect, QWidget *sourceWidget) const;
+        void hideToolTip() const;
+
         fluent::collections::TreeView *m_treeView = nullptr;
+        mutable QPointer<fluent::status_info::ToolTip> m_tooltip;
+        mutable QString m_activeToolTipText;
+        mutable QRect m_activeToolTipRect;
     };
 
 } // namespace ui::screen::settings::model_manager
