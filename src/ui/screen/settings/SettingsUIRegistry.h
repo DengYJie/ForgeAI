@@ -6,7 +6,7 @@
 namespace ui::screen::settings {
     /**
      * @brief 设置界面 UI 工厂注册中心
-     * @details 负责收集管理所有 ISettingsUIFactory 实例，并提供按分类/项顺序排序的工厂列表供 SettingsPage 渲染
+     * @details 负责收集管理所有 ISettingsUIFactory 实例，并提供按分类/项顺序排序的工厂列表供 SettingsNavigationModule 渲染
      */
     class SettingsUIRegistry {
     public:
@@ -32,7 +32,7 @@ namespace ui::screen::settings {
          */
         QList<std::shared_ptr<ISettingsUIFactory>> sortedFactories() const;
 
-        ISettingsProviderPageFactory *providerPageFactory(const QString &providerId) const;
+        std::shared_ptr<ISettingsProviderPageFactory> providerPageFactory(const QString &providerId) const;
         QList<std::shared_ptr<ISettingsProviderPageFactory>> providerPageFactories() const;
 
     private:

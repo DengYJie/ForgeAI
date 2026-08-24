@@ -31,9 +31,9 @@ namespace ui::screen::settings {
         return sorted;
     }
 
-    ISettingsProviderPageFactory *SettingsUIRegistry::providerPageFactory(const QString &providerId) const {
+    std::shared_ptr<ISettingsProviderPageFactory> SettingsUIRegistry::providerPageFactory(const QString &providerId) const {
         for (const auto &factory : m_providerPageFactories) {
-            if (factory->providerId() == providerId) return factory.get();
+            if (factory && factory->providerId() == providerId) return factory;
         }
         return nullptr;
     }

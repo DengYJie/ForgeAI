@@ -4,13 +4,33 @@
 #include <memory>
 
 namespace ui::screen::settings {
-    /** 可选扩展：为一个 Provider 提供完整的自定义页面。 */
+    /**
+     * @brief 自定义设置提供者页面工厂抽象接口
+     * @details 为一个 Provider 提供完整的自定义设置页面及导航展示元数据
+     */
     class ISettingsProviderPageFactory {
     public:
         virtual ~ISettingsProviderPageFactory() = default;
+
+        /** 所属 SettingsProvider 的稳定 ID。 */
         virtual QString providerId() const = 0;
+
+        /** 获取所属分类显示名称。 */
+        virtual QString category() const = 0;
+
+        /** 获取设置页面显示标题。 */
+        virtual QString title() const = 0;
+
+        /** 获取分类排序权重（数值越小越靠前）。 */
         virtual int categoryOrder() const { return 0; }
+
+        /** 获取项排序权重（数值越小越靠前）。 */
+        virtual int order() const { return 0; }
+
+        /** 获取导航图标字形码。 */
         virtual QString iconGlyph() const = 0;
+
+        /** 创建自定义设置页面控件。 */
         virtual QWidget *createProviderPage(QWidget *parent) = 0;
     };
 
@@ -38,7 +58,7 @@ namespace ui::screen::settings {
         virtual QString categoryId() const = 0;
 
         /**
-         * @brief 获取分类显示名称（用于 SettingsPage 界面分组标题呈现）
+         * @brief 获取分类显示名称（用于 SettingsNavigationModule 界面分组标题呈现）
          * @return 本地化的分类显示文本
          */
         virtual QString categoryDisplayName() const = 0;

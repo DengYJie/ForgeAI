@@ -13,7 +13,10 @@ namespace ui::screen::settings {
         ~ModelSettingsPageFactory() override = default;
 
         QString providerId() const override { return QStringLiteral("model"); }
+        QString category() const override;
+        QString title() const override;
         int categoryOrder() const override { return 0; }
+        int order() const override { return 0; }
         QString iconGlyph() const override;
         QWidget *createProviderPage(QWidget *parent) override;
 
