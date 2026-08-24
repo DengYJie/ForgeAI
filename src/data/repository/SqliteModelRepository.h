@@ -7,9 +7,10 @@
 namespace data::repository {
 
     /**
-     * @brief 基于 SQLite 的规范化模型与服务商仓储实现
-     * @details 维护 canonical_models, model_providers, provider_models 三张规范化关系表。
-     * 支持首次启动与模型资源更新时的哈希校验及原子事务批量写入，并保护用户自定义数据。
+     * @brief 基于 SQLite 的双表分离规范化模型与服务商仓储实现
+     * @details 维护预置基线表（canonical_models, preset_providers, preset_provider_models）
+     * 与用户增量/自定义表（user_provider_overrides, user_model_overrides, user_custom_providers, user_custom_models）。
+     * 支持资源更新时的原子全量重建预置表，并通过 Read-time Merge (LEFT JOIN) 保证用户配置永不丢失。
      */
     class SqliteModelRepository : public domain::repository::IModelRepository {
     public:

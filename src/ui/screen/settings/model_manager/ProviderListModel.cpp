@@ -44,6 +44,7 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ProviderListModel::setProviders(const QList<domain::model::ModelProvider> &providers) {
+        if (m_providers == providers) return;
         beginResetModel();
         m_providers = providers;
         endResetModel();
