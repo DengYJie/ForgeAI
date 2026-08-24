@@ -332,8 +332,10 @@ set(PROJECT_SOURCES
         src/domain/agent/Agent.h
         src/domain/agent/ToolDefinition.h
         src/domain/agent/ToolExecution.h
+        src/domain/service/IAgentToolService.h
         src/domain/agent/RuntimeCheckpoint.h
         src/domain/project/Project.h
+        src/domain/project/ProjectContext.h
         src/domain/model/ModelCapabilities.h
         src/domain/model/ModelParameters.h
         src/domain/model/CanonicalModel.h
@@ -374,6 +376,7 @@ set(PROJECT_SOURCES
         src/core/model/ModelRegistry.cpp
 
         src/domain/service/IConversationService.h
+        src/domain/service/IProjectContextService.h
         src/domain/service/IModelService.h
         src/domain/service/ISettingsService.h
 
@@ -383,6 +386,10 @@ set(PROJECT_SOURCES
         src/services/model/ModelService.cpp
         src/services/settings/SettingsService.h
         src/services/settings/SettingsService.cpp
+        src/services/project/ProjectContextService.h
+        src/services/project/ProjectContextService.cpp
+        src/services/agent/AgentToolService.h
+        src/services/agent/AgentToolService.cpp
 
         src/application/usecase/chat/ChatUseCases.h
         src/application/usecase/chat/SendMessageUseCase.h
@@ -562,6 +569,50 @@ if (BUILD_TESTING)
     add_test(NAME MarkdownCoreTests COMMAND MarkdownCoreTests)
     # QTextLayout/QFontDatabase require QGuiApplication, but no visible desktop.
     set_tests_properties(MarkdownCoreTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_FONTDIR=C:/Windows/Fonts")
+    qt_add_executable(AgentToolTests
+        tests/AgentToolTests.cpp
+        src/domain/agent/ToolDefinition.h src/domain/agent/ToolExecution.h
+        src/domain/project/ProjectContext.h
+        src/domain/service/IAgentToolService.h src/domain/service/IProjectContextService.h
+        src/services/agent/AgentToolService.h src/services/agent/AgentToolService.cpp
+        src/services/project/ProjectContextService.h src/services/project/ProjectContextService.cpp
+    )
+    target_include_directories(AgentToolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(AgentToolTests PRIVATE Qt::Core Qt::Test)
+    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+        add_custom_command(TARGET AgentToolTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:AgentToolTests>
+                $<TARGET_FILE_DIR:AgentToolTests>
+            COMMAND_EXPAND_LISTS
+            COMMENT "Deploying Qt runtime DLLs for AgentToolTests..."
+        )
+    endif ()
+    add_test(NAME AgentToolTests COMMAND AgentToolTests)
+    qt_add_executable(AgentProtocolTests
+        tests/AgentProtocolTests.cpp
+        src/llm/protocol/IStreamParser.h src/llm/protocol/IProtocolAdapter.h
+        src/llm/protocol/openai_responses/OpenAIResponsesAdapter.h
+        src/llm/protocol/openai_responses/OpenAIResponsesAdapter.cpp
+        src/llm/protocol/openai_responses/OpenAIResponsesStreamParser.h
+        src/llm/protocol/openai_responses/OpenAIResponsesStreamParser.cpp
+        src/llm/protocol/ollama/OllamaProtocolAdapter.h
+        src/llm/protocol/ollama/OllamaProtocolAdapter.cpp
+        src/llm/protocol/ollama/OllamaStreamParser.h
+        src/llm/protocol/ollama/OllamaStreamParser.cpp
+    )
+    target_include_directories(AgentProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(AgentProtocolTests PRIVATE Qt::Core Qt::Test)
+    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+        add_custom_command(TARGET AgentProtocolTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:AgentProtocolTests>
+                $<TARGET_FILE_DIR:AgentProtocolTests>
+            COMMAND_EXPAND_LISTS
+            COMMENT "Deploying Qt runtime DLLs for AgentProtocolTests..."
+        )
+    endif ()
+    add_test(NAME AgentProtocolTests COMMAND AgentProtocolTests)
 endif ()
 
 if (WIN32)

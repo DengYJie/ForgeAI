@@ -42,6 +42,7 @@ namespace llm::protocol::ollama {
                 case domain::MessageRole::Assistant: msgObj.insert("role", "assistant"); break;
                 case domain::MessageRole::Tool: msgObj.insert("role", "tool"); break;
             }
+            msgObj.insert("content", msg.content);
             if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
                 QJsonArray tcArr;
                 for (const auto &tc : msg.toolCalls.value()) {

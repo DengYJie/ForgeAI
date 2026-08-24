@@ -35,6 +35,26 @@ namespace llm::protocol::openai_responses {
 
         QJsonArray inputArray;
         for (const auto &msg : request.messages) {
+            if (msg.role == domain::MessageRole::Tool) {
+                // Responses API represents continuation results as standalone
+                // function_call_output items, not Chat Completions' role=tool.
+                QJsonObject output;
+                output.insert("type", "function_call_output");
+                output.insert("call_id", msg.toolCallId);
+                output.insert("output", msg.content);
+                inputArray.append(output);
+                continue;
+            }
+            if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
+                if (!msg.content.isEmpty()) {
+                    inputArray.append(QJsonObject{{"role", "assistant"}, {"content", msg.content}});
+                }
+                for (const auto& call : msg.toolCalls.value()) {
+                    inputArray.append(QJsonObject{{"type", "function_call"}, {"call_id", call.id},
+                                                  {"name", call.name}, {"arguments", call.arguments}});
+                }
+                continue;
+            }
             QJsonObject msgObj;
             switch (msg.role) {
                 case domain::MessageRole::System: msgObj.insert("role", "system"); break;
@@ -42,23 +62,7 @@ namespace llm::protocol::openai_responses {
                 case domain::MessageRole::Assistant: msgObj.insert("role", "assistant"); break;
                 case domain::MessageRole::Tool: msgObj.insert("role", "tool"); break;
             }
-            if (msg.role == domain::MessageRole::Tool && !msg.toolCallId.isEmpty()) {
-                msgObj.insert("tool_call_id", msg.toolCallId);
-            }
-            if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
-                QJsonArray tcArr;
-                for (const auto &tc : msg.toolCalls.value()) {
-                    QJsonObject tcObj;
-                    tcObj.insert("id", tc.id);
-                    tcObj.insert("type", "function");
-                    QJsonObject fObj;
-                    fObj.insert("name", tc.name);
-                    fObj.insert("arguments", tc.arguments);
-                    tcObj.insert("function", fObj);
-                    tcArr.append(tcObj);
-                }
-                msgObj.insert("tool_calls", tcArr);
-            }
+            msgObj.insert("content", msg.content);
             inputArray.append(msgObj);
         }
         bodyObj.insert("input", inputArray);
