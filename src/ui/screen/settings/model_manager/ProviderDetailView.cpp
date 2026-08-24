@@ -54,20 +54,6 @@ namespace ui::screen::settings::model_manager {
             }
         };
 
-        QString protocolDisplayName(domain::model::ProviderType type) {
-            using Type = domain::model::ProviderType;
-            switch (type) {
-            case Type::OpenAIChatCompletionsCompatible: return QStringLiteral("OpenAI 兼容协议 (/v1/chat/completions)");
-            case Type::OpenAIResponses: return QStringLiteral("OpenAI 原生 Responses 协议");
-            case Type::Anthropic: return QStringLiteral("Anthropic 原生 Messages 协议");
-            case Type::GoogleGemini: return QStringLiteral("Google Gemini 原生协议");
-            case Type::Ollama: return QStringLiteral("本地 Ollama 协议");
-            case Type::AzureOpenAI: return QStringLiteral("Azure OpenAI 协议");
-            case Type::AmazonBedrock: return QStringLiteral("Amazon Bedrock 协议");
-            default: return QStringLiteral("自定义协议");
-            }
-        }
-
         QString groupName(const domain::model::Model &model) {
             if (model.isCustom) return QObject::tr("自定义模型");
             if (!model.group.trimmed().isEmpty()) return model.group;
@@ -96,21 +82,11 @@ namespace ui::screen::settings::model_manager {
         m_headerLayout->setContentsMargins(32, 24, 32, 8);
         m_headerLayout->setSpacing(12);
 
-        auto *titleColumn = new QVBoxLayout();
-        titleColumn->setContentsMargins(0, 0, 0, 0);
-        titleColumn->setSpacing(4);
-
         m_nameLabel = new fluent::textfields::Label(m_headerWidget);
         m_nameLabel->setFluentTypography(Typography::FontRole::Title);
         m_nameLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
 
-        m_protocolLabel = new fluent::textfields::Label(m_headerWidget);
-        m_protocolLabel->setFluentTypography(Typography::FontRole::Caption);
-        m_protocolLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
-
-        titleColumn->addWidget(m_nameLabel);
-        titleColumn->addWidget(m_protocolLabel);
-        m_headerLayout->addLayout(titleColumn, 1);
+        m_headerLayout->addWidget(m_nameLabel, 1, Qt::AlignVCenter);
 
         m_enableSwitch = new fluent::basicinput::ToggleSwitch(m_headerWidget);
         connect(m_enableSwitch, &fluent::basicinput::ToggleSwitch::toggled, this, [this](bool checked) {
@@ -144,13 +120,16 @@ namespace ui::screen::settings::model_manager {
         connectionLayout->setContentsMargins(20, 16, 20, 16);
         connectionLayout->setSpacing(12);
 
+        const auto spacing = themeSpacing();
+        const int controlHeight = spacing.controlHeight.standard;
+
         auto *urlLabel = new fluent::textfields::Label(tr("API 基础地址 (Base URL)"), connectionCard);
         urlLabel->setFluentTypography(Typography::FontRole::Caption);
         urlLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
 
         m_urlEdit = new fluent::textfields::LineEdit(connectionCard);
         m_urlEdit->setPlaceholderText(QStringLiteral("https://api.openai.com/v1"));
-        m_urlEdit->setFixedHeight(36);
+        m_urlEdit->setFixedHeight(controlHeight);
         connect(m_urlEdit, &fluent::textfields::LineEdit::textChanged, this, [this](const QString &text) {
             if (!m_hasProvider) return;
             m_provider.baseUrl = text.trimmed();
@@ -167,7 +146,7 @@ namespace ui::screen::settings::model_manager {
 
         m_keyEdit = new fluent::textfields::PasswordBox(connectionCard);
         m_keyEdit->setPlaceholderText(QStringLiteral("sk-..."));
-        m_keyEdit->setFixedHeight(36);
+        m_keyEdit->setFixedHeight(controlHeight);
         connect(m_keyEdit, &fluent::textfields::PasswordBox::textChanged, this, [this](const QString &text) {
             if (!m_hasProvider) return;
             m_provider.apiKey = text.trimmed();
@@ -176,7 +155,7 @@ namespace ui::screen::settings::model_manager {
 
         m_testBtn = new fluent::basicinput::Button(connectionCard);
         m_testBtn->setText(tr("检测"));
-        m_testBtn->setFixedHeight(36);
+        m_testBtn->setFixedHeight(controlHeight);
         m_testBtn->setFixedWidth(80);
         m_testBtn->setFluentStyle(fluent::basicinput::Button::Standard);
         connect(m_testBtn, &fluent::basicinput::Button::clicked, this, &ProviderDetailView::testConnection);
@@ -303,7 +282,6 @@ namespace ui::screen::settings::model_manager {
         const QSignalBlocker urlBlocker(m_urlEdit);
         const QSignalBlocker keyBlocker(m_keyEdit);
         m_nameLabel->setText(m_hasProvider ? m_provider.name : QString());
-        m_protocolLabel->setText(m_hasProvider ? protocolDisplayName(m_provider.type) : QString());
         m_enableSwitch->setIsOn(m_hasProvider && m_provider.isEnabled);
         m_urlEdit->setText(m_provider.baseUrl);
         m_keyEdit->setText(m_provider.apiKey);

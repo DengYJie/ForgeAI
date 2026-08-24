@@ -58,7 +58,6 @@ namespace ui::screen::settings::model_manager {
         QWidget *m_scrollContent = nullptr;
         QVBoxLayout *m_mainLayout = nullptr;
         fluent::textfields::Label *m_nameLabel = nullptr;
-        fluent::textfields::Label *m_protocolLabel = nullptr;
         fluent::basicinput::ToggleSwitch *m_enableSwitch = nullptr;
         fluent::textfields::LineEdit *m_urlEdit = nullptr;
         fluent::textfields::PasswordBox *m_keyEdit = nullptr;
