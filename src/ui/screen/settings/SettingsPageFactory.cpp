@@ -66,7 +66,6 @@ namespace ui::screen::settings {
                 : fluent::layout::Card(parent), m_trailing(trailingWidget) {
                 setObjectName(QStringLiteral("settingsCardItem"));
                 setMinimumHeight(68);
-                setMaximumWidth(kMaxContentWidth);
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
                 m_layout = new QGridLayout(this);
@@ -172,7 +171,7 @@ namespace ui::screen::settings {
 
     QWidget *SettingsPageFactory::createLazyPage(
         const SettingsProviderPageDescriptor &descriptor,
-        QList<QVBoxLayout *> &pageLayouts,
+        QList<QBoxLayout *> &pageLayouts,
         QList<QWidget *> &cards,
         QWidget *parent) {
 
@@ -195,7 +194,7 @@ namespace ui::screen::settings {
 
     QWidget *SettingsPageFactory::createGenericProviderPage(
         const SettingsProviderPageDescriptor &descriptor,
-        QList<QVBoxLayout *> &pageLayouts,
+        QList<QBoxLayout *> &pageLayouts,
         QList<QWidget *> &cards,
         QWidget *parent) {
 
@@ -203,16 +202,24 @@ namespace ui::screen::settings {
 
         auto *contentWidget = new QWidget(scrollView);
         contentWidget->setAutoFillBackground(false);
-        auto *contentLayout = new QVBoxLayout(contentWidget);
-        contentLayout->setContentsMargins(36, 24, 36, 36);
+
+        auto *rootLayout = new QHBoxLayout(contentWidget);
+        rootLayout->setContentsMargins(36, 24, 36, 36);
+        rootLayout->setSpacing(0);
+        pageLayouts.append(rootLayout);
+
+        auto *centerContainer = new QWidget(contentWidget);
+        centerContainer->setAutoFillBackground(false);
+        centerContainer->setMaximumWidth(kMaxContentWidth);
+        centerContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+        auto *contentLayout = new QVBoxLayout(centerContainer);
+        contentLayout->setContentsMargins(0, 0, 0, 0);
         contentLayout->setSpacing(kCardSpacing);
 
-        pageLayouts.append(contentLayout);
-
-        auto *pageTitle = new fluent::textfields::Label(descriptor.title, contentWidget);
+        auto *pageTitle = new fluent::textfields::Label(descriptor.title, centerContainer);
         pageTitle->setFluentTypography(Typography::FontRole::Title);
         pageTitle->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
-        pageTitle->setMaximumWidth(kMaxContentWidth);
         contentLayout->addWidget(pageTitle);
         contentLayout->addSpacing(8);
 
@@ -223,24 +230,26 @@ namespace ui::screen::settings {
             const QString currentCategory = factory->categoryDisplayName();
             if (currentCategory != previousCategory && !currentCategory.isEmpty()) {
                 contentLayout->addSpacing(20);
-                contentLayout->addWidget(createSectionHeader(currentCategory, contentWidget));
+                contentLayout->addWidget(createSectionHeader(currentCategory, centerContainer));
                 contentLayout->addSpacing(2);
                 previousCategory = currentCategory;
             }
 
-            QWidget *trailingWidget = factory->createControlWidget(contentWidget);
+            QWidget *trailingWidget = factory->createControlWidget(centerContainer);
             QWidget *card = createSettingsCard(
                 factory->iconGlyph(),
                 factory->title(),
                 factory->subtitle(),
                 trailingWidget,
-                contentWidget
+                centerContainer
             );
             cards.append(card);
             contentLayout->addWidget(card);
         }
 
         contentLayout->addStretch();
+        rootLayout->addWidget(centerContainer, 1, Qt::AlignHCenter | Qt::AlignTop);
+
         scrollView->setWidget(contentWidget);
         return scrollView;
     }
@@ -249,7 +258,6 @@ namespace ui::screen::settings {
         auto *header = new fluent::textfields::Label(title, parent);
         header->setFluentTypography(Typography::FontRole::BodyStrong);
         header->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
-        header->setMaximumWidth(kMaxContentWidth);
         return header;
     }
 

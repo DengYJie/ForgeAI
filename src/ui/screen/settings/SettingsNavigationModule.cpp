@@ -2,10 +2,11 @@
 
 #include <FluentQt/Design.h>
 #include <QDebug>
-#include <QVBoxLayout>
+#include <QBoxLayout>
 
 #include "ui/animation/AnimatedSettingsVisualSource.h"
 #include "ui/navigation/NavigationPanel.h"
+#include "ui/screen/settings/SettingsUIRegistry.h"
 #include "ui/screen/settings/SettingsDescriptorBuilder.h"
 #include "ui/screen/settings/SettingsPageFactory.h"
 
@@ -38,24 +39,22 @@ namespace ui::screen::settings {
             return false;
         }
 
-        if (m_isInstalled) {
-            qWarning().noquote() << "[SettingsNavigationModule] install REJECTED: already installed";
-            Q_ASSERT_X(false, "SettingsNavigationModule::install", "Module supports single installation only");
+        // 1. 注册 settings surface（转移所有权）
+        auto *rawPanel = m_panel.get();
+        const bool surfaceRegistered = registrar.registerSurface(
+            QStringLiteral("settings"),
+            m_panel.release()
+        );
+
+        if (!surfaceRegistered) {
+            qWarning().noquote() << "[SettingsNavigationModule] registerSurface FAILED for 'settings'";
             return false;
         }
 
-        // 1. 提取所有 Provider 描述符
+        // 2. 构建纯描述符列表
         const auto descriptors = SettingsDescriptorBuilder::buildDescriptors(m_uiRegistry);
         if (descriptors.isEmpty()) {
-            qDebug().noquote() << "[SettingsNavigationModule] install skipped: no provider descriptors registered";
-            return false;
-        }
-
-        // 2. 注册 settings 专属导航面板到宿主 Surface 管理器（显式移交所有权）
-        auto *rawPanel = m_panel.release();
-        if (!registrar.registerSurface(QStringLiteral("settings"), rawPanel)) {
-            qWarning().noquote() << "[SettingsNavigationModule] install FAILED: registrar rejected surface 'settings'";
-            delete rawPanel;
+            qWarning().noquote() << "[SettingsNavigationModule] install FAILED: no descriptors available";
             return false;
         }
         m_installedPanel = rawPanel;
