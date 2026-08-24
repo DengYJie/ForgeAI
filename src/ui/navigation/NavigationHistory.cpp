@@ -1,4 +1,4 @@
-﻿#include "ui/navigation/NavigationHistory.h"
+#include "ui/navigation/NavigationHistory.h"
 
 namespace ui::navigation {
     NavigationHistory::NavigationHistory(QObject *parent)
@@ -25,6 +25,22 @@ namespace ui::navigation {
         return m_forwardStack;
     }
 
+    QString NavigationHistory::peekBack() const {
+        return m_backStack.isEmpty() ? QString() : m_backStack.last();
+    }
+
+    QString NavigationHistory::commitBack() {
+        return goBack();
+    }
+
+    QString NavigationHistory::peekForward() const {
+        return m_forwardStack.isEmpty() ? QString() : m_forwardStack.last();
+    }
+
+    QString NavigationHistory::commitForward() {
+        return goForward();
+    }
+
     void NavigationHistory::push(const QString &newRoute) {
         if (newRoute.isEmpty() || m_currentRoute == newRoute) return;
 
@@ -40,6 +56,13 @@ namespace ui::navigation {
             m_forwardStack.clear();
             Q_EMIT canGoForwardChanged(canGoForward());
         }
+    }
+
+    void NavigationHistory::replace(const QString &newRoute) {
+        if (newRoute.isEmpty() || m_currentRoute == newRoute) return;
+
+        m_currentRoute = newRoute;
+        Q_EMIT currentRouteChanged(m_currentRoute);
     }
 
     QString NavigationHistory::goBack() {

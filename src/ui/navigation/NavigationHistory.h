@@ -1,4 +1,4 @@
-﻿#ifndef OMNIAUTH_UI_NAVIGATION_NAVIGATIONHISTORY_H
+#ifndef OMNIAUTH_UI_NAVIGATION_NAVIGATIONHISTORY_H
 #define OMNIAUTH_UI_NAVIGATION_NAVIGATIONHISTORY_H
 
 #include <QObject>
@@ -56,6 +56,30 @@ namespace ui::navigation {
          */
         const QStringList &forwardStack() const;
 
+        /**
+         * @brief 预览上一个路由（不改变历史状态）
+         * @return 上一个路由键，栈空时返回空字符串
+         */
+        QString peekBack() const;
+
+        /**
+         * @brief 提交后退操作
+         * @return 后退到的目标路由键
+         */
+        QString commitBack();
+
+        /**
+         * @brief 预览下一个路由（不改变历史状态）
+         * @return 下一个路由键，栈空时返回空字符串
+         */
+        QString peekForward() const;
+
+        /**
+         * @brief 提交前进操作
+         * @return 前进到的目标路由键
+         */
+        QString commitForward();
+
     public
         Q_SLOTS:
         /**
@@ -71,6 +95,12 @@ namespace ui::navigation {
 
 
         void push(const QString &newRoute);
+
+        /**
+         * @brief 替换当前路由（不入栈旧路由，不清除前进栈）
+         * @param newRoute 要替换的新路由键
+         */
+        void replace(const QString &newRoute);
 
         /**
          * @brief 弹栈并执行后退逻辑

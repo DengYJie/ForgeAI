@@ -125,7 +125,11 @@ namespace ui::navigation {
     void NavigationPanel::setCurrentItem(const QString &routeKey) {
         if (!m_tree || routeKey.isEmpty()) return;
         NavigationTreeItem *prevOwner = m_indicatorOwner;
-        m_tree->setCurrentItem(routeKey, false);
+        {
+            const QSignalBlocker blocker(this);
+            const QSignalBlocker treeBlocker(m_tree);
+            m_tree->setCurrentItem(routeKey, false);
+        }
         NavigationTreeWidget *node = m_tree->nodeFor(routeKey);
         NavigationTreeItem *curOwner = nullptr;
         if (node && node->itemWidget()) {

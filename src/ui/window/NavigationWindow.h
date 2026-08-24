@@ -1,10 +1,13 @@
 #pragma once
 
+#include "ui/navigation/INavigationPresenter.h"
+#include "ui/navigation/INavigationRegistrar.h"
 #include "ui/navigation/NavigationMetrics.h"
+#include "ui/navigation/NavigationTypes.h"
 #include "WindowBase.h"
 #include <QHash>
 #include <QString>
-
+#include <QPointer>
 #include <memory>
 
 namespace ui::animation {
@@ -15,51 +18,38 @@ namespace ui::navigation {
     class NavigationPanel;
     class NavigationIndicator;
     class NavigationWidget;
-    class NavigationHistory;
 }
 
 namespace fluent::navigation {
     class NavigationView;
 }
 
-
-class NavigationWindow : public WindowBase {
+/**
+ * @brief 导航窗口基类，作为多 Surface 托管与页面路由呈现的纯 UI Shell 容器
+ */
+class NavigationWindow : public WindowBase,
+                         public ui::navigation::INavigationPresenter,
+                         public ui::navigation::INavigationRegistrar {
     Q_OBJECT
 
 public:
     explicit NavigationWindow(QWidget *parent = nullptr);
-
     ~NavigationWindow() override;
 
-    ui::navigation::NavigationPanel *navigationPanel() const { return m_panel; }
+    bool registerSurface(const QString &surfaceId, ui::navigation::NavigationPanel *panel) override;
+    bool registerRoute(const QString &routeKey, QWidget *page, const QString &surfaceId = QStringLiteral("main")) override;
+    bool addNavigationItem(const ui::navigation::NavigationItemDescriptor &item, const QString &surfaceId = QStringLiteral("main")) override;
+
+    bool setActiveNavigationSurface(const QString &surfaceId);
+    ui::navigation::NavigationPanel *activeNavigationPanel() const;
+    ui::navigation::NavigationPanel *mainNavigationPanel() const;
+    ui::navigation::NavigationPanel *navigationPanel(const QString &surfaceId) const;
+    QString activeNavigationSurfaceId() const { return m_activeSurfaceId; }
 
     /**
-     * @brief 添加分区小标题
-     * @param text 标题文本
+     * @brief 注册主导航子界面及主导航项快捷接口
      */
-    void addSectionHeader(const QString &text);
-
-    /**
-     * @brief 向导航栏添加自定义部件
-     * @param widget 导航部件指针
-     * @param position 归属区域（Top 顶部 / Bottom 底部）
-     */
-    void addWidget(ui::navigation::NavigationWidget *widget,
-                   ui::navigation::NavigationItemPosition position =
-                           ui::navigation::NavigationItemPosition::Top);
-
-    /**
-     * @brief 注册子界面及对应的导航路由项
-     * @param routeKey 唯一路由标识
-     * @param interfaceWidget 页面部件指针（为 nullptr 时仅作为分类菜单）
-     * @param iconGlyph 图标字形
-     * @param text 显示文本
-     * @param parentRouteKey 父级分类路由标识（为空时作为顶级节点）
-     * @param pos 归属区域（Top / Bottom）
-     * @param selectable 是否可被选中
-     * @param visualSource 动态矢量动画源（可选）
-     */
-    void addSubInterface(
+    bool addSubInterface(
         const QString &routeKey,
         QWidget *interfaceWidget,
         const QString &iconGlyph,
@@ -71,54 +61,73 @@ public:
     );
 
     /**
-     * @brief 只注册内容页，不向当前导航面板添加导航项
-     * @details 用于临时替换 mainChromeWidget 的子导航场景，仍复用 NavigationView 的 StackContentHost。
+     * @brief 向当前激活的导航面板添加分区分隔头
+     * @param text 分区标题
      */
-    void addContentPage(const QString &routeKey, QWidget *interfaceWidget);
+    void addSectionHeader(const QString &text);
 
     /**
-     * @brief 切换当前显示的子页面
-     * @param routeKey 目标路由标识
+     * @brief 向当前激活的导航面板添加自定义小控件
+     * @param widget 控件指针
+     * @param position 布局位置
      */
-    void switchTo(const QString &routeKey);
+    void addWidget(ui::navigation::NavigationWidget *widget,
+                   ui::navigation::NavigationItemPosition position = ui::navigation::NavigationItemPosition::Top);
 
     /**
-     * @brief 设置底部固定槽位部件（对标 WinUI 3 PaneFooter）
-     * @param footerWidget 底部槽位部件指针（继承自 NavigationWidget）
+     * @brief 设置主导航面板底部固定控件
+     * @param footerWidget 底部控件指针
      */
     void setPaneFooter(ui::navigation::NavigationWidget *footerWidget);
 
     /**
-     * @brief 获取当前挂载的底部槽位部件
-     * @return 底部部件指针
+     * @brief 获取主导航面板底部固定控件
+     * @return 底部控件指针
      */
     ui::navigation::NavigationWidget *paneFooter() const;
 
     /**
-     * @brief 获取底层导航面板实例
-     * @return NavigationPanel 指针
-     */
-    ui::navigation::NavigationPanel *panel() const { return m_panel; }
-
-    /**
-     * @brief 获取 Fluent 原生导航视图组件
+     * @brief 获取底层 Fluent NavigationView
      * @return NavigationView 指针
      */
     fluent::navigation::NavigationView *navigationView() const { return m_navigationView; }
 
+    bool canPresentRoute(const QString &routeKey) const override;
+    bool presentRoute(const QString &routeKey, ui::navigation::NavigationDirection direction = ui::navigation::NavigationDirection::Forward) override;
+
 Q_SIGNALS:
+    /**
+     * @brief 用户在导航面板等 UI 发起导航意图
+     * @param routeKey 目标路由
+     */
+    void navigationRequested(const QString &routeKey);
+
+    /**
+     * @brief 用户触发返回（TitleBar 或 Panel Back）
+     */
+    void backRequested();
+
+    /**
+     * @brief 用户触发前进
+     */
+    void forwardRequested();
+
+    /**
+     * @brief 页面已在 UI 层面生效呈现
+     * @param routeKey 当前呈现的路由
+     */
     void routeChanged(const QString &routeKey);
 
 protected:
     void initNavigation();
+    void syncActivePanelState();
 
 protected:
-    ui::navigation::NavigationPanel *m_panel = nullptr;
     fluent::navigation::NavigationView *m_navigationView = nullptr;
-    ui::navigation::NavigationHistory *m_history = nullptr;
 
-    QHash<QString, int> m_routeToIndexMap;
+    QHash<QString, QPointer<ui::navigation::NavigationPanel>> m_surfaces;
+    QString m_activeSurfaceId;
+
+    QHash<QString, ui::navigation::RouteDescriptor> m_routes;
     QHash<int, QString> m_indexToRouteMap;
-
-    bool m_isNavigatingHistory = false;
 };

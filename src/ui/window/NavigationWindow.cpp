@@ -1,8 +1,8 @@
 #include "ui/window/NavigationWindow.h"
 #include <FluentQt/Navigation.h>
 #include <QDebug>
+#include <QMetaObject>
 
-#include "ui/navigation/NavigationHistory.h"
 #include "ui/navigation/NavigationIndicator.h"
 #include "ui/navigation/NavigationPanel.h"
 #include "ui/navigation/NavigationToolButton.h"
@@ -20,94 +20,33 @@ void NavigationWindow::initNavigation() {
     m_navigationView = new fluent::navigation::NavigationView(this);
     m_navigationView->setDisplayMode(fluent::navigation::NavigationView::DisplayMode::Auto);
 
-    m_history = new ui::navigation::NavigationHistory(this);
+    // 1. 创建默认主导航 Surface
+    auto *mainPanel = new ui::navigation::NavigationPanel(m_navigationView);
+    registerSurface(QStringLiteral("main"), mainPanel);
+    setActiveNavigationSurface(QStringLiteral("main"));
 
-    m_panel = new ui::navigation::NavigationPanel(m_navigationView);
-    m_navigationView->setMainChromeWidget(m_panel);
-
-    // 隐藏 NavigationPanel 自带的按钮，由 TitleBar 接管
-    m_panel->setPaneToggleButtonVisible(false);
-    m_panel->setBackButtonVisible(false);
-
-    auto syncDisplayMode = [this](fluent::navigation::NavigationView::DisplayMode mode) {
-        using DisplayMode = fluent::navigation::NavigationView::DisplayMode;
-        using StackContentHost = fluent::navigation::StackContentHost;
-        const bool top = (mode == DisplayMode::Top);
-        if (m_panel) {
-            m_panel->setOrientation(top ? Qt::Horizontal : Qt::Vertical);
-        }
-        if (m_navigationView) {
-            m_navigationView->setPaneOpen(mode == DisplayMode::Left || top);
-            if (auto *host = m_navigationView->contentHost()) {
-                host->setTransitionEffect(
-                    top
-                        ? StackContentHost::TransitionEffect::SlideFromLeft
-                        : StackContentHost::TransitionEffect::SlideFromBottom);
-            }
-        }
-        if (m_panel && m_navigationView) {
-            m_panel->setCompacted(!m_navigationView->isPaneOpen());
-        }
-        if (titleBar()) {
-            titleBar()->setPaneToggleButtonVisible(!top);
-        }
-    };
-
+    // 2. 响应式与 DisplayMode 同步
     connect(m_navigationView, &fluent::navigation::NavigationView::effectiveDisplayModeChanged,
-            this, syncDisplayMode);
-    syncDisplayMode(m_navigationView->effectiveDisplayMode());
-
+            this, &NavigationWindow::syncActivePanelState);
     connect(m_navigationView, &fluent::navigation::NavigationView::paneOpenChanged,
-            this, [this](bool open) {
-                if (m_panel) {
-                    m_panel->setCompacted(!open);
-                }
-            });
+            this, &NavigationWindow::syncActivePanelState);
 
-    connect(m_panel, &ui::navigation::NavigationPanel::backRequested, this, [this]() {
-        if (m_navigationView) {
-            using DisplayMode = fluent::navigation::NavigationView::DisplayMode;
-            const auto mode = m_navigationView->effectiveDisplayMode();
-            if (m_navigationView->isPaneOpen()
-                && (mode == DisplayMode::LeftCompact || mode == DisplayMode::LeftMinimal)) {
-                m_navigationView->setPaneOpen(false);
-                return;
-            }
-        }
-
-        if (m_history &&m_history->canGoBack())
-        {
-            m_isNavigatingHistory = true;
-            QString prevRoute = m_history->goBack();
-            switchTo(prevRoute);
-            m_isNavigatingHistory = false;
-        }
-    });
-
-    if (m_panel->paneToggleButton()) {
-        connect(m_panel->paneToggleButton(), &ui::navigation::NavigationToolButton::clicked, this, [this]() {
-            if (m_navigationView) {
-                m_navigationView->setPaneOpen(!m_navigationView->isPaneOpen());
-            }
-        });
-    }
-
+    // 3. TitleBar 统一绑定
     if (titleBar()) {
-        bool canGoBack = m_history && m_history->canGoBack();
-        titleBar()->setBackButtonVisible(canGoBack);
+        titleBar()->setBackButtonVisible(false);
         titleBar()->setBackButtonEnabled(true);
 
-        connect(m_history, &ui::navigation::NavigationHistory::canGoBackChanged,
-                titleBar(), &ui::window::TitleBar::setBackButtonVisible);
-
         connect(titleBar(), &ui::window::TitleBar::backButtonClicked, this, [this]() {
-            if (m_history &&m_history->canGoBack())
-            {
-                m_isNavigatingHistory = true;
-                QString prevRoute = m_history->goBack();
-                switchTo(prevRoute);
-                m_isNavigatingHistory = false;
+            if (m_navigationView) {
+                using DisplayMode = fluent::navigation::NavigationView::DisplayMode;
+                const auto mode = m_navigationView->effectiveDisplayMode();
+                if (m_navigationView->isPaneOpen()
+                    && (mode == DisplayMode::LeftCompact || mode == DisplayMode::LeftMinimal)) {
+                    m_navigationView->setPaneOpen(false);
+                    return;
+                }
             }
+            Q_EMIT backRequested();
         });
 
         connect(titleBar(), &ui::window::TitleBar::paneToggleButtonClicked, this, [this]() {
@@ -117,42 +56,138 @@ void NavigationWindow::initNavigation() {
         });
     }
 
-    syncDisplayMode(m_navigationView->effectiveDisplayMode());
-    if (m_panel) {
-        m_panel->setCompacted(!m_navigationView->isPaneOpen());
-    }
-
-    connect(m_panel, &ui::navigation::NavigationPanel::itemSelected, this, [this](const QString &routeKey) {
-        switchTo(routeKey);
-    });
-
+    // 4. ContentHost 切页生效通知（异步队列派发以确保 Controller 事务先行提交）
     connect(m_navigationView->contentHost(), &fluent::navigation::StackContentHost::currentIndexChanged,
             this, [this](int index) {
                 const QString routeKey = m_indexToRouteMap.value(index);
-                if (!routeKey.isEmpty() && m_panel)
-                    m_panel->setCurrentItem(routeKey);
+                qDebug().noquote() << "[NavigationWindow] contentHost currentIndexChanged index=" << index
+                                   << "mappedRoute=" << routeKey;
                 if (!routeKey.isEmpty()) {
-                    Q_EMIT routeChanged(routeKey);
+                    if (auto *panel = activeNavigationPanel()) {
+                        panel->setCurrentItem(routeKey);
+                    }
+                    QMetaObject::invokeMethod(this, [this, routeKey]() {
+                        Q_EMIT routeChanged(routeKey);
+                    }, Qt::QueuedConnection);
                 }
             });
 
+    syncActivePanelState();
     setContentWidget(m_navigationView);
 }
 
-void NavigationWindow::addSectionHeader(const QString &text) {
-    if (m_panel) {
-        m_panel->addSectionHeader(text);
+bool NavigationWindow::registerSurface(const QString &surfaceId, ui::navigation::NavigationPanel *panel) {
+    if (surfaceId.isEmpty() || !panel) return false;
+
+    if (m_surfaces.contains(surfaceId)) {
+        auto existing = m_surfaces.value(surfaceId);
+        if (existing.data() == panel) {
+            return true;
+        }
+        if (existing) {
+            qWarning().noquote() << "[NavigationWindow] registerSurface REJECTED: surfaceId already registered with active panel:" << surfaceId;
+            Q_ASSERT_X(false, "NavigationWindow::registerSurface", "Duplicate surfaceId registered");
+            return false;
+        }
     }
+
+    panel->setPaneToggleButtonVisible(false);
+    panel->setBackButtonVisible(false);
+
+    connect(panel, &ui::navigation::NavigationPanel::itemSelected, this, [this](const QString &routeKey) {
+        qDebug().noquote() << "[NavigationWindow] panel itemSelected -> navigationRequested:" << routeKey;
+        Q_EMIT navigationRequested(routeKey);
+    });
+
+    connect(panel, &ui::navigation::NavigationPanel::backRequested, this, [this]() {
+        if (m_navigationView) {
+            using DisplayMode = fluent::navigation::NavigationView::DisplayMode;
+            const auto mode = m_navigationView->effectiveDisplayMode();
+            if (m_navigationView->isPaneOpen()
+                && (mode == DisplayMode::LeftCompact || mode == DisplayMode::LeftMinimal)) {
+                m_navigationView->setPaneOpen(false);
+                return;
+            }
+        }
+        Q_EMIT backRequested();
+    });
+
+    // 监听 panel 销毁，仅当 map 中存储的指针与被销毁的 panel 匹配时才执行清理
+    connect(panel, &QObject::destroyed, this, [this, surfaceId, panel]() {
+        if (m_surfaces.value(surfaceId).data() == panel || m_surfaces.value(surfaceId).isNull()) {
+            m_surfaces.remove(surfaceId);
+            if (m_activeSurfaceId == surfaceId) {
+                m_activeSurfaceId.clear();
+                if (m_surfaces.contains(QStringLiteral("main")) && m_surfaces.value(QStringLiteral("main")) != nullptr) {
+                    setActiveNavigationSurface(QStringLiteral("main"));
+                }
+            }
+        }
+    });
+
+    m_surfaces.insert(surfaceId, panel);
+    qDebug().noquote() << "[NavigationWindow] registered surface:" << surfaceId << "panel:" << panel;
+    return true;
 }
 
-void NavigationWindow::addWidget(ui::navigation::NavigationWidget *widget,
-                                 ui::navigation::NavigationItemPosition position) {
-    if (m_panel) {
-        m_panel->addWidget(widget, position);
+bool NavigationWindow::registerRoute(const QString &routeKey, QWidget *page, const QString &surfaceId) {
+    if (!m_navigationView || routeKey.isEmpty()) return false;
+
+    if (m_routes.contains(routeKey)) {
+        qWarning().noquote() << "[NavigationWindow] registerRoute FAILED: duplicate routeKey:" << routeKey;
+        Q_ASSERT_X(false, "NavigationWindow::registerRoute", "Duplicate route key registered");
+        return false;
     }
+
+    const QString targetSurfaceId = surfaceId.isEmpty() ? QStringLiteral("main") : surfaceId;
+    if (!m_surfaces.contains(targetSurfaceId) || m_surfaces.value(targetSurfaceId) == nullptr) {
+        qWarning().noquote() << "[NavigationWindow] registerRoute REJECTED: target surface not registered or destroyed:"
+                             << targetSurfaceId << "for route:" << routeKey;
+        Q_ASSERT_X(false, "NavigationWindow::registerRoute", "Surface must be registered before its routes");
+        return false;
+    }
+
+    int index = -1;
+    if (page) {
+        auto *contentHost = m_navigationView->contentHost();
+        index = contentHost->count();
+        contentHost->insertPage(index, page);
+        m_indexToRouteMap.insert(index, routeKey);
+    }
+
+    ui::navigation::RouteDescriptor desc;
+    desc.routeKey = routeKey;
+    desc.interfaceWidget = page;
+    desc.surfaceId = targetSurfaceId;
+    desc.contentIndex = index;
+
+    m_routes.insert(routeKey, desc);
+    qDebug().noquote() << "[NavigationWindow] registerRoute SUCCESS key=" << routeKey
+                       << "surface=" << desc.surfaceId << "index=" << index << "widget=" << page;
+    return true;
 }
 
-void NavigationWindow::addSubInterface(
+bool NavigationWindow::addNavigationItem(const ui::navigation::NavigationItemDescriptor &item, const QString &surfaceId) {
+    auto *targetPanel = navigationPanel(surfaceId);
+    if (!targetPanel) {
+        qWarning().noquote() << "[NavigationWindow] addNavigationItem FAILED: surface not found:" << surfaceId;
+        return false;
+    }
+
+    targetPanel->addItem(
+        item.routeKey,
+        item.iconGlyph,
+        item.text,
+        item.parentRouteKey,
+        item.position,
+        item.selectable,
+        item.tooltip,
+        item.visualSource
+    );
+    return true;
+}
+
+bool NavigationWindow::addSubInterface(
     const QString &routeKey,
     QWidget *interfaceWidget,
     const QString &iconGlyph,
@@ -161,61 +196,173 @@ void NavigationWindow::addSubInterface(
     ui::navigation::NavigationItemPosition pos,
     bool selectable,
     std::shared_ptr<ui::animation::AnimatedVisualSource> visualSource) {
-    if (!m_navigationView || !m_panel) return;
 
-    if (interfaceWidget) {
+    if (!registerRoute(routeKey, interfaceWidget, QStringLiteral("main"))) {
+        return false;
+    }
+
+    ui::navigation::NavigationItemDescriptor item;
+    item.routeKey = routeKey;
+    item.iconGlyph = iconGlyph;
+    item.text = text;
+    item.parentRouteKey = parentRouteKey;
+    item.position = pos;
+    item.selectable = selectable && (interfaceWidget != nullptr);
+    item.visualSource = visualSource;
+
+    return addNavigationItem(item, QStringLiteral("main"));
+}
+
+bool NavigationWindow::setActiveNavigationSurface(const QString &surfaceId) {
+    if (surfaceId.isEmpty() || !m_navigationView) return false;
+    auto targetPanel = m_surfaces.value(surfaceId);
+    if (!targetPanel) {
+        qWarning().noquote() << "[NavigationWindow] setActiveNavigationSurface FAILED: surface not found or destroyed:" << surfaceId;
+        m_surfaces.remove(surfaceId);
+        if (m_activeSurfaceId == surfaceId) {
+            m_activeSurfaceId.clear();
+        }
+        return false;
+    }
+
+    if (m_activeSurfaceId == surfaceId && m_navigationView->mainChromeWidget() == targetPanel.data()) {
+        return true;
+    }
+
+    if (m_navigationView->mainChromeWidget()) {
+        QWidget *oldWidget = m_navigationView->takeMainChromeWidget();
+        if (oldWidget) {
+            oldWidget->hide();
+        }
+    }
+
+    m_navigationView->setMainChromeWidget(targetPanel.data(), fluent::WidgetOwnership::Reparented);
+    m_activeSurfaceId = surfaceId;
+
+    syncActivePanelState();
+    targetPanel->show();
+    targetPanel->updateIndicatorVisuals(false);
+
+    qDebug().noquote() << "[NavigationWindow] activated surface:" << surfaceId << "panel:" << targetPanel.data();
+    return true;
+}
+
+ui::navigation::NavigationPanel *NavigationWindow::activeNavigationPanel() const {
+    return m_surfaces.value(m_activeSurfaceId, nullptr).data();
+}
+
+ui::navigation::NavigationPanel *NavigationWindow::mainNavigationPanel() const {
+    return m_surfaces.value(QStringLiteral("main"), nullptr).data();
+}
+
+ui::navigation::NavigationPanel *NavigationWindow::navigationPanel(const QString &surfaceId) const {
+    return m_surfaces.value(surfaceId, nullptr).data();
+}
+
+void NavigationWindow::syncActivePanelState() {
+    auto *panel = activeNavigationPanel();
+    if (!panel || !m_navigationView) return;
+
+    using DisplayMode = fluent::navigation::NavigationView::DisplayMode;
+    using StackContentHost = fluent::navigation::StackContentHost;
+
+    const auto mode = m_navigationView->effectiveDisplayMode();
+    const bool top = (mode == DisplayMode::Top);
+
+    panel->setOrientation(top ? Qt::Horizontal : Qt::Vertical);
+    panel->setCompacted(!m_navigationView->isPaneOpen());
+
+    if (auto *host = m_navigationView->contentHost()) {
+        host->setTransitionEffect(
+            top
+                ? StackContentHost::TransitionEffect::SlideFromLeft
+                : StackContentHost::TransitionEffect::SlideFromBottom);
+    }
+
+    if (titleBar()) {
+        titleBar()->setPaneToggleButtonVisible(!top);
+    }
+}
+
+void NavigationWindow::addSectionHeader(const QString &text) {
+    if (auto *panel = activeNavigationPanel()) {
+        panel->addSectionHeader(text);
+    }
+}
+
+void NavigationWindow::addWidget(ui::navigation::NavigationWidget *widget,
+                                 ui::navigation::NavigationItemPosition position) {
+    if (auto *panel = activeNavigationPanel()) {
+        panel->addWidget(widget, position);
+    }
+}
+
+bool NavigationWindow::canPresentRoute(const QString &routeKey) const {
+    if (!m_navigationView || routeKey.isEmpty()) return false;
+    if (!m_routes.contains(routeKey)) return false;
+
+    const auto desc = m_routes.value(routeKey);
+    if (!desc.surfaceId.isEmpty()) {
+        if (!m_surfaces.contains(desc.surfaceId) || m_surfaces.value(desc.surfaceId) == nullptr) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool NavigationWindow::presentRoute(const QString &routeKey, ui::navigation::NavigationDirection direction) {
+    if (!canPresentRoute(routeKey)) {
+        qWarning().noquote() << "[NavigationWindow] presentRoute REJECTED: cannot present route:" << routeKey;
+        return false;
+    }
+
+    const auto desc = m_routes.value(routeKey);
+
+    // 1. 严格先换 Surface，失败则立即中断并返回 false
+    if (!desc.surfaceId.isEmpty()) {
+        if (!setActiveNavigationSurface(desc.surfaceId)) {
+            qWarning().noquote() << "[NavigationWindow] present ABORTED: failed to activate surface:"
+                                 << desc.surfaceId << "for route:" << routeKey;
+            return false;
+        }
+    }
+
+    // 2. 换 Content
+    if (desc.contentIndex >= 0) {
         auto *contentHost = m_navigationView->contentHost();
-        const int index = contentHost->count();
-        contentHost->insertPage(index, interfaceWidget);
-        m_routeToIndexMap.insert(routeKey, index);
-        m_indexToRouteMap.insert(index, routeKey);
+        const int currentIndex = contentHost->currentIndex();
+
+        if (desc.contentIndex == currentIndex) {
+            if (auto *panel = activeNavigationPanel()) {
+                panel->setCurrentItem(routeKey);
+            }
+            QMetaObject::invokeMethod(this, [this, routeKey]() {
+                Q_EMIT routeChanged(routeKey);
+            }, Qt::QueuedConnection);
+            return true;
+        }
+
+        const int animDirection = static_cast<int>(direction);
+        const bool animated = (direction != ui::navigation::NavigationDirection::None);
+
+        qDebug().noquote() << "[NavigationWindow] present route=" << routeKey
+                           << "surface=" << desc.surfaceId
+                           << "fromIndex=" << currentIndex << "toIndex=" << desc.contentIndex
+                           << "direction=" << animDirection;
+
+        contentHost->setCurrentIndex(desc.contentIndex, animDirection, animated);
     }
 
-    m_panel->addItem(routeKey, iconGlyph, text, parentRouteKey, pos,
-                     selectable && (interfaceWidget != nullptr),
-                     /*tooltip=*/QString(),
-                     visualSource);
-}
-
-void NavigationWindow::addContentPage(const QString &routeKey, QWidget *interfaceWidget) {
-    if (!m_navigationView || !interfaceWidget || routeKey.isEmpty() || m_routeToIndexMap.contains(routeKey)) return;
-
-    auto *contentHost = m_navigationView->contentHost();
-    const int index = contentHost->count();
-    contentHost->insertPage(index, interfaceWidget);
-    m_routeToIndexMap.insert(routeKey, index);
-    m_indexToRouteMap.insert(index, routeKey);
-    qDebug().noquote() << "[NavigationWindow] add content page route=" << routeKey << "index=" << index;
-}
-
-void NavigationWindow::switchTo(const QString &routeKey) {
-    if (!m_routeToIndexMap.contains(routeKey) || !m_navigationView) return;
-
-    if (!m_isNavigatingHistory && m_history) {
-        m_history->push(routeKey);
-    }
-
-    auto *contentHost = m_navigationView->contentHost();
-    const int targetIndex = m_routeToIndexMap.value(routeKey);
-    const int currentIndex = contentHost->currentIndex();
-    const int direction = targetIndex >= currentIndex ? 1 : -1;
-
-    qDebug().noquote() << "[NavigationWindow] switch route=" << routeKey
-                       << "from=" << currentIndex << "to=" << targetIndex;
-    if (targetIndex == currentIndex) {
-        Q_EMIT routeChanged(routeKey);
-        return;
-    }
-    contentHost->setCurrentIndex(targetIndex, direction, true);
+    return true;
 }
 
 void NavigationWindow::setPaneFooter(ui::navigation::NavigationWidget *footerWidget) {
-    if (!m_panel) return;
-    m_panel->setPaneFooter(footerWidget);
+    if (auto *mainPanel = mainNavigationPanel()) {
+        mainPanel->setPaneFooter(footerWidget);
+    }
 }
 
 ui::navigation::NavigationWidget *NavigationWindow::paneFooter() const {
-    return m_panel ? m_panel->paneFooter() : nullptr;
+    auto *mainPanel = mainNavigationPanel();
+    return mainPanel ? mainPanel->paneFooter() : nullptr;
 }
-
-
