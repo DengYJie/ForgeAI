@@ -15,6 +15,7 @@ find_package(Qt${QT_VERSION_MAJOR}
         Widgets
         Network
         Sql
+        Test
 )
 
 include(FetchContent)
@@ -41,11 +42,7 @@ FetchContent_Declare(
         GIT_REPOSITORY https://github.com/github/cmark-gfm.git
         GIT_TAG 0.29.0.gfm.13
 )
-FetchContent_GetProperties(cmark-gfm)
-if(NOT cmark-gfm_POPULATED)
-    FetchContent_Populate(cmark-gfm)
-    add_subdirectory(${cmark-gfm_SOURCE_DIR} ${cmark-gfm_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif()
+FetchContent_MakeAvailable(cmark-gfm)
 
 if (MSVC)
     if (TARGET libcmark-gfm_static)
@@ -154,6 +151,18 @@ set(PROJECT_SOURCES
         src/ui/widget/MarkdownStyle.cpp
         src/ui/widget/MarkdownView.h
         src/ui/widget/MarkdownView.cpp
+        src/ui/markdown/MarkdownDocument.h
+        src/ui/markdown/MarkdownDocument.cpp
+        src/ui/markdown/MarkdownTheme.h
+        src/ui/markdown/MarkdownTheme.cpp
+        src/ui/markdown/MarkdownLayout.h
+        src/ui/markdown/MarkdownLayout.cpp
+        src/ui/markdown/MarkdownRenderer.h
+        src/ui/markdown/MarkdownRenderer.cpp
+        src/ui/markdown/resource/MarkdownImageResourceManager.h
+        src/ui/markdown/resource/MarkdownImageResourceManager.cpp
+        src/ui/markdown/syntax/MarkdownSyntaxHighlighter.h
+        src/ui/markdown/syntax/MarkdownSyntaxHighlighter.cpp
         src/ui/widget/badge/ModelCapabilityStyle.h
         src/ui/widget/badge/ModelCapabilityStyle.cpp
         src/ui/widget/badge/ModelCapabilityBadge.h
@@ -461,6 +470,65 @@ target_link_libraries(${PROJECT_NAME}
         cmark-gfm::cmark-gfm
         cmark-gfm::cmark-gfm-extensions
 )
+
+include(CTest)
+if (BUILD_TESTING)
+    qt_add_executable(MarkdownCoreTests
+        tests/MarkdownCoreTests.cpp
+        src/ui/markdown/MarkdownDocument.h
+        src/ui/markdown/MarkdownDocument.cpp
+        src/ui/markdown/MarkdownTheme.h
+        src/ui/markdown/MarkdownTheme.cpp
+        src/ui/markdown/MarkdownLayout.h
+        src/ui/markdown/MarkdownLayout.cpp
+        src/ui/markdown/MarkdownRenderer.h
+        src/ui/markdown/MarkdownRenderer.cpp
+        src/ui/markdown/resource/MarkdownImageResourceManager.h
+        src/ui/markdown/resource/MarkdownImageResourceManager.cpp
+        src/ui/markdown/syntax/MarkdownSyntaxHighlighter.h
+        src/ui/markdown/syntax/MarkdownSyntaxHighlighter.cpp
+        src/ui/widget/MarkdownStyle.h
+        src/ui/widget/MarkdownStyle.cpp
+        src/ui/widget/MarkdownView.h
+        src/ui/widget/MarkdownView.cpp
+    )
+    target_compile_definitions(MarkdownCoreTests PRIVATE CMARK_GFM_STATIC_DEFINE CMARK_GFM_EXTENSIONS_STATIC_DEFINE)
+    target_include_directories(MarkdownCoreTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${cmark-gfm_SOURCE_DIR}/src
+        ${cmark-gfm_SOURCE_DIR}/extensions
+        ${cmark-gfm_BINARY_DIR}/src
+        ${cmark-gfm_BINARY_DIR}/extensions
+    )
+    target_link_libraries(MarkdownCoreTests PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network Qt::Test FluentQt::FluentQt cmark-gfm::cmark-gfm cmark-gfm::cmark-gfm-extensions)
+    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+        add_custom_command(TARGET MarkdownCoreTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:MarkdownCoreTests>
+                $<TARGET_FILE_DIR:MarkdownCoreTests>
+            COMMAND_EXPAND_LISTS
+            COMMENT "Deploying Qt runtime DLLs for MarkdownCoreTests..."
+        )
+        add_custom_command(TARGET MarkdownCoreTests POST_BUILD
+            COMMAND "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe"
+                --verbose 0
+                --no-compiler-runtime
+                --no-opengl-sw
+                "$<TARGET_FILE:MarkdownCoreTests>"
+            COMMENT "Deploying Qt platform plugins for MarkdownCoreTests..."
+        )
+        add_custom_command(TARGET MarkdownCoreTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:MarkdownCoreTests>/platforms"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_PREFIX_PATH}/plugins/platforms/qoffscreend.dll"
+                "$<TARGET_FILE_DIR:MarkdownCoreTests>/platforms/qoffscreend.dll"
+            COMMENT "Deploying Qt offscreen platform plugin for MarkdownCoreTests..."
+        )
+    endif ()
+    add_test(NAME MarkdownCoreTests COMMAND MarkdownCoreTests)
+    # QTextLayout/QFontDatabase require QGuiApplication, but no visible desktop.
+    set_tests_properties(MarkdownCoreTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_FONTDIR=C:/Windows/Fonts")
+endif ()
 
 if (WIN32)
     if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
