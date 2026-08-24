@@ -70,10 +70,9 @@ namespace data::repository {
             if (!query.value(offset + 11).isNull())
                 pm.capabilitiesOverride = static_cast<domain::model::ModelCapabilities>(query.value(offset + 11).toLongLong());
             pm.reasoningField = query.value(offset + 12).toString();
-            pm.group          = query.value(offset + 13).toString();
-            pm.isEnabled      = query.value(offset + 14).toInt() != 0;
-            pm.isCustom       = query.value(offset + 15).toInt() != 0;
-            pm.origin         = stringToOrigin(query.value(offset + 16).toString());
+            pm.isEnabled      = query.value(offset + 13).toInt() != 0;
+            pm.isCustom       = query.value(offset + 14).toInt() != 0;
+            pm.origin         = stringToOrigin(query.value(offset + 15).toString());
             return pm;
         }
 
@@ -147,7 +146,7 @@ namespace data::repository {
             rm.provider.isCustom   = false;
             rm.provider.origin     = domain::model::DataOrigin::BuiltIn;
 
-            // ProviderModel (offset 12..28)
+            // ProviderModel (offset 12..27)
             rm.binding.providerId    = q.value(12).toString();
             rm.binding.remoteModelId = q.value(13).toString();
             if (!q.value(14).isNull()) rm.binding.canonicalModelId = q.value(14).toString();
@@ -166,14 +165,13 @@ namespace data::repository {
             if (!q.value(23).isNull())
                 rm.binding.capabilitiesOverride = static_cast<domain::model::ModelCapabilities>(q.value(23).toLongLong());
             rm.binding.reasoningField = q.value(24).toString();
-            rm.binding.group          = q.value(25).toString();
-            rm.binding.isEnabled      = q.value(26).toInt() != 0;
-            rm.binding.isCustom       = q.value(27).toInt() != 0;
-            rm.binding.origin         = stringToOrigin(q.value(28).toString());
+            rm.binding.isEnabled      = q.value(25).toInt() != 0;
+            rm.binding.isCustom       = q.value(26).toInt() != 0;
+            rm.binding.origin         = stringToOrigin(q.value(27).toString());
 
-            // CanonicalModel (offset 29..45)
-            if (!q.value(29).isNull()) {
-                rm.canonical = readCanonicalModelRow(q, 29);
+            // CanonicalModel (offset 28..44)
+            if (!q.value(28).isNull()) {
+                rm.canonical = readCanonicalModelRow(q, 28);
             }
 
             return rm;
@@ -272,7 +270,6 @@ namespace data::repository {
             "  max_output_override INTEGER,"
             "  capabilities_override INTEGER,"
             "  reasoning_field TEXT,"
-            "  group_name TEXT,"
             "  is_enabled INTEGER DEFAULT 1,"
             "  is_custom INTEGER DEFAULT 0,"
             "  origin TEXT DEFAULT 'BuiltIn',"
@@ -324,7 +321,6 @@ namespace data::repository {
             "  provider_id TEXT NOT NULL,"
             "  remote_model_id TEXT NOT NULL,"
             "  display_name TEXT NOT NULL,"
-            "  group_name TEXT,"
             "  is_enabled INTEGER DEFAULT 1,"
             "  PRIMARY KEY (provider_id, remote_model_id)"
             ");"
@@ -456,8 +452,8 @@ namespace data::repository {
             "  provider_id, remote_model_id, canonical_model_id, pricing_input, pricing_output, "
             "  pricing_cache_read, pricing_cache_write, pricing_currency, context_limit_override, "
             "  max_input_override, max_output_override, capabilities_override, reasoning_field, "
-            "  group_name, is_enabled, is_custom, origin"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
+            "  is_enabled, is_custom, origin"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
         ));
         for (const auto &binding : importResult.providerModels) {
             bindingQuery.bindValue(0,  binding.providerId);
@@ -481,10 +477,9 @@ namespace data::repository {
             bindingQuery.bindValue(11, binding.capabilitiesOverride.has_value()
                                            ? QVariant(static_cast<qint64>(*binding.capabilitiesOverride)) : QVariant());
             bindingQuery.bindValue(12, binding.reasoningField);
-            bindingQuery.bindValue(13, binding.group);
-            bindingQuery.bindValue(14, binding.isEnabled ? 1 : 0);
-            bindingQuery.bindValue(15, binding.isCustom  ? 1 : 0);
-            bindingQuery.bindValue(16, originToString(binding.origin));
+            bindingQuery.bindValue(13, binding.isEnabled ? 1 : 0);
+            bindingQuery.bindValue(14, binding.isCustom  ? 1 : 0);
+            bindingQuery.bindValue(15, originToString(binding.origin));
             if (!bindingQuery.exec())
                 qWarning() << "[seed] binding insert failed:" << bindingQuery.lastError().text();
         }
@@ -668,13 +663,13 @@ namespace data::repository {
             "SELECT pm.provider_id, pm.remote_model_id, pm.canonical_model_id, "
             "       pm.pricing_input, pm.pricing_output, pm.pricing_cache_read, pm.pricing_cache_write, pm.pricing_currency, "
             "       pm.context_limit_override, pm.max_input_override, pm.max_output_override, "
-            "       pm.capabilities_override, pm.reasoning_field, pm.group_name, "
+            "       pm.capabilities_override, pm.reasoning_field, "
             "       COALESCE(umo.is_enabled, pm.is_enabled) AS eff_enabled, "
             "       pm.is_custom, pm.origin "
             "FROM preset_provider_models pm "
             "LEFT JOIN user_model_overrides umo ON pm.provider_id = umo.provider_id AND pm.remote_model_id = umo.remote_model_id "
             "WHERE pm.provider_id = ? "
-            "ORDER BY pm.group_name ASC, pm.remote_model_id ASC;"
+            "ORDER BY pm.remote_model_id ASC;"
         ));
         queryA.bindValue(0, providerId);
         if (queryA.exec()) {
@@ -685,9 +680,9 @@ namespace data::repository {
         QSqlQuery queryB(db);
         queryB.prepare(QStringLiteral(
             "SELECT provider_id, remote_model_id, NULL, 0.0, 0.0, 0.0, 0.0, 'USD', "
-            "       NULL, NULL, NULL, NULL, '', group_name, is_enabled, 1, 'User' "
+            "       NULL, NULL, NULL, NULL, '', is_enabled, 1, 'User' "
             "FROM user_custom_models WHERE provider_id = ? "
-            "ORDER BY group_name ASC, remote_model_id ASC;"
+            "ORDER BY remote_model_id ASC;"
         ));
         queryB.bindValue(0, providerId);
         if (queryB.exec()) {
@@ -703,17 +698,16 @@ namespace data::repository {
         if (binding.isCustom || binding.origin == domain::model::DataOrigin::User) {
             QSqlQuery q(db);
             q.prepare(QStringLiteral(
-                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, group_name, is_enabled) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, is_enabled) "
+                "VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(provider_id, remote_model_id) DO UPDATE SET "
-                "  display_name = excluded.display_name, group_name = excluded.group_name, "
+                "  display_name = excluded.display_name, "
                 "  is_enabled = excluded.is_enabled;"
             ));
             q.bindValue(0, binding.providerId);
             q.bindValue(1, binding.remoteModelId);
             q.bindValue(2, binding.remoteModelId);
-            q.bindValue(3, binding.group);
-            q.bindValue(4, binding.isEnabled ? 1 : 0);
+            q.bindValue(3, binding.isEnabled ? 1 : 0);
             if (!q.exec()) qWarning() << "[saveProviderModel] custom error:" << q.lastError().text();
         } else {
             QSqlQuery q(db);
@@ -751,7 +745,7 @@ namespace data::repository {
             "  pm.provider_id, pm.remote_model_id, pm.canonical_model_id, "
             "  pm.pricing_input, pm.pricing_output, pm.pricing_cache_read, pm.pricing_cache_write, pm.pricing_currency, "
             "  pm.context_limit_override, pm.max_input_override, pm.max_output_override, "
-            "  pm.capabilities_override, pm.reasoning_field, pm.group_name, "
+            "  pm.capabilities_override, pm.reasoning_field, "
             "  COALESCE(umo.is_enabled, pm.is_enabled), pm.is_custom, pm.origin, "
             "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
@@ -764,7 +758,7 @@ namespace data::repository {
             "LEFT JOIN user_model_overrides umo ON pm.provider_id = umo.provider_id AND pm.remote_model_id = umo.remote_model_id "
             "LEFT JOIN canonical_models cm ON pm.canonical_model_id = cm.id "
             "WHERE pm.provider_id = ? "
-            "ORDER BY pm.group_name ASC, pm.remote_model_id ASC;"
+            "ORDER BY cm.family ASC, pm.remote_model_id ASC;"
         ));
         query.bindValue(0, providerId);
         if (query.exec()) {
@@ -784,7 +778,7 @@ namespace data::repository {
             "  pm.provider_id, pm.remote_model_id, pm.canonical_model_id, "
             "  pm.pricing_input, pm.pricing_output, pm.pricing_cache_read, pm.pricing_cache_write, pm.pricing_currency, "
             "  pm.context_limit_override, pm.max_input_override, pm.max_output_override, "
-            "  pm.capabilities_override, pm.reasoning_field, pm.group_name, "
+            "  pm.capabilities_override, pm.reasoning_field, "
             "  COALESCE(umo.is_enabled, pm.is_enabled), pm.is_custom, pm.origin, "
             "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
@@ -796,7 +790,7 @@ namespace data::repository {
             "LEFT JOIN user_provider_overrides uo ON pp.id = uo.provider_id "
             "LEFT JOIN user_model_overrides umo ON pm.provider_id = umo.provider_id AND pm.remote_model_id = umo.remote_model_id "
             "LEFT JOIN canonical_models cm ON pm.canonical_model_id = cm.id "
-            "ORDER BY pp.name ASC, pm.group_name ASC, pm.remote_model_id ASC;"
+            "ORDER BY pp.name ASC, cm.family ASC, pm.remote_model_id ASC;"
         ), db);
         while (query.next()) list.append(buildResolvedFromRow(query));
         return list;
@@ -813,7 +807,7 @@ namespace data::repository {
             "  pm.provider_id, pm.remote_model_id, pm.canonical_model_id, "
             "  pm.pricing_input, pm.pricing_output, pm.pricing_cache_read, pm.pricing_cache_write, pm.pricing_currency, "
             "  pm.context_limit_override, pm.max_input_override, pm.max_output_override, "
-            "  pm.capabilities_override, pm.reasoning_field, pm.group_name, "
+            "  pm.capabilities_override, pm.reasoning_field, "
             "  COALESCE(umo.is_enabled, pm.is_enabled), pm.is_custom, pm.origin, "
             "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
@@ -826,7 +820,7 @@ namespace data::repository {
             "LEFT JOIN user_model_overrides umo ON pm.provider_id = umo.provider_id AND pm.remote_model_id = umo.remote_model_id "
             "LEFT JOIN canonical_models cm ON pm.canonical_model_id = cm.id "
             "WHERE uo.is_enabled = 1 AND COALESCE(umo.is_enabled, pm.is_enabled) = 1 "
-            "ORDER BY pp.name ASC, pm.group_name ASC, pm.remote_model_id ASC;"
+            "ORDER BY pp.name ASC, cm.family ASC, pm.remote_model_id ASC;"
         ), db);
         while (query.next()) list.append(buildResolvedFromRow(query));
         return list;
@@ -845,7 +839,7 @@ namespace data::repository {
             "  pm.provider_id, pm.remote_model_id, pm.canonical_model_id, "
             "  pm.pricing_input, pm.pricing_output, pm.pricing_cache_read, pm.pricing_cache_write, pm.pricing_currency, "
             "  pm.context_limit_override, pm.max_input_override, pm.max_output_override, "
-            "  pm.capabilities_override, pm.reasoning_field, pm.group_name, "
+            "  pm.capabilities_override, pm.reasoning_field, "
             "  COALESCE(umo.is_enabled, pm.is_enabled), pm.is_custom, pm.origin, "
             "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "

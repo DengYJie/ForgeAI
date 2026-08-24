@@ -60,7 +60,6 @@ namespace domain::model {
 
         const ModelPricing &pricing() const { return binding.pricing; }
         const QString &reasoningField() const { return binding.reasoningField; }
-        const QString &group() const { return binding.group; }
         bool isEnabled() const { return provider.isEnabled && binding.isEnabled; }
         bool isCustom() const { return binding.isCustom; }
         DataOrigin origin() const { return binding.origin; }

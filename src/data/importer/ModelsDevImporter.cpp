@@ -136,7 +136,6 @@ namespace data::importer {
         QJsonObject interleavedObj = modelObj.value(QStringLiteral("interleaved")).toObject();
         binding.reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
 
-        binding.group = providerName.isEmpty() ? providerId : providerName;
         binding.isEnabled = true;
         binding.isCustom = false;
         binding.origin = domain::model::DataOrigin::BuiltIn;

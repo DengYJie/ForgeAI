@@ -57,7 +57,6 @@ namespace domain::model {
         QString providerId;
         QString remoteModelId;
         QString displayName;
-        QString group;
         bool isEnabled = true;
 
         bool operator==(const UserCustomModel &other) const = default;

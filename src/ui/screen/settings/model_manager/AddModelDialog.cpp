@@ -77,7 +77,6 @@ namespace ui::screen::settings::model_manager {
         domain::model::ProviderModel binding;
         binding.providerId = m_providerId;
         binding.remoteModelId = m_idEdit ? m_idEdit->text().trimmed() : QString();
-        binding.group = QStringLiteral("自定义模型");
         binding.isEnabled = true;
         binding.isCustom = true;
         binding.origin = domain::model::DataOrigin::User;
