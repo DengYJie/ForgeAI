@@ -13,9 +13,9 @@ class QStandardItemModel;
 class QResizeEvent;
 
 namespace fluent::basicinput { class ToggleSwitch; class Button; }
-namespace fluent::collections { class TreeView; }
 namespace fluent::scrolling { class ScrollView; }
 namespace fluent::textfields { class Label; class LineEdit; class PasswordBox; }
+namespace ui::widget::tree { class AutoHeightTreeView; }
 
 namespace ui::screen::settings::model_manager {
 
@@ -43,7 +43,6 @@ namespace ui::screen::settings::model_manager {
     private:
         void setupUi();
         void updateMargins();
-        void updateTreeHeight();
         void rebuildModelTree();
         void testConnection();
 
@@ -64,7 +63,7 @@ namespace ui::screen::settings::model_manager {
         fluent::basicinput::Button *m_testBtn = nullptr;
         fluent::textfields::Label *m_modelCountLabel = nullptr;
         ModelActionsSplitButton *m_actionButton = nullptr;
-        fluent::collections::TreeView *m_modelTreeView = nullptr;
+        ui::widget::tree::AutoHeightTreeView *m_modelTreeView = nullptr;
         QStandardItemModel *m_modelTreeModel = nullptr;
     };
 

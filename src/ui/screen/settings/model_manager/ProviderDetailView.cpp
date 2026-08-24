@@ -14,6 +14,7 @@
 #include "ModelTreeItemDelegate.h"
 #include "domain/model/ModelCapabilities.h"
 #include "network/QtHttpClient.h"
+#include "ui/widget/tree/AutoHeightTreeView.h"
 
 namespace ui::screen::settings::model_manager {
 
@@ -193,7 +194,7 @@ namespace ui::screen::settings::model_manager {
         modelHeader->addWidget(m_actionButton);
         m_mainLayout->addLayout(modelHeader);
 
-        m_modelTreeView = new fluent::collections::TreeView(m_scrollContent);
+        m_modelTreeView = new ui::widget::tree::AutoHeightTreeView(m_scrollContent);
         m_modelTreeView->setBackgroundVisible(false);
         m_modelTreeView->setBorderVisible(false);
         m_modelTreeView->setHeaderHidden(true);
@@ -204,11 +205,7 @@ namespace ui::screen::settings::model_manager {
         m_modelTreeView->setFocusPolicy(Qt::NoFocus);
         m_modelTreeView->setSelectionIndicatorVisible(false);
         m_modelTreeView->setIndicatorMotionAnimationEnabled(false);
-        m_modelTreeView->setScrollChainingEnabled(true);
         m_modelTreeView->setOverscrollEnabled(false);
-        m_modelTreeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        m_modelTreeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        m_modelTreeView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_modelTreeView->setPlaceholderText(tr("没有可用模型"));
         m_modelTreeView->viewport()->setAutoFillBackground(false);
         m_modelTreeView->setProperty("fluentPreserveParentSurface", true);
@@ -221,8 +218,6 @@ namespace ui::screen::settings::model_manager {
                 m_modelTreeView->toggleExpanded(index);
             }
         });
-        connect(m_modelTreeView, &fluent::collections::TreeView::expanded, this, &ProviderDetailView::updateTreeHeight);
-        connect(m_modelTreeView, &fluent::collections::TreeView::collapsed, this, &ProviderDetailView::updateTreeHeight);
 
         m_modelTreeModel = new QStandardItemModel(m_modelTreeView);
         m_modelTreeView->setModel(m_modelTreeModel);
@@ -230,30 +225,6 @@ namespace ui::screen::settings::model_manager {
         m_mainLayout->addWidget(m_modelTreeView);
         m_mainLayout->addStretch(1);
         updateMargins();
-    }
-
-    void ProviderDetailView::updateTreeHeight() {
-        if (!m_modelTreeView || !m_modelTreeModel) return;
-        const int rootCount = m_modelTreeModel->rowCount();
-        if (rootCount == 0) {
-            m_modelTreeView->setFixedHeight(100);
-            return;
-        }
-        const auto spacing = themeSpacing();
-        int totalHeight = 0;
-        for (int i = 0; i < rootCount; ++i) {
-            const QModelIndex groupIdx = m_modelTreeModel->index(i, 0);
-            totalHeight += spacing.controlHeight.large + spacing.xSmall;
-            if (m_modelTreeView->isExpanded(groupIdx)) {
-                const int childCount = m_modelTreeModel->rowCount(groupIdx);
-                for (int c = 0; c < childCount; ++c) {
-                    const bool isLast = (c == childCount - 1);
-                    totalHeight += isLast ? (spacing.controlHeight.large + 2) : spacing.controlHeight.large;
-                }
-            }
-            totalHeight += spacing.gap.tight;
-        }
-        m_modelTreeView->setFixedHeight(totalHeight + spacing.medium);
     }
 
     void ProviderDetailView::updateMargins() {
@@ -322,7 +293,6 @@ namespace ui::screen::settings::model_manager {
 
         m_modelCountLabel->setText(tr("可用模型 (%1)").arg(m_provider.models.size()));
         m_modelTreeView->expandAll();
-        updateTreeHeight();
         m_syncingTree = false;
     }
 

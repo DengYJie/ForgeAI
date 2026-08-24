@@ -160,6 +160,8 @@ set(PROJECT_SOURCES
         src/ui/widget/badge/ModelCapabilityBadge.cpp
         src/ui/widget/badge/ModelCapabilityBadgeGroup.h
         src/ui/widget/badge/ModelCapabilityBadgeGroup.cpp
+        src/ui/widget/tree/AutoHeightTreeView.h
+        src/ui/widget/tree/AutoHeightTreeView.cpp
 
         src/ui/widget/chat/ChatHeader.h
         src/ui/widget/chat/ChatHeader.cpp
