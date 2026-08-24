@@ -100,15 +100,7 @@ namespace ui::screen::settings::model_manager {
                     if (idx.isValid()) {
                         const QRect itemRect = static_cast<const QAbstractItemView *>(m_listView)->visualRect(idx);
                         const QRect btnRect(itemRect.right() - 28, itemRect.top() + (itemRect.height() - 24) / 2, 24, 24);
-                        const bool hitBtn = btnRect.contains(pos);
-                        qDebug().noquote() << QStringLiteral("[ProviderNavigationPane::eventFilter] %1 pos=(%2,%3), row=%4, hitBtn=%5, itemRect=(%6,%7,%8,%9), btnRect=(%10,%11,%12,%13)")
-                            .arg(event->type() == QEvent::MouseButtonPress ? "Press" : "Release")
-                            .arg(pos.x()).arg(pos.y())
-                            .arg(idx.row())
-                            .arg(hitBtn)
-                            .arg(itemRect.x()).arg(itemRect.y()).arg(itemRect.width()).arg(itemRect.height())
-                            .arg(btnRect.x()).arg(btnRect.y()).arg(btnRect.width()).arg(btnRect.height());
-                        if (hitBtn) {
+                        if (btnRect.contains(pos)) {
                             if (event->type() == QEvent::MouseButtonRelease) {
                                 const QString providerId = idx.data(ProviderIdRole).toString();
                                 const QPoint btnBottomRight = m_listView->viewport()->mapToGlobal(btnRect.bottomRight());
