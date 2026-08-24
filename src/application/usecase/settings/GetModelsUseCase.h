@@ -4,6 +4,7 @@
 #include <QList>
 #include "domain/model/Model.h"
 #include "domain/model/ModelProvider.h"
+#include "domain/model/ResolvedModel.h"
 
 namespace domain::service {
     class IModelService;
@@ -24,14 +25,8 @@ namespace application::usecase::settings {
 
         ~GetModelsUseCase() override = default;
 
-        /**
-         * @brief 获取所有已激活的服务商配置列表
-         */
         QList<domain::model::ModelProvider> getActiveProviders() const;
-
-        /**
-         * @brief 获取所有已启用的模型列表
-         */
+        QList<domain::model::ResolvedModel> getModelsForProvider(const QString &providerId) const;
         QList<domain::model::Model> getEnabledModels() const;
 
     Q_SIGNALS:

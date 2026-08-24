@@ -145,37 +145,41 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ModelManagerViewModel::addModel(const QString &providerId, const domain::model::Model &model) {
-        for (auto p : m_state.providers) {
-            if (p.id == providerId) {
-                p.models.append(model);
-                saveProvider(p);
-                break;
-            }
-        }
+        Q_UNUSED(providerId)
+        Q_UNUSED(model)
+        // 预留自定义模型添加
     }
 
     void ModelManagerViewModel::applyProviderSelection(ModelManagerState &state, const QString &preferredId) {
         state.selectedProviderId.clear();
         state.selectedProvider.reset();
+        state.selectedProviderModels.clear();
 
         if (state.providers.isEmpty()) {
             return;
         }
 
-        // 尝试选中 preferredId
-        if (!preferredId.isEmpty()) {
-            for (const auto &p : state.providers) {
-                if (p.id == preferredId) {
-                    state.selectedProviderId = p.id;
-                    state.selectedProvider = p;
-                    return;
+        QString targetId = preferredId;
+        if (targetId.isEmpty()) {
+            targetId = state.providers.first().id;
+        }
+
+        for (const auto &p : state.providers) {
+            if (p.id == targetId) {
+                state.selectedProviderId = p.id;
+                state.selectedProvider = p;
+                if (m_getModelsUseCase) {
+                    state.selectedProviderModels = m_getModelsUseCase->getModelsForProvider(p.id);
                 }
+                return;
             }
         }
 
-        // 回退为首个服务商
         state.selectedProviderId = state.providers.first().id;
         state.selectedProvider = state.providers.first();
+        if (m_getModelsUseCase) {
+            state.selectedProviderModels = m_getModelsUseCase->getModelsForProvider(state.selectedProviderId);
+        }
     }
 
 } // namespace ui::screen::settings::model_manager

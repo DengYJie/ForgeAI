@@ -43,10 +43,10 @@ namespace app {
             repo->initializeDatabase();
         }
         if (auto *modelRepo = dynamic_cast<data::repository::SqliteModelRepository *>(m_context->modelRepository())) {
-            modelRepo->initializeDatabase();
+            modelRepo->initializeDatabase(QStringLiteral(":/config/api.json"), QStringLiteral(":/config/models.json"));
         }
         if (auto *modelReg = m_context->modelRegistry()) {
-            modelReg->initialize();
+            modelReg->initialize(QStringLiteral(":/config/api.json"), QStringLiteral(":/config/models.json"));
         }
     }
 

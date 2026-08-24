@@ -327,6 +327,9 @@ set(PROJECT_SOURCES
         src/domain/project/Project.h
         src/domain/model/ModelCapabilities.h
         src/domain/model/ModelParameters.h
+        src/domain/model/CanonicalModel.h
+        src/domain/model/ProviderModel.h
+        src/domain/model/ResolvedModel.h
         src/domain/model/Model.h
         src/domain/model/ModelProvider.h
         src/domain/llm/ChatError.h

@@ -10,11 +10,17 @@ namespace application::usecase::settings {
         if (m_modelService) {
             connect(m_modelService, &domain::service::IModelService::providersChanged,
                     this, &GetModelsUseCase::modelsChanged);
+            connect(m_modelService, &domain::service::IModelService::modelsChanged,
+                    this, &GetModelsUseCase::modelsChanged);
         }
     }
 
     QList<domain::model::ModelProvider> GetModelsUseCase::getActiveProviders() const {
         return m_modelService ? m_modelService->getActiveProviders() : QList<domain::model::ModelProvider>{};
+    }
+
+    QList<domain::model::ResolvedModel> GetModelsUseCase::getModelsForProvider(const QString &providerId) const {
+        return m_modelService ? m_modelService->getModelsForProvider(providerId) : QList<domain::model::ResolvedModel>{};
     }
 
     QList<domain::model::Model> GetModelsUseCase::getEnabledModels() const {

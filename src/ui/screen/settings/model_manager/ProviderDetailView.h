@@ -7,6 +7,7 @@
 #include <FluentQt/FluentQt.h>
 
 #include "domain/model/ModelProvider.h"
+#include "domain/model/ResolvedModel.h"
 
 class QStandardItem;
 class QStandardItemModel;
@@ -27,6 +28,7 @@ namespace ui::screen::settings::model_manager {
     public:
         explicit ProviderDetailView(QWidget *parent = nullptr);
         void setProvider(const std::optional<domain::model::ModelProvider> &provider);
+        void setProviderData(const std::optional<domain::model::ModelProvider> &provider, const QList<domain::model::ResolvedModel> &models = {});
         const domain::model::ModelProvider &provider() const { return m_provider; }
         void setRefreshing(bool refreshing);
 
@@ -47,6 +49,7 @@ namespace ui::screen::settings::model_manager {
         void testConnection();
 
         domain::model::ModelProvider m_provider;
+        QList<domain::model::ResolvedModel> m_models;
         bool m_hasProvider = false;
         bool m_syncingTree = false;
         QTimer m_debounceTimer;

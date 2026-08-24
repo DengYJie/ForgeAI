@@ -44,7 +44,7 @@ namespace ui::screen::settings::model_manager {
     void ModelManagerPage::renderState(const ModelManagerState &state) {
         m_navPane->setProviders(state.providers);
         if (!state.selectedProviderId.isEmpty()) m_navPane->selectProvider(state.selectedProviderId);
-        m_detailView->setProvider(state.selectedProvider);
+        m_detailView->setProviderData(state.selectedProvider, state.selectedProviderModels);
         m_detailView->setRefreshing(state.isRefreshing);
     }
 

@@ -1,30 +1,61 @@
 set(MODELS_DEV_API_URL "https://models.dev/api.json")
+set(API_JSON_TARGET "${CMAKE_CURRENT_SOURCE_DIR}/config/api.json")
+
+set(MODELS_DEV_MODELS_URL "https://models.dev/models.json")
 set(MODELS_JSON_TARGET "${CMAKE_CURRENT_SOURCE_DIR}/config/models.json")
 
-message(STATUS "正在从 ${MODELS_DEV_API_URL} 同步最新模型元数据目录...")
+# 1. 同步 Provider 与端点元数据 (api.json)
+message(STATUS "正在从 ${MODELS_DEV_API_URL} 同步 Provider 元数据...")
 file(DOWNLOAD
         "${MODELS_DEV_API_URL}"
-        "${MODELS_JSON_TARGET}"
-        STATUS DOWNLOAD_STATUS
+        "${API_JSON_TARGET}"
+        STATUS API_DOWNLOAD_STATUS
         TIMEOUT 15
         SHOW_PROGRESS
 )
-list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-list(GET DOWNLOAD_STATUS 1 ERROR_MESSAGE)
+list(GET API_DOWNLOAD_STATUS 0 API_STATUS_CODE)
+list(GET API_DOWNLOAD_STATUS 1 API_ERROR_MESSAGE)
 
-if (NOT STATUS_CODE EQUAL 0)
-    if (EXISTS "${MODELS_JSON_TARGET}")
-        message(WARNING "从 models.dev 自动同步失败 (${ERROR_MESSAGE})，将使用本地现有的模型目录缓存。")
+if (NOT API_STATUS_CODE EQUAL 0)
+    if (EXISTS "${API_JSON_TARGET}")
+        message(WARNING "从 models.dev 同步 api.json 失败 (${API_ERROR_MESSAGE})，将使用本地现有的 api.json 缓存。")
+    elseif (EXISTS "${MODELS_JSON_TARGET}")
+        # 兼容过渡：若已有旧 models.json，拷贝一份为 api.json
+        file(COPY_FILE "${MODELS_JSON_TARGET}" "${API_JSON_TARGET}")
+        message(STATUS "已从旧缓存生成: ${API_JSON_TARGET}")
     else ()
-        message(FATAL_ERROR "从 models.dev 自动拉取模型目录失败且无本地缓存: ${ERROR_MESSAGE}")
+        message(FATAL_ERROR "从 models.dev 同步 api.json 失败且无本地缓存: ${API_ERROR_MESSAGE}")
     endif ()
 else ()
-    message(STATUS "成功同步全量模型目录至: ${MODELS_JSON_TARGET}")
+    message(STATUS "成功同步 Provider 元数据至: ${API_JSON_TARGET}")
+endif ()
+
+# 2. 同步模型本体元数据 (models.json)
+message(STATUS "正在从 ${MODELS_DEV_MODELS_URL} 同步模型本体元数据...")
+file(DOWNLOAD
+        "${MODELS_DEV_MODELS_URL}"
+        "${MODELS_JSON_TARGET}"
+        STATUS MODELS_DOWNLOAD_STATUS
+        TIMEOUT 15
+        SHOW_PROGRESS
+)
+list(GET MODELS_DOWNLOAD_STATUS 0 MODELS_STATUS_CODE)
+list(GET MODELS_DOWNLOAD_STATUS 1 MODELS_ERROR_MESSAGE)
+
+if (NOT MODELS_STATUS_CODE EQUAL 0)
+    if (EXISTS "${MODELS_JSON_TARGET}")
+        message(WARNING "从 models.dev 同步 models.json 失败 (${MODELS_ERROR_MESSAGE})，将使用本地现有的 models.json 缓存。")
+    else ()
+        message(WARNING "从 models.dev 同步 models.json 失败: ${MODELS_ERROR_MESSAGE}")
+    endif ()
+else ()
+    message(STATUS "成功同步模型本体元数据至: ${MODELS_JSON_TARGET}")
 endif ()
 
 qt_add_resources(${PROJECT_NAME} "app_resources"
         PREFIX "/"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES
+        config/api.json
         config/models.json
 )

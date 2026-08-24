@@ -4,35 +4,14 @@
 #include <optional>
 #include "ModelCapabilities.h"
 #include "ModelParameters.h"
+#include "CanonicalModel.h"
+#include "ProviderModel.h"
+#include "ResolvedModel.h"
 
 namespace domain::model {
 
     /**
-     * @brief 模型 Token 与物理上限定义 (对齐 models.dev limit)
-     */
-    struct ModelLimit {
-        int context = 128000;                 ///< 总上下文窗口大小
-        int maxInput = 128000;                ///< 单次最大输入 Token 限制
-        int maxOutput = 8192;                 ///< 单次最大输出 Token 限制
-
-        bool operator==(const ModelLimit &other) const = default;
-    };
-
-    /**
-     * @brief 模型计费信息 (按每 100 万 Tokens 计算，包含 Prompt Caching 读写计费)
-     */
-    struct ModelPricing {
-        double inputPrice = 0.0;              ///< 基础输入价格 / 1M tokens
-        double outputPrice = 0.0;             ///< 基础输出价格 / 1M tokens
-        double cacheReadPrice = 0.0;          ///< Prompt Cache 命中读取价格 / 1M tokens
-        double cacheWritePrice = 0.0;         ///< Prompt Cache 写入价格 / 1M tokens
-        QString currency = "USD";             ///< 货币单位 ("USD" 或 "CNY")
-
-        bool operator==(const ModelPricing &other) const = default;
-    };
-
-    /**
-     * @brief 具体大语言模型实体
+     * @brief 兼容层：大语言模型综合实体 (可由 ResolvedModel 映射)
      */
     struct Model {
         QString id;                           ///< 模型的真实 API 标识符
@@ -53,8 +32,32 @@ namespace domain::model {
 
         bool isEnabled = true;                ///< 用户是否在列表中启用
         bool isCustom = false;                ///< 是否为用户自定义添加的模型
+        DataOrigin origin = DataOrigin::BuiltIn;
 
         bool operator==(const Model &other) const = default;
+
+        static Model fromResolved(const ResolvedModel &resolved) {
+            Model m;
+            m.id = resolved.requestModelId();
+            m.providerId = resolved.provider.id;
+            m.displayName = resolved.displayName();
+            m.description = resolved.description();
+            m.family = resolved.family();
+            m.group = resolved.group();
+            m.limits = resolved.effectiveLimits();
+            m.capabilities = resolved.effectiveCapabilities();
+            if (resolved.canonical.has_value()) {
+                m.defaultParams = resolved.canonical->defaultParams;
+                m.openWeights = resolved.canonical->openWeights;
+                m.knowledgeCutoff = resolved.canonical->knowledgeCutoff;
+            }
+            m.pricing = resolved.pricing();
+            m.reasoningField = resolved.reasoningField();
+            m.isEnabled = resolved.isEnabled();
+            m.isCustom = resolved.isCustom();
+            m.origin = resolved.origin();
+            return m;
+        }
     };
 
 } // namespace domain::model

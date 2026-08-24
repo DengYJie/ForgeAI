@@ -23,6 +23,67 @@ namespace data::importer {
         return domain::model::ProviderType::OpenAIChatCompletionsCompatible;
     }
 
+    domain::model::CanonicalModel ModelsDevImporter::parseCanonicalModel(
+        const QString &modelKey,
+        const QJsonObject &modelObj
+    ) {
+        domain::model::CanonicalModel model;
+        model.id = modelObj.value(QStringLiteral("id")).toString(modelKey);
+        model.name = modelObj.value(QStringLiteral("name")).toString(model.id);
+        model.family = modelObj.value(QStringLiteral("family")).toString();
+        model.description = modelObj.value(QStringLiteral("description")).toString();
+
+        QJsonObject limitObj = modelObj.value(QStringLiteral("limit")).toObject();
+        model.limits.context = limitObj.value(QStringLiteral("context")).toInt(128000);
+        model.limits.maxInput = limitObj.value(QStringLiteral("input")).toInt(model.limits.context);
+        model.limits.maxOutput = limitObj.value(QStringLiteral("output")).toInt(8192);
+
+        domain::model::ModelCapabilities caps = domain::model::ModelCapability::Chat | domain::model::ModelCapability::Streaming;
+        if (modelObj.value(QStringLiteral("tool_call")).toBool(false)) {
+            caps |= domain::model::ModelCapability::ToolCalling;
+        }
+        if (modelObj.value(QStringLiteral("reasoning")).toBool(false)) {
+            caps |= domain::model::ModelCapability::Thinking;
+        }
+        if (modelObj.value(QStringLiteral("structured_output")).toBool(false)) {
+            caps |= domain::model::ModelCapability::StructuredOutputs;
+        }
+
+        QJsonObject modalitiesObj = modelObj.value(QStringLiteral("modalities")).toObject();
+        QJsonArray inputArray = modalitiesObj.value(QStringLiteral("input")).toArray();
+        if (!inputArray.isEmpty()) {
+            model.modalities.input.clear();
+            for (const auto &val : inputArray) {
+                QString mod = val.toString();
+                model.modalities.input.append(mod);
+                if (mod == QStringLiteral("image")) caps |= domain::model::ModelCapability::Vision;
+                else if (mod == QStringLiteral("audio")) caps |= domain::model::ModelCapability::Audio;
+                else if (mod == QStringLiteral("video")) caps |= domain::model::ModelCapability::Video;
+                else if (mod == QStringLiteral("pdf")) caps |= domain::model::ModelCapability::Pdf;
+            }
+        }
+
+        QJsonArray outputArray = modalitiesObj.value(QStringLiteral("output")).toArray();
+        if (!outputArray.isEmpty()) {
+            model.modalities.output.clear();
+            for (const auto &val : outputArray) {
+                model.modalities.output.append(val.toString());
+            }
+        }
+        model.capabilities = caps;
+
+        model.defaultParams.temperature = 0.7;
+        model.defaultParams.topP = 1.0;
+        model.defaultParams.enableThinking = modelObj.value(QStringLiteral("reasoning")).toBool(false);
+        model.defaultParams.thinkingBudgetTokens = 4096;
+
+        model.openWeights = modelObj.value(QStringLiteral("open_weights")).toBool(false);
+        model.knowledgeCutoff = modelObj.value(QStringLiteral("knowledge")).toString();
+        model.releaseDate = modelObj.value(QStringLiteral("release_date")).toString();
+
+        return model;
+    }
+
     domain::model::ModelProvider ModelsDevImporter::parseProvider(const QString &id, const QJsonObject &providerObj) {
         domain::model::ModelProvider provider;
         provider.id = id;
@@ -38,85 +99,72 @@ namespace data::importer {
         QString npm = providerObj.value(QStringLiteral("npm")).toString();
         provider.type = mapNpmToProviderType(npm);
         provider.timeoutMs = 60000;
-        provider.isEnabled = true;
+        provider.isEnabled = false;
+        provider.isCustom = false;
+        provider.origin = domain::model::DataOrigin::BuiltIn;
 
         return provider;
     }
 
-    domain::model::Model ModelsDevImporter::parseModel(
+    domain::model::ProviderModel ModelsDevImporter::parseProviderModel(
         const QString &providerId,
         const QString &providerName,
         const QString &modelKey,
         const QJsonObject &modelObj
     ) {
-        domain::model::Model model;
-        model.id = modelObj.value(QStringLiteral("id")).toString(modelKey);
-        model.providerId = providerId;
-        model.displayName = modelObj.value(QStringLiteral("name")).toString(model.id);
-        model.description = modelObj.value(QStringLiteral("description")).toString();
-        model.family = modelObj.value(QStringLiteral("family")).toString();
-        model.group = providerName.isEmpty() ? providerId : providerName;
+        domain::model::ProviderModel binding;
+        binding.providerId = providerId;
+        binding.remoteModelId = modelObj.value(QStringLiteral("id")).toString(modelKey);
+        binding.canonicalModelId = binding.remoteModelId;
 
-        // 上下文与输出限制
-        QJsonObject limitObj = modelObj.value(QStringLiteral("limit")).toObject();
-        model.limits.context = limitObj.value(QStringLiteral("context")).toInt(128000);
-        model.limits.maxInput = limitObj.value(QStringLiteral("input")).toInt(model.limits.context);
-        model.limits.maxOutput = limitObj.value(QStringLiteral("output")).toInt(8192);
-
-        // 能力标志
-        domain::model::ModelCapabilities caps = domain::model::ModelCapability::Chat | domain::model::ModelCapability::Streaming;
-        if (modelObj.value(QStringLiteral("tool_call")).toBool(false)) {
-            caps |= domain::model::ModelCapability::ToolCalling;
-        }
-        if (modelObj.value(QStringLiteral("reasoning")).toBool(false)) {
-            caps |= domain::model::ModelCapability::Thinking;
-        }
-        if (modelObj.value(QStringLiteral("structured_output")).toBool(false)) {
-            caps |= domain::model::ModelCapability::StructuredOutputs;
-        }
-
-        QJsonObject modalitiesObj = modelObj.value(QStringLiteral("modalities")).toObject();
-        QJsonArray inputArray = modalitiesObj.value(QStringLiteral("input")).toArray();
-        for (const auto &val : inputArray) {
-            QString mod = val.toString();
-            if (mod == QStringLiteral("image")) caps |= domain::model::ModelCapability::Vision;
-            else if (mod == QStringLiteral("audio")) caps |= domain::model::ModelCapability::Audio;
-            else if (mod == QStringLiteral("video")) caps |= domain::model::ModelCapability::Video;
-            else if (mod == QStringLiteral("pdf")) caps |= domain::model::ModelCapability::Pdf;
-        }
-        model.capabilities = caps;
-
-        // 默认推理参数
-        model.defaultParams.temperature = 0.7;
-        model.defaultParams.topP = 1.0;
-        model.defaultParams.enableThinking = modelObj.value(QStringLiteral("reasoning")).toBool(false);
-        model.defaultParams.thinkingBudgetTokens = 4096;
-
-        // 计费解析
         QJsonObject costObj = modelObj.value(QStringLiteral("cost")).toObject();
-        model.pricing.inputPrice = costObj.value(QStringLiteral("input")).toDouble(0.0);
-        model.pricing.outputPrice = costObj.value(QStringLiteral("output")).toDouble(0.0);
-        model.pricing.cacheReadPrice = costObj.value(QStringLiteral("cache_read")).toDouble(0.0);
-        model.pricing.cacheWritePrice = costObj.value(QStringLiteral("cache_write")).toDouble(0.0);
-        model.pricing.currency = QStringLiteral("USD");
+        binding.pricing.inputPrice = costObj.value(QStringLiteral("input")).toDouble(0.0);
+        binding.pricing.outputPrice = costObj.value(QStringLiteral("output")).toDouble(0.0);
+        binding.pricing.cacheReadPrice = costObj.value(QStringLiteral("cache_read")).toDouble(0.0);
+        binding.pricing.cacheWritePrice = costObj.value(QStringLiteral("cache_write")).toDouble(0.0);
+        binding.pricing.currency = QStringLiteral("USD");
 
-        // 思考流字段与发布信息
+        if (modelObj.contains(QStringLiteral("limit"))) {
+            QJsonObject limitObj = modelObj.value(QStringLiteral("limit")).toObject();
+            domain::model::ModelLimit lim;
+            lim.context = limitObj.value(QStringLiteral("context")).toInt(128000);
+            lim.maxInput = limitObj.value(QStringLiteral("input")).toInt(lim.context);
+            lim.maxOutput = limitObj.value(QStringLiteral("output")).toInt(8192);
+            binding.limitsOverride = lim;
+        }
+
         QJsonObject interleavedObj = modelObj.value(QStringLiteral("interleaved")).toObject();
-        model.reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
-        model.openWeights = modelObj.value(QStringLiteral("open_weights")).toBool(false);
-        model.knowledgeCutoff = modelObj.value(QStringLiteral("knowledge")).toString();
+        binding.reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
 
-        model.isEnabled = true;
-        model.isCustom = false;
+        binding.group = providerName.isEmpty() ? providerId : providerName;
+        binding.isEnabled = true;
+        binding.isCustom = false;
+        binding.origin = domain::model::DataOrigin::BuiltIn;
 
-        return model;
+        return binding;
     }
 
-    ModelsDevImporter::ParseResult ModelsDevImporter::parseAll(const QJsonObject &root) {
-        ParseResult result;
-        result.providers.reserve(root.size());
+    QHash<QString, domain::model::CanonicalModel> ModelsDevImporter::parseCanonicalModels(const QJsonObject &modelsRoot) {
+        QHash<QString, domain::model::CanonicalModel> canonicals;
+        canonicals.reserve(modelsRoot.size());
 
-        for (auto providerIt = root.begin(); providerIt != root.end(); ++providerIt) {
+        for (auto it = modelsRoot.begin(); it != modelsRoot.end(); ++it) {
+            QString modelKey = it.key();
+            QJsonObject modelObj = it.value().toObject();
+            auto model = parseCanonicalModel(modelKey, modelObj);
+            canonicals.insert(model.id, model);
+        }
+
+        return canonicals;
+    }
+
+    std::pair<QList<domain::model::ModelProvider>, QList<domain::model::ProviderModel>>
+    ModelsDevImporter::parseProvidersAndBindings(const QJsonObject &apiRoot) {
+        QList<domain::model::ModelProvider> providers;
+        QList<domain::model::ProviderModel> providerModels;
+        providers.reserve(apiRoot.size());
+
+        for (auto providerIt = apiRoot.begin(); providerIt != apiRoot.end(); ++providerIt) {
             QString providerId = providerIt.key();
             QJsonObject providerObj = providerIt.value().toObject();
 
@@ -127,12 +175,32 @@ namespace data::importer {
                 QString modelKey = modelIt.key();
                 QJsonObject modelObj = modelIt.value().toObject();
 
-                auto model = parseModel(providerId, provider.name, modelKey, modelObj);
-                provider.models.append(model);
-                result.models.append(model);
+                auto binding = parseProviderModel(providerId, provider.name, modelKey, modelObj);
+                providerModels.append(binding);
             }
 
-            result.providers.append(std::move(provider));
+            providers.append(std::move(provider));
+        }
+
+        return { std::move(providers), std::move(providerModels) };
+    }
+
+    ModelsDevImportResult ModelsDevImporter::parseAll(const QJsonObject &apiRoot, const QJsonObject &modelsRoot) {
+        ModelsDevImportResult result;
+
+        result.canonicalModels = parseCanonicalModels(modelsRoot);
+
+        auto [providers, bindings] = parseProvidersAndBindings(apiRoot);
+        result.providers = std::move(providers);
+        result.providerModels = std::move(bindings);
+
+        for (auto &binding : result.providerModels) {
+            if (binding.canonicalModelId.has_value()) {
+                const QString &cId = *binding.canonicalModelId;
+                if (!result.canonicalModels.contains(cId)) {
+                    result.unresolvedBindingsCount++;
+                }
+            }
         }
 
         return result;

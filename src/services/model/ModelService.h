@@ -9,7 +9,7 @@ namespace core::model {
 
 namespace services::model {
     /**
-     * @brief 模型服务实现（基于 core::model::ModelRegistry）
+     * @brief 模型服务实现
      */
     class ModelService : public domain::service::IModelService {
         Q_OBJECT
@@ -28,6 +28,10 @@ namespace services::model {
         std::optional<std::pair<domain::model::Model, domain::model::ModelProvider>> resolveModel(const QString &modelId) const override;
         void saveProvider(const domain::model::ModelProvider &provider) override;
         void deleteProvider(const QString &providerId) override;
+
+        QList<domain::model::ResolvedModel> getModelsForProvider(const QString &providerId) const override;
+        void saveProviderModel(const domain::model::ProviderModel &binding) override;
+        void deleteProviderModel(const QString &providerId, const QString &remoteModelId) override;
 
     private:
         std::shared_ptr<core::model::ModelRegistry> m_registry;

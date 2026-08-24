@@ -55,10 +55,10 @@ namespace ui::screen::settings::model_manager {
             }
         };
 
-        QString groupName(const domain::model::Model &model) {
-            if (model.isCustom) return QObject::tr("自定义模型");
-            if (!model.group.trimmed().isEmpty()) return model.group;
-            if (!model.family.trimmed().isEmpty()) return model.family;
+        QString groupName(const domain::model::ResolvedModel &model) {
+            if (model.isCustom()) return QObject::tr("自定义模型");
+            if (!model.group().trimmed().isEmpty()) return model.group();
+            if (!model.family().trimmed().isEmpty()) return model.family();
             return QObject::tr("其他模型");
         }
     } // namespace
@@ -246,9 +246,14 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ProviderDetailView::setProvider(const std::optional<domain::model::ModelProvider> &provider) {
+        setProviderData(provider, {});
+    }
+
+    void ProviderDetailView::setProviderData(const std::optional<domain::model::ModelProvider> &provider, const QList<domain::model::ResolvedModel> &models) {
         m_debounceTimer.stop();
         m_hasProvider = provider.has_value();
         m_provider = provider.value_or(domain::model::ModelProvider{});
+        m_models = models;
         const QSignalBlocker switchBlocker(m_enableSwitch);
         const QSignalBlocker urlBlocker(m_urlEdit);
         const QSignalBlocker keyBlocker(m_keyEdit);
@@ -269,7 +274,7 @@ namespace ui::screen::settings::model_manager {
             brandIcon = QIcon(m_provider.icon);
         }
 
-        for (const auto &model : m_provider.models) {
+        for (const auto &model : m_models) {
             const QString group = groupName(model);
             auto *groupItem = groups.value(group, nullptr);
             if (!groupItem) {
@@ -279,19 +284,19 @@ namespace ui::screen::settings::model_manager {
                 groups.insert(group, groupItem);
                 m_modelTreeModel->appendRow(groupItem);
             }
-            auto *modelItem = new QStandardItem(model.displayName.isEmpty() ? model.id : model.displayName);
+            auto *modelItem = new QStandardItem(model.displayName());
             modelItem->setData(false, IsGroupRole);
-            modelItem->setData(model.id, ModelIdRole);
-            modelItem->setData(static_cast<int>(model.capabilities), ModelCapabilitiesRole);
+            modelItem->setData(model.requestModelId(), ModelIdRole);
+            modelItem->setData(static_cast<int>(model.effectiveCapabilities()), ModelCapabilitiesRole);
             if (!brandIcon.isNull()) {
                 modelItem->setData(brandIcon, BrandIconRole);
             }
-            modelItem->setToolTip(model.id);
+            modelItem->setToolTip(model.requestModelId());
             modelItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             groupItem->appendRow(modelItem);
         }
 
-        m_modelCountLabel->setText(tr("可用模型 (%1)").arg(m_provider.models.size()));
+        m_modelCountLabel->setText(tr("可用模型 (%1)").arg(m_models.size()));
         m_modelTreeView->expandAll();
         m_syncingTree = false;
     }

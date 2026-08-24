@@ -1,9 +1,8 @@
 #pragma once
 #include <QString>
-#include <QList>
 #include <QMap>
 #include <optional>
-#include "Model.h"
+#include "ProviderModel.h"
 
 namespace domain::model {
 
@@ -14,7 +13,7 @@ namespace domain::model {
         OpenAIChatCompletionsCompatible, ///< OpenAI 兼容协议 (基于 /v1/chat/completions)
         OpenAIResponses,                 ///< OpenAI 原生 Responses API
         Anthropic,                       ///< Anthropic 原生 Messages 协议
-        Ollama,                          ///< 本地 Ollama 协议 (支持模型检测与拉取)
+        Ollama,                          ///< 本地 Ollama 协议
         GoogleGemini,                    ///< Google Gemini 原生协议
         AzureOpenAI,                     ///< Azure OpenAI 专用协议
         AmazonBedrock                    ///< Amazon Bedrock 原生协议
@@ -28,18 +27,19 @@ namespace domain::model {
         QString name;                         ///< 显示名称
         QString icon;                         ///< 服务商图标路径或内置图标标识
         QString docUrl;                       ///< 官方文档或 API 说明地址
-        QString envVarName;                   ///< 对应的环境变量名
+        QString envVarName;                   ///< 环境变量名
         ProviderType type = ProviderType::OpenAIChatCompletionsCompatible; ///< 协议驱动类型
 
         QString baseUrl;                      ///< API 基础请求地址
         QString apiKey;                       ///< API 密钥
 
-        QMap<QString, QString> customHeaders; ///< 自定义 HTTP Header (如自定义鉴权或网关头)
-        std::optional<QString> proxyUrl;      ///< 独立网络代理配置 (留空使用系统代理)
-        int timeoutMs = 60000;                ///< 请求超时时间（毫秒，默认 60s）
+        QMap<QString, QString> customHeaders; ///< 自定义 HTTP Header
+        std::optional<QString> proxyUrl;      ///< 代理配置
+        int timeoutMs = 60000;                ///< 超时时间（毫秒）
 
-        QList<Model> models;                  ///< 该服务商下注册的所有模型列表
-        bool isEnabled = true;                ///< 是否全局启用该服务商
+        bool isEnabled = false;               ///< 是否全局启用
+        bool isCustom = false;                ///< 是否为用户自定义添加
+        DataOrigin origin = DataOrigin::BuiltIn; ///< 数据来源
 
         bool operator==(const ModelProvider &other) const = default;
     };

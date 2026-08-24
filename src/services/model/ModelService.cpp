@@ -10,6 +10,8 @@ namespace services::model {
         if (m_registry) {
             connect(m_registry.get(), &core::model::ModelRegistry::providersChanged,
                     this, &IModelService::providersChanged);
+            connect(m_registry.get(), &core::model::ModelRegistry::modelsChanged,
+                    this, &IModelService::modelsChanged);
         }
     }
 
@@ -38,6 +40,22 @@ namespace services::model {
     void ModelService::deleteProvider(const QString &providerId) {
         if (m_registry) {
             m_registry->deleteProvider(providerId);
+        }
+    }
+
+    QList<domain::model::ResolvedModel> ModelService::getModelsForProvider(const QString &providerId) const {
+        return m_registry ? m_registry->getModelsForProvider(providerId) : QList<domain::model::ResolvedModel>{};
+    }
+
+    void ModelService::saveProviderModel(const domain::model::ProviderModel &binding) {
+        if (m_registry) {
+            m_registry->saveProviderModel(binding);
+        }
+    }
+
+    void ModelService::deleteProviderModel(const QString &providerId, const QString &remoteModelId) {
+        if (m_registry) {
+            m_registry->deleteProviderModel(providerId, remoteModelId);
         }
     }
 } // namespace services::model
