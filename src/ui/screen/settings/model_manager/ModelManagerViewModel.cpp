@@ -93,6 +93,41 @@ namespace ui::screen::settings::model_manager {
         });
     }
 
+    void ModelManagerViewModel::updateProvider(const UpdateProviderIntent &intent) {
+        domain::model::ModelProvider modifiedProvider;
+        bool found = false;
+
+        for (const auto &p : m_state.providers) {
+            if (p.id == intent.providerId) {
+                modifiedProvider = p;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) return;
+
+        if (intent.baseUrl.has_value()) modifiedProvider.baseUrl = intent.baseUrl.value();
+        if (intent.apiKey.has_value()) modifiedProvider.apiKey = intent.apiKey.value();
+        if (intent.isEnabled.has_value()) modifiedProvider.isEnabled = intent.isEnabled.value();
+
+        if (m_saveProviderUseCase) {
+            m_saveProviderUseCase->execute(modifiedProvider);
+        }
+
+        updateState([this, modifiedProvider](ModelManagerState &s) {
+            for (auto &p : s.providers) {
+                if (p.id == modifiedProvider.id) {
+                    p = modifiedProvider;
+                    break;
+                }
+            }
+            if (s.selectedProviderId == modifiedProvider.id) {
+                s.selectedProvider = modifiedProvider;
+            }
+        });
+    }
+
     void ModelManagerViewModel::deleteProvider(const QString &providerId) {
         if (m_deleteProviderUseCase) {
             m_deleteProviderUseCase->execute(providerId);

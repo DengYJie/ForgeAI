@@ -34,6 +34,16 @@ namespace ui::screen::settings::model_manager {
     };
 
     /**
+     * @brief 更新 Provider 意图
+     */
+    struct UpdateProviderIntent {
+        QString providerId;
+        std::optional<QString> baseUrl;
+        std::optional<QString> apiKey;
+        std::optional<bool> isEnabled;
+    };
+
+    /**
      * @brief 模型管理器 ViewModel
      */
     class ModelManagerViewModel : public BaseViewModel<ModelManagerViewModel, ModelManagerState> {
@@ -53,6 +63,7 @@ namespace ui::screen::settings::model_manager {
         void loadProviders();
         void selectProvider(const QString &providerId);
         void saveProvider(const domain::model::ModelProvider &provider);
+        void updateProvider(const UpdateProviderIntent &intent);
         void deleteProvider(const QString &providerId);
         void refreshModels(const QString &providerId);
         void addProvider(const domain::model::ModelProvider &provider);

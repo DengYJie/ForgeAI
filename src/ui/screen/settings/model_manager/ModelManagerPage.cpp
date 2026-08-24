@@ -33,9 +33,34 @@ namespace ui::screen::settings::model_manager {
         });
         connect(m_navPane, &ProviderNavigationPane::addProviderRequested, this, &ModelManagerPage::onAddProvider);
         connect(m_detailView, &ProviderDetailView::addModelRequested, this, &ModelManagerPage::onAddModel);
-        connect(m_detailView, &ProviderDetailView::providerChanged, this, [this](const domain::model::ModelProvider &provider) {
-            if (m_viewModel) m_viewModel->saveProvider(provider);
+        
+        connect(m_detailView, &ProviderDetailView::baseUrlEditRequested, this, [this](const QString &id, const QString &baseUrl) {
+            if (m_viewModel) {
+                UpdateProviderIntent intent;
+                intent.providerId = id;
+                intent.baseUrl = baseUrl;
+                m_viewModel->updateProvider(intent);
+            }
         });
+
+        connect(m_detailView, &ProviderDetailView::apiKeyEditRequested, this, [this](const QString &id, const QString &apiKey) {
+            if (m_viewModel) {
+                UpdateProviderIntent intent;
+                intent.providerId = id;
+                intent.apiKey = apiKey;
+                m_viewModel->updateProvider(intent);
+            }
+        });
+
+        connect(m_detailView, &ProviderDetailView::enabledChangeRequested, this, [this](const QString &id, bool enabled) {
+            if (m_viewModel) {
+                UpdateProviderIntent intent;
+                intent.providerId = id;
+                intent.isEnabled = enabled;
+                m_viewModel->updateProvider(intent);
+            }
+        });
+
         connect(m_detailView, &ProviderDetailView::refreshModelsRequested, this, [this](const QString &id) {
             if (m_viewModel) m_viewModel->refreshModels(id);
         });

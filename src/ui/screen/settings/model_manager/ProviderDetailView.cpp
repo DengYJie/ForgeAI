@@ -13,7 +13,6 @@
 #include "ModelActionsSplitButton.h"
 #include "ModelTreeItemDelegate.h"
 #include "domain/model/ModelCapabilities.h"
-#include "network/QtHttpClient.h"
 #include "ui/widget/tree/AutoHeightTreeView.h"
 
 namespace ui::screen::settings::model_manager {
@@ -70,7 +69,15 @@ namespace ui::screen::settings::model_manager {
     void ProviderDetailView::setupUi() {
         m_debounceTimer.setSingleShot(true);
         connect(&m_debounceTimer, &QTimer::timeout, this, [this] {
-            if (m_hasProvider) Q_EMIT providerChanged(m_provider);
+            if (!m_hasProvider) return;
+            if (m_baseUrlDirty) {
+                emit baseUrlEditRequested(m_provider.id, m_pendingBaseUrl);
+                m_baseUrlDirty = false;
+            }
+            if (m_apiKeyDirty) {
+                emit apiKeyEditRequested(m_provider.id, m_pendingApiKey);
+                m_apiKeyDirty = false;
+            }
         });
 
         auto *rootLayout = new QVBoxLayout(this);
@@ -92,8 +99,7 @@ namespace ui::screen::settings::model_manager {
         m_enableSwitch = new fluent::basicinput::ToggleSwitch(m_headerWidget);
         connect(m_enableSwitch, &fluent::basicinput::ToggleSwitch::toggled, this, [this](bool checked) {
             if (!m_hasProvider) return;
-            m_provider.isEnabled = checked;
-            Q_EMIT providerChanged(m_provider);
+            emit enabledChangeRequested(m_provider.id, checked);
         });
         m_headerLayout->addWidget(m_enableSwitch, 0, Qt::AlignVCenter);
 
@@ -133,7 +139,8 @@ namespace ui::screen::settings::model_manager {
         m_urlEdit->setFixedHeight(controlHeight);
         connect(m_urlEdit, &fluent::textfields::LineEdit::textChanged, this, [this](const QString &text) {
             if (!m_hasProvider) return;
-            m_provider.baseUrl = text.trimmed();
+            m_pendingBaseUrl = text.trimmed();
+            m_baseUrlDirty = true;
             m_debounceTimer.start(350);
         });
 
@@ -150,7 +157,8 @@ namespace ui::screen::settings::model_manager {
         m_keyEdit->setFixedHeight(controlHeight);
         connect(m_keyEdit, &fluent::textfields::PasswordBox::textChanged, this, [this](const QString &text) {
             if (!m_hasProvider) return;
-            m_provider.apiKey = text.trimmed();
+            m_pendingApiKey = text.trimmed();
+            m_apiKeyDirty = true;
             m_debounceTimer.start(350);
         });
 
@@ -183,10 +191,10 @@ namespace ui::screen::settings::model_manager {
 
         m_actionButton = new ModelActionsSplitButton(m_scrollContent);
         connect(m_actionButton, &ModelActionsSplitButton::refreshRequested, this, [this] {
-            if (m_hasProvider) Q_EMIT refreshModelsRequested(m_provider.id);
+            if (m_hasProvider) emit refreshModelsRequested(m_provider.id);
         });
         connect(m_actionButton, &ModelActionsSplitButton::addRequested, this, [this] {
-            if (m_hasProvider) Q_EMIT addModelRequested(m_provider.id);
+            if (m_hasProvider) emit addModelRequested(m_provider.id);
         });
 
         modelHeader->addWidget(m_modelCountLabel);
@@ -308,29 +316,15 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ProviderDetailView::testConnection() {
-        if (m_provider.baseUrl.isEmpty()) {
+        QString baseUrl = m_urlEdit->text().trimmed();
+        QString apiKey = m_keyEdit->text().trimmed();
+
+        if (baseUrl.isEmpty()) {
             fluent::status_info::Toast::showToast(this, tr("API 基础地址不能为空"), fluent::status_info::Toast::Warning);
             return;
         }
-        m_testBtn->setEnabled(false);
-        m_testBtn->setText(tr("正在检测..."));
-        auto *client = new network::QtHttpClient(this);
-        network::HttpRequest request;
-        request.url = m_provider.baseUrl;
-        request.method = network::HttpMethod::Get;
-        request.timeoutMs = 8000;
-        if (!m_provider.apiKey.isEmpty()) request.headers.insert(QStringLiteral("Authorization"), QStringLiteral("Bearer ") + m_provider.apiKey);
-        auto *operation = client->send(request);
-        connect(operation, &network::HttpOperation::finished, this, [this, client, operation] {
-            m_testBtn->setEnabled(true); m_testBtn->setText(tr("检测"));
-            fluent::status_info::Toast::showToast(this, tr("检测成功"), fluent::status_info::Toast::Success);
-            operation->deleteLater(); client->deleteLater();
-        });
-        connect(operation, &network::HttpOperation::failed, this, [this, client, operation](const QString &error, int code) {
-            m_testBtn->setEnabled(true); m_testBtn->setText(tr("检测"));
-            fluent::status_info::Toast::showToast(this, tr("检测失败: %1 (代码 %2)").arg(error).arg(code), fluent::status_info::Toast::Error);
-            operation->deleteLater(); client->deleteLater();
-        });
+        
+        emit testConnectionRequested(m_provider.id, baseUrl, apiKey);
     }
 
     void ProviderDetailView::onThemeUpdated() { update(); }

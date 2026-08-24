@@ -33,10 +33,13 @@ namespace ui::screen::settings::model_manager {
         void setRefreshing(bool refreshing);
 
     Q_SIGNALS:
-        void providerChanged(const domain::model::ModelProvider &provider);
+        void baseUrlEditRequested(const QString &providerId, const QString &baseUrl);
+        void apiKeyEditRequested(const QString &providerId, const QString &apiKey);
+        void enabledChangeRequested(const QString &providerId, bool enabled);
         void providerDeleted(const QString &providerId);
         void refreshModelsRequested(const QString &providerId);
         void addModelRequested(const QString &providerId);
+        void testConnectionRequested(const QString &providerId, const QString &baseUrl, const QString &apiKey);
 
     protected:
         void resizeEvent(QResizeEvent *event) override;
@@ -52,6 +55,12 @@ namespace ui::screen::settings::model_manager {
         QList<domain::model::ResolvedModel> m_models;
         bool m_hasProvider = false;
         bool m_syncingTree = false;
+        
+        // View-local edit state for debouncing
+        QString m_pendingBaseUrl;
+        QString m_pendingApiKey;
+        bool m_baseUrlDirty = false;
+        bool m_apiKeyDirty = false;
         QTimer m_debounceTimer;
 
         QWidget *m_headerWidget = nullptr;
