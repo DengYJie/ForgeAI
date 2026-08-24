@@ -2,7 +2,7 @@
 #include <FluentQt/DialogsFlyouts.h>
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/TextFields.h>
-#include "domain/model/Model.h"
+#include "domain/model/ProviderModel.h"
 
 namespace ui::screen::settings::model_manager {
 
@@ -16,7 +16,7 @@ namespace ui::screen::settings::model_manager {
         explicit AddModelDialog(const QString &providerId, QWidget *parent = nullptr);
         ~AddModelDialog() override = default;
 
-        domain::model::Model resultModel() const;
+        domain::model::ProviderModel resultModel() const;
 
     private:
         void setupContent();

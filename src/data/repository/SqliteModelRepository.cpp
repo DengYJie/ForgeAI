@@ -217,6 +217,7 @@ namespace data::repository {
             ");"
         ), db);
 
+
         // 计算资源文件的哈希校验
         QByteArray hashContent;
         {
@@ -228,15 +229,22 @@ namespace data::repository {
         QString currentHash = QString::fromLatin1(QCryptographicHash::hash(hashContent, QCryptographicHash::Md5).toHex());
         QString storedHash = getMetadata(QStringLiteral("models_dev_hash"));
         int canonicalCount = data::sqlite::SqlHelper::scalarInt(QStringLiteral("SELECT COUNT(*) FROM canonical_models;"), {}, db);
+        int providerCount = data::sqlite::SqlHelper::scalarInt(QStringLiteral("SELECT COUNT(*) FROM model_providers;"), {}, db);
+        int bindingCount = data::sqlite::SqlHelper::scalarInt(QStringLiteral("SELECT COUNT(*) FROM provider_models;"), {}, db);
 
-        if (currentHash != storedHash || canonicalCount == 0) {
-            qDebug() << "[SqliteModelRepository] 检测到 models.dev 资源更新或数据库为空，开始全量原子同步...";
+        qInfo().noquote() << QStringLiteral("[SqliteModelRepository] 检查状态: storedHash=%1, currentHash=%2, canonical=%3, providers=%4, bindings=%5")
+            .arg(storedHash, currentHash).arg(canonicalCount).arg(providerCount).arg(bindingCount);
+
+        if (currentHash != storedHash || canonicalCount == 0 || providerCount == 0 || bindingCount == 0) {
+            qInfo() << "[SqliteModelRepository] 检测到 models.dev 资源更新或数据表不完整，开始全量原子同步...";
             if (seedFromPresetJson(apiJsonPath, modelsJsonPath, true)) {
                 setMetadata(QStringLiteral("models_dev_hash"), currentHash);
-                qDebug() << "[SqliteModelRepository] 同步完成并已更新哈希:" << currentHash;
+                qInfo() << "[SqliteModelRepository] 同步完成并已更新哈希:" << currentHash;
+            } else {
+                qWarning() << "[SqliteModelRepository] 同步失败!";
             }
         } else {
-            qDebug() << "[SqliteModelRepository] 模型库缓存有效，跳过全量写入 (Hash:" << storedHash << ")";
+            qInfo() << "[SqliteModelRepository] 模型库缓存有效，跳过全量写入 (Hash:" << storedHash << ")";
         }
 
         return true;
@@ -403,9 +411,33 @@ namespace data::repository {
             "FROM model_providers ORDER BY origin DESC, name ASC;"
         ), db);
 
+        if (!query.isActive() || query.lastError().isValid()) {
+            qWarning().noquote() << "[SqliteModelRepository] getAllProviders SQL错误:" << query.lastError().text();
+        }
+
         while (query.next()) {
             list.append(readProviderRow(query));
         }
+        qInfo().noquote() << QStringLiteral("[SqliteModelRepository] getAllProviders: 查出 %1 个服务商").arg(list.size());
+        return list;
+    }
+
+    QList<domain::model::ModelProvider> SqliteModelRepository::getEnabledProviders() {
+        QList<domain::model::ModelProvider> list;
+        auto db = getDatabase();
+        QSqlQuery query(QStringLiteral(
+            "SELECT id, name, icon, doc_url, env_var_name, type, base_url, api_key, custom_headers, proxy_url, timeout_ms, is_enabled, is_custom, origin "
+            "FROM model_providers WHERE is_enabled = 1 ORDER BY origin DESC, name ASC;"
+        ), db);
+
+        if (!query.isActive() || query.lastError().isValid()) {
+            qWarning().noquote() << "[SqliteModelRepository] getEnabledProviders SQL错误:" << query.lastError().text();
+        }
+
+        while (query.next()) {
+            list.append(readProviderRow(query));
+        }
+        qInfo().noquote() << QStringLiteral("[SqliteModelRepository] getEnabledProviders: 查出 %1 个已启用服务商").arg(list.size());
         return list;
     }
 
@@ -678,26 +710,6 @@ namespace data::repository {
                 rm.canonical = readCanonicalModelRow(query, 31);
             }
             return rm;
-        }
-        return std::nullopt;
-    }
-
-    QList<domain::model::Model> SqliteModelRepository::getEnabledModels() {
-        QList<domain::model::Model> result;
-        auto resolvedList = getEnabledResolvedModels();
-        result.reserve(resolvedList.size());
-        for (const auto &rm : resolvedList) {
-            result.append(domain::model::Model::fromResolved(rm));
-        }
-        return result;
-    }
-
-    std::optional<domain::model::Model> SqliteModelRepository::getModel(const QString &modelId) {
-        auto allResolved = getAllResolvedModels();
-        for (const auto &rm : allResolved) {
-            if (rm.requestModelId() == modelId) {
-                return domain::model::Model::fromResolved(rm);
-            }
         }
         return std::nullopt;
     }

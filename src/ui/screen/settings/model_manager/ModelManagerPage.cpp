@@ -55,6 +55,6 @@ namespace ui::screen::settings::model_manager {
 
     void ModelManagerPage::onAddModel(const QString &providerId) {
         AddModelDialog dialog(providerId, this);
-        if (dialog.exec() == QDialog::Accepted && m_viewModel) m_viewModel->addModel(providerId, dialog.resultModel());
+        if (dialog.exec() == QDialog::Accepted && m_viewModel) m_viewModel->addModel(dialog.resultModel());
     }
 } // namespace ui::screen::settings::model_manager

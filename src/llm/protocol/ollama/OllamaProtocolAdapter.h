@@ -24,7 +24,7 @@ namespace llm::protocol::ollama {
         network::HttpRequest buildListModelsRequest(
             const domain::model::ModelProvider &provider) const override;
 
-        QList<domain::model::Model> parseListModelsResponse(
+        QList<domain::model::ProviderModel> parseListModelsResponse(
             const QByteArray &responseBody,
             const QString &providerId) const override;
     };

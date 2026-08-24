@@ -3,7 +3,7 @@
 #include "ui/base/BaseViewModel.h"
 #include "domain/model/ModelProvider.h"
 #include "domain/model/ResolvedModel.h"
-#include "domain/model/Model.h"
+#include "domain/model/ProviderModel.h"
 #include <QString>
 #include <QList>
 #include <optional>
@@ -56,7 +56,7 @@ namespace ui::screen::settings::model_manager {
         void deleteProvider(const QString &providerId);
         void refreshModels(const QString &providerId);
         void addProvider(const domain::model::ModelProvider &provider);
-        void addModel(const QString &providerId, const domain::model::Model &model);
+        void addModel(const domain::model::ProviderModel &binding);
 
     Q_SIGNALS:
         void stateChanged(const ui::screen::settings::model_manager::ModelManagerState &state);

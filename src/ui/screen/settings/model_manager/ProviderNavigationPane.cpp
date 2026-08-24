@@ -5,6 +5,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QVBoxLayout>
+#include <QDebug>
 
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/Collections.h>
@@ -117,6 +118,7 @@ namespace ui::screen::settings::model_manager {
     void ProviderNavigationPane::setProviders(const QList<domain::model::ModelProvider>& providers) {
         if (!m_listModel) return;
 
+        qInfo().noquote() << QStringLiteral("[ProviderNavigationPane] setProviders: 传入 %1 个服务商").arg(providers.size());
         m_listModel->setProviders(providers);
 
         if (!m_currentSelectedId.isEmpty()) {

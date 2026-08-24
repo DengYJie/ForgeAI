@@ -157,22 +157,11 @@ namespace core::logging {
             obj[QStringLiteral("name")] = p.name;
             obj[QStringLiteral("type")] = static_cast<int>(p.type);
             obj[QStringLiteral("isEnabled")] = p.isEnabled;
-            obj[QStringLiteral("modelCount")] = p.models.size();
+            obj[QStringLiteral("isCustom")] = p.isCustom;
+            obj[QStringLiteral("origin")] = p.origin == domain::model::DataOrigin::User ? QStringLiteral("User") : QStringLiteral("BuiltIn");
             
             // 安全过滤：Base URL 移除潜在敏感 Query 参数
             obj[QStringLiteral("baseUrl")] = SensitiveDataFilter::sanitizeUrl(p.baseUrl);
-
-            QJsonArray modelsArr;
-            for (const auto &m : p.models) {
-                QJsonObject mObj;
-                mObj[QStringLiteral("id")] = m.id;
-                mObj[QStringLiteral("displayName")] = m.displayName;
-                mObj[QStringLiteral("isEnabled")] = m.isEnabled;
-                mObj[QStringLiteral("contextLimit")] = m.limits.context;
-                mObj[QStringLiteral("maxOutputLimit")] = m.limits.maxOutput;
-                modelsArr.append(mObj);
-            }
-            obj[QStringLiteral("models")] = modelsArr;
 
             provArray.append(obj);
         }

@@ -23,13 +23,14 @@ namespace services::model {
         ~ModelService() override = default;
 
         QList<domain::model::ModelProvider> getActiveProviders() const override;
-        QList<domain::model::Model> getEnabledModels() const override;
+        QList<domain::model::ModelProvider> getAllProviders() const override;
         std::optional<domain::model::ModelProvider> getProvider(const QString &providerId) const override;
-        std::optional<std::pair<domain::model::Model, domain::model::ModelProvider>> resolveModel(const QString &modelId) const override;
         void saveProvider(const domain::model::ModelProvider &provider) override;
         void deleteProvider(const QString &providerId) override;
 
+        QList<domain::model::ResolvedModel> getEnabledResolvedModels() const override;
         QList<domain::model::ResolvedModel> getModelsForProvider(const QString &providerId) const override;
+        std::optional<domain::model::ResolvedModel> resolveModel(const QString &providerId, const QString &remoteModelId) const override;
         void saveProviderModel(const domain::model::ProviderModel &binding) override;
         void deleteProviderModel(const QString &providerId, const QString &remoteModelId) override;
 

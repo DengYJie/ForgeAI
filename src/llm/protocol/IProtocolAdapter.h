@@ -55,7 +55,7 @@ namespace llm::protocol {
         /**
          * @brief 解析远程模型列表响应
          */
-        virtual QList<domain::model::Model> parseListModelsResponse(
+        virtual QList<domain::model::ProviderModel> parseListModelsResponse(
             const QByteArray &responseBody,
             const QString &providerId) const = 0;
     };

@@ -3,8 +3,6 @@
 #include <QObject>
 #include <QList>
 #include <optional>
-#include <utility>
-#include "domain/model/Model.h"
 #include "domain/model/ModelProvider.h"
 #include "domain/model/ProviderModel.h"
 #include "domain/model/ResolvedModel.h"
@@ -21,13 +19,14 @@ namespace domain::service {
         ~IModelService() override = default;
 
         virtual QList<domain::model::ModelProvider> getActiveProviders() const = 0;
-        virtual QList<domain::model::Model> getEnabledModels() const = 0;
+        virtual QList<domain::model::ModelProvider> getAllProviders() const = 0;
         virtual std::optional<domain::model::ModelProvider> getProvider(const QString &providerId) const = 0;
-        virtual std::optional<std::pair<domain::model::Model, domain::model::ModelProvider>> resolveModel(const QString &modelId) const = 0;
         virtual void saveProvider(const domain::model::ModelProvider &provider) = 0;
         virtual void deleteProvider(const QString &providerId) = 0;
 
+        virtual QList<domain::model::ResolvedModel> getEnabledResolvedModels() const = 0;
         virtual QList<domain::model::ResolvedModel> getModelsForProvider(const QString &providerId) const = 0;
+        virtual std::optional<domain::model::ResolvedModel> resolveModel(const QString &providerId, const QString &remoteModelId) const = 0;
         virtual void saveProviderModel(const domain::model::ProviderModel &binding) = 0;
         virtual void deleteProviderModel(const QString &providerId, const QString &remoteModelId) = 0;
 

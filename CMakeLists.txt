@@ -330,7 +330,6 @@ set(PROJECT_SOURCES
         src/domain/model/CanonicalModel.h
         src/domain/model/ProviderModel.h
         src/domain/model/ResolvedModel.h
-        src/domain/model/Model.h
         src/domain/model/ModelProvider.h
         src/domain/llm/ChatError.h
         src/domain/llm/ChatMessage.h

@@ -19,16 +19,12 @@ namespace services::model {
         return m_registry ? m_registry->getActiveProviders() : QList<domain::model::ModelProvider>{};
     }
 
-    QList<domain::model::Model> ModelService::getEnabledModels() const {
-        return m_registry ? m_registry->getEnabledModels() : QList<domain::model::Model>{};
+    QList<domain::model::ModelProvider> ModelService::getAllProviders() const {
+        return m_registry ? m_registry->getAllProviders() : QList<domain::model::ModelProvider>{};
     }
 
     std::optional<domain::model::ModelProvider> ModelService::getProvider(const QString &providerId) const {
         return m_registry ? m_registry->getProvider(providerId) : std::nullopt;
-    }
-
-    std::optional<std::pair<domain::model::Model, domain::model::ModelProvider>> ModelService::resolveModel(const QString &modelId) const {
-        return m_registry ? m_registry->resolve(modelId) : std::nullopt;
     }
 
     void ModelService::saveProvider(const domain::model::ModelProvider &provider) {
@@ -43,8 +39,16 @@ namespace services::model {
         }
     }
 
+    QList<domain::model::ResolvedModel> ModelService::getEnabledResolvedModels() const {
+        return m_registry ? m_registry->getEnabledResolvedModels() : QList<domain::model::ResolvedModel>{};
+    }
+
     QList<domain::model::ResolvedModel> ModelService::getModelsForProvider(const QString &providerId) const {
         return m_registry ? m_registry->getModelsForProvider(providerId) : QList<domain::model::ResolvedModel>{};
+    }
+
+    std::optional<domain::model::ResolvedModel> ModelService::resolveModel(const QString &providerId, const QString &remoteModelId) const {
+        return m_registry ? m_registry->resolveModel(providerId, remoteModelId) : std::nullopt;
     }
 
     void ModelService::saveProviderModel(const domain::model::ProviderModel &binding) {

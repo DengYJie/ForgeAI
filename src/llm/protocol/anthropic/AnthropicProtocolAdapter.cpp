@@ -229,11 +229,11 @@ namespace llm::protocol::anthropic {
         return netReq;
     }
 
-    QList<domain::model::Model> AnthropicProtocolAdapter::parseListModelsResponse(
+    QList<domain::model::ProviderModel> AnthropicProtocolAdapter::parseListModelsResponse(
         const QByteArray &responseBody,
         const QString &providerId) const {
         
-        QList<domain::model::Model> models;
+        QList<domain::model::ProviderModel> models;
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
@@ -248,11 +248,12 @@ namespace llm::protocol::anthropic {
             QString id = mObj.value("id").toString();
             if (id.isEmpty()) continue;
 
-            domain::model::Model model;
-            model.id = id;
-            model.providerId = providerId;
-            model.displayName = mObj.value("display_name").toString(id);
-            models.append(model);
+            domain::model::ProviderModel pm;
+            pm.remoteModelId = id;
+            pm.providerId = providerId;
+            pm.isEnabled = true;
+            pm.origin = domain::model::DataOrigin::User;
+            models.append(pm);
         }
 
         return models;

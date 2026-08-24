@@ -13,6 +13,9 @@ namespace core::model {
 
         refreshCache();
 
+        qInfo().noquote() << QStringLiteral("[ModelRegistry] initialize 完成: 活跃服务商=%1, 启用模型=%2")
+            .arg(m_providers.size()).arg(m_enabledResolvedModels.size());
+
         emit providersChanged();
         emit modelsChanged();
         return true;
@@ -20,23 +23,15 @@ namespace core::model {
 
     void ModelRegistry::refreshCache() {
         m_providers.clear();
-        m_canonicalModels.clear();
-        m_providerModels.clear();
         m_enabledResolvedModels.clear();
 
         if (!m_repository) {
             return;
         }
 
-        auto providers = m_repository->getAllProviders();
-        for (const auto &p : providers) {
+        auto enabledProviders = m_repository->getEnabledProviders();
+        for (const auto &p : enabledProviders) {
             m_providers.insert(p.id, p);
-            m_providerModels.insert(p.id, m_repository->getProviderModels(p.id));
-        }
-
-        auto canonicals = m_repository->getAllCanonicalModels();
-        for (const auto &cm : canonicals) {
-            m_canonicalModels.insert(cm.id, cm);
         }
 
         m_enabledResolvedModels = m_repository->getEnabledResolvedModels();
@@ -46,10 +41,22 @@ namespace core::model {
         return m_providers.values();
     }
 
+    QList<domain::model::ModelProvider> ModelRegistry::getAllProviders() const {
+        if (m_repository) {
+            auto all = m_repository->getAllProviders();
+            qInfo().noquote() << QStringLiteral("[ModelRegistry] getAllProviders (穿透仓储): %1 个").arg(all.size());
+            return all;
+        }
+        return m_providers.values();
+    }
+
     std::optional<domain::model::ModelProvider> ModelRegistry::getProvider(const QString &providerId) const {
         auto it = m_providers.find(providerId);
         if (it != m_providers.end()) {
             return it.value();
+        }
+        if (m_repository) {
+            return m_repository->getProvider(providerId);
         }
         return std::nullopt;
     }
@@ -73,7 +80,6 @@ namespace core::model {
         }
 
         m_providers.remove(providerId);
-        m_providerModels.remove(providerId);
 
         if (m_repository) {
             m_repository->deleteProvider(providerId);
@@ -85,7 +91,10 @@ namespace core::model {
     }
 
     QList<domain::model::ProviderModel> ModelRegistry::getProviderModels(const QString &providerId) const {
-        return m_providerModels.value(providerId);
+        if (m_repository) {
+            return m_repository->getProviderModels(providerId);
+        }
+        return {};
     }
 
     void ModelRegistry::saveProviderModel(const domain::model::ProviderModel &binding) {
@@ -118,34 +127,13 @@ namespace core::model {
     }
 
     std::optional<domain::model::ResolvedModel> ModelRegistry::resolveModel(const QString &providerId, const QString &remoteModelId) const {
+        for (const auto &rm : m_enabledResolvedModels) {
+            if (rm.provider.id == providerId && rm.requestModelId() == remoteModelId) {
+                return rm;
+            }
+        }
         if (m_repository) {
             return m_repository->resolveModel(providerId, remoteModelId);
-        }
-        return std::nullopt;
-    }
-
-    QList<domain::model::Model> ModelRegistry::getEnabledModels() const {
-        QList<domain::model::Model> list;
-        list.reserve(m_enabledResolvedModels.size());
-        for (const auto &rm : m_enabledResolvedModels) {
-            list.append(domain::model::Model::fromResolved(rm));
-        }
-        return list;
-    }
-
-    std::optional<std::pair<domain::model::Model, domain::model::ModelProvider>> ModelRegistry::resolve(const QString &modelId) const {
-        for (const auto &rm : m_enabledResolvedModels) {
-            if (rm.requestModelId() == modelId) {
-                return std::make_pair(domain::model::Model::fromResolved(rm), rm.provider);
-            }
-        }
-        if (m_repository) {
-            auto all = m_repository->getAllResolvedModels();
-            for (const auto &rm : all) {
-                if (rm.requestModelId() == modelId) {
-                    return std::make_pair(domain::model::Model::fromResolved(rm), rm.provider);
-                }
-            }
         }
         return std::nullopt;
     }
@@ -159,25 +147,20 @@ namespace core::model {
         return false;
     }
 
-    QList<domain::model::Model> ModelRegistry::hydrateDiscoveredModels(
+    QList<domain::model::ProviderModel> ModelRegistry::hydrateDiscoveredModels(
         const QString &providerId,
-        const QList<domain::model::Model> &discoveredModels) const {
-        QList<domain::model::Model> result;
+        const QList<domain::model::ProviderModel> &discoveredModels) const {
+        QList<domain::model::ProviderModel> result;
         for (const auto &raw : discoveredModels) {
-            domain::model::Model m = raw;
-            m.providerId = providerId;
-            if (m_canonicalModels.contains(raw.id)) {
-                const auto &cm = m_canonicalModels.value(raw.id);
-                m.displayName = cm.name;
-                m.description = cm.description;
-                m.family = cm.family;
-                m.limits = cm.limits;
-                m.capabilities = cm.capabilities;
-                m.defaultParams = cm.defaultParams;
-                m.openWeights = cm.openWeights;
-                m.knowledgeCutoff = cm.knowledgeCutoff;
+            domain::model::ProviderModel pm = raw;
+            pm.providerId = providerId;
+            if (m_repository) {
+                auto optCm = m_repository->getCanonicalModel(raw.remoteModelId);
+                if (optCm.has_value()) {
+                    pm.canonicalModelId = optCm->id;
+                }
             }
-            result.append(m);
+            result.append(pm);
         }
         return result;
     }

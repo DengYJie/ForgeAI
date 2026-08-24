@@ -174,11 +174,11 @@ namespace llm::protocol::ollama {
         return netReq;
     }
 
-    QList<domain::model::Model> OllamaProtocolAdapter::parseListModelsResponse(
+    QList<domain::model::ProviderModel> OllamaProtocolAdapter::parseListModelsResponse(
         const QByteArray &responseBody,
         const QString &providerId) const {
         
-        QList<domain::model::Model> models;
+        QList<domain::model::ProviderModel> models;
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
@@ -196,12 +196,12 @@ namespace llm::protocol::ollama {
             }
             if (name.isEmpty()) continue;
 
-            domain::model::Model model;
-            model.id = name;
-            model.providerId = providerId;
-            model.displayName = name;
-            model.openWeights = true;
-            models.append(model);
+            domain::model::ProviderModel pm;
+            pm.remoteModelId = name;
+            pm.providerId = providerId;
+            pm.isEnabled = true;
+            pm.origin = domain::model::DataOrigin::User;
+            models.append(pm);
         }
 
         return models;

@@ -240,11 +240,11 @@ namespace llm::protocol::gemini {
         return netReq;
     }
 
-    QList<domain::model::Model> GeminiProtocolAdapter::parseListModelsResponse(
+    QList<domain::model::ProviderModel> GeminiProtocolAdapter::parseListModelsResponse(
         const QByteArray &responseBody,
         const QString &providerId) const {
         
-        QList<domain::model::Model> models;
+        QList<domain::model::ProviderModel> models;
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
@@ -262,12 +262,12 @@ namespace llm::protocol::gemini {
             // 去除 "models/" 前缀
             QString id = rawName.startsWith("models/") ? rawName.mid(7) : rawName;
             
-            domain::model::Model model;
-            model.id = id;
-            model.providerId = providerId;
-            model.displayName = mObj.value("displayName").toString(id);
-            model.description = mObj.value("description").toString();
-            models.append(model);
+            domain::model::ProviderModel pm;
+            pm.remoteModelId = id;
+            pm.providerId = providerId;
+            pm.isEnabled = true;
+            pm.origin = domain::model::DataOrigin::User;
+            models.append(pm);
         }
 
         return models;

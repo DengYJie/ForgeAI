@@ -63,7 +63,7 @@ namespace ui::screen::settings::model_manager {
         };
     } // namespace
 
-    ModelItemCard::ModelItemCard(const domain::model::Model &model, QWidget *parent)
+    ModelItemCard::ModelItemCard(const domain::model::ResolvedModel &model, QWidget *parent)
         : QWidget(parent), m_model(model) {
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         setupUi();
@@ -74,16 +74,15 @@ namespace ui::screen::settings::model_manager {
         rootLayout->setContentsMargins(14, 10, 14, 10);
         rootLayout->setSpacing(6);
 
-        // 顶部行：名称、ID 与右侧开关
         auto *topRow = new QHBoxLayout();
         topRow->setContentsMargins(0, 0, 0, 0);
         topRow->setSpacing(8);
 
-        auto *nameLabel = new fluent::textfields::Label(m_model.displayName, this);
+        auto *nameLabel = new fluent::textfields::Label(m_model.displayName(), this);
         nameLabel->setFluentTypography(Typography::FontRole::BodyStrong);
         nameLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
 
-        auto *idLabel = new fluent::textfields::Label(QStringLiteral("(%1)").arg(m_model.id), this);
+        auto *idLabel = new fluent::textfields::Label(QStringLiteral("(%1)").arg(m_model.requestModelId()), this);
         idLabel->setFluentTypography(Typography::FontRole::Caption);
         idLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
 
@@ -91,27 +90,26 @@ namespace ui::screen::settings::model_manager {
         topRow->addWidget(idLabel);
         topRow->addStretch(1);
 
-        if (m_model.isCustom) {
+        if (m_model.isCustom()) {
             m_deleteBtn = new fluent::basicinput::Button(this);
             m_deleteBtn->setText(tr("删除"));
             m_deleteBtn->setFixedHeight(26);
             connect(m_deleteBtn, &fluent::basicinput::Button::clicked, this, [this]() {
-                Q_EMIT modelDeleted(m_model.id);
+                Q_EMIT modelDeleted(m_model.requestModelId());
             });
             topRow->addWidget(m_deleteBtn);
         }
 
         m_toggleSwitch = new fluent::basicinput::ToggleSwitch(this);
-        m_toggleSwitch->setIsOn(m_model.isEnabled);
+        m_toggleSwitch->setIsOn(m_model.isEnabled());
         connect(m_toggleSwitch, &fluent::basicinput::ToggleSwitch::toggled, this, [this](bool checked) {
-            m_model.isEnabled = checked;
-            Q_EMIT modelToggled(m_model.id, checked);
+            m_model.binding.isEnabled = checked;
+            Q_EMIT modelToggled(m_model.requestModelId(), checked);
         });
         topRow->addWidget(m_toggleSwitch);
 
         rootLayout->addLayout(topRow);
 
-        // 底部行：能力 Tags
         m_tagsContainer = new QWidget(this);
         auto *tagsLayout = new QHBoxLayout(m_tagsContainer);
         tagsLayout->setContentsMargins(0, 0, 0, 0);
@@ -126,7 +124,6 @@ namespace ui::screen::settings::model_manager {
         auto *tagsLayout = qobject_cast<QHBoxLayout *>(m_tagsContainer->layout());
         if (!tagsLayout) return;
 
-        // 清空现有 tag
         while (QLayoutItem *item = tagsLayout->takeAt(0)) {
             if (item->widget()) {
                 item->widget()->deleteLater();
@@ -134,47 +131,47 @@ namespace ui::screen::settings::model_manager {
             delete item;
         }
 
-        // 1. 上下文
-        if (m_model.limits.context > 0) {
-            tagsLayout->addWidget(new CapabilityTag(formatContextLimit(m_model.limits.context), m_tagsContainer));
+        auto limits = m_model.effectiveLimits();
+        if (limits.context > 0) {
+            tagsLayout->addWidget(new CapabilityTag(formatContextLimit(limits.context), m_tagsContainer));
         }
 
-        // 2. 能力标志
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::Thinking)) {
+        auto caps = m_model.effectiveCapabilities();
+        if (caps.testFlag(domain::model::ModelCapability::Thinking)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("Thinking"), m_tagsContainer));
         }
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::ToolCalling)) {
+        if (caps.testFlag(domain::model::ModelCapability::ToolCalling)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("Tools"), m_tagsContainer));
         }
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::Vision)) {
+        if (caps.testFlag(domain::model::ModelCapability::Vision)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("Vision"), m_tagsContainer));
         }
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::Audio)) {
+        if (caps.testFlag(domain::model::ModelCapability::Audio)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("Audio"), m_tagsContainer));
         }
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::Video)) {
+        if (caps.testFlag(domain::model::ModelCapability::Video)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("Video"), m_tagsContainer));
         }
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::Pdf)) {
+        if (caps.testFlag(domain::model::ModelCapability::Pdf)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("PDF"), m_tagsContainer));
         }
-        if (m_model.capabilities.testFlag(domain::model::ModelCapability::StructuredOutputs)) {
+        if (caps.testFlag(domain::model::ModelCapability::StructuredOutputs)) {
             tagsLayout->addWidget(new CapabilityTag(QStringLiteral("Structured"), m_tagsContainer));
         }
 
-        // 3. 计费
-        if (m_model.pricing.inputPrice > 0.0 || m_model.pricing.outputPrice > 0.0) {
-            QString priceStr = QStringLiteral("$%1 / $%2").arg(m_model.pricing.inputPrice).arg(m_model.pricing.outputPrice);
+        auto pricing = m_model.pricing();
+        if (pricing.inputPrice > 0.0 || pricing.outputPrice > 0.0) {
+            QString priceStr = QStringLiteral("$%1 / $%2").arg(pricing.inputPrice).arg(pricing.outputPrice);
             tagsLayout->addWidget(new CapabilityTag(priceStr, m_tagsContainer));
         }
 
         tagsLayout->addStretch(1);
     }
 
-    void ModelItemCard::setModel(const domain::model::Model &model) {
+    void ModelItemCard::setModel(const domain::model::ResolvedModel &model) {
         m_model = model;
         if (m_toggleSwitch) {
-            m_toggleSwitch->setIsOn(m_model.isEnabled);
+            m_toggleSwitch->setIsOn(m_model.isEnabled());
         }
         updateTagsLayout();
         update();

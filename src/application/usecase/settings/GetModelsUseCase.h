@@ -2,7 +2,6 @@
 
 #include <QObject>
 #include <QList>
-#include "domain/model/Model.h"
 #include "domain/model/ModelProvider.h"
 #include "domain/model/ResolvedModel.h"
 
@@ -26,8 +25,9 @@ namespace application::usecase::settings {
         ~GetModelsUseCase() override = default;
 
         QList<domain::model::ModelProvider> getActiveProviders() const;
+        QList<domain::model::ModelProvider> getAllProviders() const;
         QList<domain::model::ResolvedModel> getModelsForProvider(const QString &providerId) const;
-        QList<domain::model::Model> getEnabledModels() const;
+        QList<domain::model::ResolvedModel> getEnabledResolvedModels() const;
 
     Q_SIGNALS:
         void modelsChanged();

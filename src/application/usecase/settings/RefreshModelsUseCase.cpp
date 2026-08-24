@@ -53,18 +53,16 @@ namespace application::usecase::settings {
         return m_currentOp != nullptr;
     }
 
-    void RefreshModelsUseCase::onModelsFetched(const QList<domain::model::Model> &models) {
+    void RefreshModelsUseCase::onModelsFetched(const QList<domain::model::ProviderModel> &models) {
         if (m_currentProviderId.isEmpty()) return;
 
         auto optProvider = m_registry->getProvider(m_currentProviderId);
         if (optProvider.has_value()) {
-            auto provider = optProvider.value();
-            // 优先与本地注册表元数据模板 (models.json) 与已有配置匹配补全
-            auto hydratedModels = m_registry->hydrateDiscoveredModels(m_currentProviderId, models);
-            provider.models = hydratedModels;
-            m_registry->saveProvider(provider);
+            for (const auto &binding : models) {
+                m_registry->saveProviderModel(binding);
+            }
 
-            emit discoveryFinished(m_currentProviderId, hydratedModels.size());
+            emit discoveryFinished(m_currentProviderId, models.size());
         } else {
             emit discoveryFailed(m_currentProviderId, "Provider removed during discovery.");
         }

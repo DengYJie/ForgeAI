@@ -10,7 +10,6 @@
 #include "domain/model/ModelProvider.h"
 #include "domain/model/ProviderModel.h"
 #include "domain/model/ResolvedModel.h"
-#include "domain/model/Model.h"
 #include "domain/repository/IModelRepository.h"
 
 namespace core::model {
@@ -33,29 +32,24 @@ namespace core::model {
             const QString &modelsJsonPath = QStringLiteral(":/config/models.json")
         );
 
-        // --- Providers ---
         QList<domain::model::ModelProvider> getActiveProviders() const;
+        QList<domain::model::ModelProvider> getAllProviders() const;
         std::optional<domain::model::ModelProvider> getProvider(const QString &providerId) const;
         void saveProvider(const domain::model::ModelProvider &provider);
         void deleteProvider(const QString &providerId);
 
-        // --- Provider Models ---
         QList<domain::model::ProviderModel> getProviderModels(const QString &providerId) const;
         void saveProviderModel(const domain::model::ProviderModel &binding);
         void deleteProviderModel(const QString &providerId, const QString &remoteModelId);
 
-        // --- Resolved Models ---
         QList<domain::model::ResolvedModel> getModelsForProvider(const QString &providerId) const;
         QList<domain::model::ResolvedModel> getEnabledResolvedModels() const;
         std::optional<domain::model::ResolvedModel> resolveModel(const QString &providerId, const QString &remoteModelId) const;
 
-        // --- 兼容层 ---
-        QList<domain::model::Model> getEnabledModels() const;
-        std::optional<std::pair<domain::model::Model, domain::model::ModelProvider>> resolve(const QString &modelId) const;
         bool hasCapability(const QString &modelId, domain::model::ModelCapability cap) const;
-        QList<domain::model::Model> hydrateDiscoveredModels(
+        QList<domain::model::ProviderModel> hydrateDiscoveredModels(
             const QString &providerId,
-            const QList<domain::model::Model> &discoveredModels) const;
+            const QList<domain::model::ProviderModel> &discoveredModels) const;
 
         /**
          * @brief 探测并注册本地 Ollama 模型
@@ -72,8 +66,6 @@ namespace core::model {
         std::shared_ptr<domain::repository::IModelRepository> m_repository;
 
         QHash<QString, domain::model::ModelProvider> m_providers;
-        QHash<QString, domain::model::CanonicalModel> m_canonicalModels;
-        QHash<QString, QList<domain::model::ProviderModel>> m_providerModels;
         QList<domain::model::ResolvedModel> m_enabledResolvedModels;
     };
 

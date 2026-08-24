@@ -1,6 +1,7 @@
 #include "ModelDiscoveryService.h"
 #include "network/HttpOperation.h"
 #include "protocol/IProtocolAdapter.h"
+#include "domain/model/ProviderModel.h"
 
 namespace llm {
 

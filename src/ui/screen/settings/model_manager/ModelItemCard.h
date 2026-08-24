@@ -1,7 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <FluentQt/FluentQt.h>
-#include "domain/model/Model.h"
+#include "domain/model/ResolvedModel.h"
 
 namespace fluent::basicinput {
     class ToggleSwitch;
@@ -18,11 +18,11 @@ namespace ui::screen::settings::model_manager {
         Q_OBJECT
 
     public:
-        explicit ModelItemCard(const domain::model::Model &model, QWidget *parent = nullptr);
+        explicit ModelItemCard(const domain::model::ResolvedModel &model, QWidget *parent = nullptr);
         ~ModelItemCard() override = default;
 
-        const domain::model::Model &model() const { return m_model; }
-        void setModel(const domain::model::Model &model);
+        const domain::model::ResolvedModel &model() const { return m_model; }
+        void setModel(const domain::model::ResolvedModel &model);
 
     Q_SIGNALS:
         void modelToggled(const QString &modelId, bool enabled);
@@ -38,7 +38,7 @@ namespace ui::screen::settings::model_manager {
         void setupUi();
         void updateTagsLayout();
 
-        domain::model::Model m_model;
+        domain::model::ResolvedModel m_model;
         bool m_isHovered = false;
 
         fluent::basicinput::ToggleSwitch *m_toggleSwitch = nullptr;

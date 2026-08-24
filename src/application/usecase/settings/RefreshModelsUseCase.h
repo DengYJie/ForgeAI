@@ -49,7 +49,7 @@ namespace application::usecase::settings {
         void discoveryFailed(const QString &providerId, const QString &errorMessage);
 
     private Q_SLOTS:
-        void onModelsFetched(const QList<domain::model::Model> &models);
+        void onModelsFetched(const QList<domain::model::ProviderModel> &models);
         void onFetchFailed(const QString &errorMessage);
 
     private:

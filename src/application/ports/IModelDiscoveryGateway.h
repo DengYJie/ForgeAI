@@ -2,7 +2,7 @@
 #include <QObject>
 #include <QList>
 #include <QString>
-#include "domain/model/Model.h"
+#include "domain/model/ProviderModel.h"
 #include "domain/model/ModelProvider.h"
 
 namespace application::ports {
@@ -19,7 +19,7 @@ namespace application::ports {
         virtual void cancel() = 0;
 
     Q_SIGNALS:
-        void finished(const QList<domain::model::Model> &models);
+        void finished(const QList<domain::model::ProviderModel> &models);
         void failed(const QString &errorMessage);
     };
 

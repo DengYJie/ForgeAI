@@ -1,9 +1,9 @@
 #include "ModelManagerViewModel.h"
-
 #include "application/usecase/settings/GetModelsUseCase.h"
 #include "application/usecase/settings/SaveProviderUseCase.h"
 #include "application/usecase/settings/DeleteProviderUseCase.h"
 #include "application/usecase/settings/RefreshModelsUseCase.h"
+#include <QDebug>
 
 namespace ui::screen::settings::model_manager {
 
@@ -57,10 +57,13 @@ namespace ui::screen::settings::model_manager {
     void ModelManagerViewModel::loadProviders() {
         if (!m_getModelsUseCase) return;
 
-        const auto providers = m_getModelsUseCase->getActiveProviders();
+        const auto providers = m_getModelsUseCase->getAllProviders();
+        qInfo().noquote() << QStringLiteral("[ModelManagerViewModel] loadProviders: 从用例获取到 %1 个服务商").arg(providers.size());
         updateState([this, &providers](ModelManagerState &s) {
             s.providers = providers;
             applyProviderSelection(s, s.selectedProviderId);
+            qInfo().noquote() << QStringLiteral("[ModelManagerViewModel] loadProviders 完成: 状态包含 %1 个服务商, 当前选中=%2")
+                .arg(s.providers.size()).arg(s.selectedProviderId);
         });
     }
 
@@ -144,9 +147,8 @@ namespace ui::screen::settings::model_manager {
         });
     }
 
-    void ModelManagerViewModel::addModel(const QString &providerId, const domain::model::Model &model) {
-        Q_UNUSED(providerId)
-        Q_UNUSED(model)
+    void ModelManagerViewModel::addModel(const domain::model::ProviderModel &binding) {
+        Q_UNUSED(binding)
         // 预留自定义模型添加
     }
 

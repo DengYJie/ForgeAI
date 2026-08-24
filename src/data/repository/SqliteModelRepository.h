@@ -27,30 +27,23 @@ namespace data::repository {
             const QString &modelsJsonPath = QStringLiteral(":/config/models.json")
         );
 
-        // --- Providers ---
         QList<domain::model::ModelProvider> getAllProviders() override;
+        QList<domain::model::ModelProvider> getEnabledProviders() override;
         std::optional<domain::model::ModelProvider> getProvider(const QString &providerId) override;
         void saveProvider(const domain::model::ModelProvider &provider) override;
         void deleteProvider(const QString &providerId) override;
 
-        // --- Canonical Models ---
         std::optional<domain::model::CanonicalModel> getCanonicalModel(const QString &modelId) override;
         QList<domain::model::CanonicalModel> getAllCanonicalModels() override;
 
-        // --- Provider Models (挂载与定制) ---
         QList<domain::model::ProviderModel> getProviderModels(const QString &providerId) override;
         void saveProviderModel(const domain::model::ProviderModel &binding) override;
         void deleteProviderModel(const QString &providerId, const QString &remoteModelId) override;
 
-        // --- Resolved Models (运行时组合投影) ---
         QList<domain::model::ResolvedModel> getResolvedModelsForProvider(const QString &providerId) override;
         QList<domain::model::ResolvedModel> getAllResolvedModels() override;
         QList<domain::model::ResolvedModel> getEnabledResolvedModels() override;
         std::optional<domain::model::ResolvedModel> resolveModel(const QString &providerId, const QString &remoteModelId) override;
-
-        // --- 兼容层 ---
-        QList<domain::model::Model> getEnabledModels() override;
-        std::optional<domain::model::Model> getModel(const QString &modelId) override;
 
         /**
          * @brief 从 api.json 和 models.json 批量更新/播种 models.dev 数据

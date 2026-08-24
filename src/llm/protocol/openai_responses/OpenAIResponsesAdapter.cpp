@@ -198,11 +198,11 @@ namespace llm::protocol::openai_responses {
         return netReq;
     }
 
-    QList<domain::model::Model> OpenAIResponsesAdapter::parseListModelsResponse(
+    QList<domain::model::ProviderModel> OpenAIResponsesAdapter::parseListModelsResponse(
         const QByteArray &responseBody,
         const QString &providerId) const {
         
-        QList<domain::model::Model> models;
+        QList<domain::model::ProviderModel> models;
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(responseBody, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
@@ -217,11 +217,12 @@ namespace llm::protocol::openai_responses {
             QString id = mObj.value("id").toString();
             if (id.isEmpty()) continue;
 
-            domain::model::Model model;
-            model.id = id;
-            model.providerId = providerId;
-            model.displayName = id;
-            models.append(model);
+            domain::model::ProviderModel pm;
+            pm.remoteModelId = id;
+            pm.providerId = providerId;
+            pm.isEnabled = true;
+            pm.origin = domain::model::DataOrigin::User;
+            models.append(pm);
         }
 
         return models;

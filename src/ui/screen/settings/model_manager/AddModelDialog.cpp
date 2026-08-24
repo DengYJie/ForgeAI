@@ -73,20 +73,22 @@ namespace ui::screen::settings::model_manager {
         setContent(contentWidget);
     }
 
-    domain::model::Model AddModelDialog::resultModel() const {
-        domain::model::Model model;
-        model.id = m_idEdit ? m_idEdit->text().trimmed() : QString();
-        model.providerId = m_providerId;
-        model.displayName = m_nameEdit ? m_nameEdit->text().trimmed() : QString();
-        if (model.displayName.isEmpty()) {
-            model.displayName = model.id;
-        }
+    domain::model::ProviderModel AddModelDialog::resultModel() const {
+        domain::model::ProviderModel binding;
+        binding.providerId = m_providerId;
+        binding.remoteModelId = m_idEdit ? m_idEdit->text().trimmed() : QString();
+        binding.group = QStringLiteral("自定义模型");
+        binding.isEnabled = true;
+        binding.isCustom = true;
+        binding.origin = domain::model::DataOrigin::User;
 
         int ctx = m_contextEdit ? m_contextEdit->text().toInt() : 128000;
         if (ctx <= 0) ctx = 128000;
-        model.limits.context = ctx;
-        model.limits.maxInput = ctx;
-        model.limits.maxOutput = 8192;
+        domain::model::ModelLimit limit;
+        limit.context = ctx;
+        limit.maxInput = ctx;
+        limit.maxOutput = 8192;
+        binding.limitsOverride = limit;
 
         domain::model::ModelCapabilities caps = domain::model::ModelCapability::Chat | domain::model::ModelCapability::Streaming;
         if (m_reasoningCheck && m_reasoningCheck->isChecked()) {
@@ -98,12 +100,9 @@ namespace ui::screen::settings::model_manager {
         if (m_visionCheck && m_visionCheck->isChecked()) {
             caps |= domain::model::ModelCapability::Vision;
         }
-        model.capabilities = caps;
+        binding.capabilitiesOverride = caps;
 
-        model.isEnabled = true;
-        model.isCustom = true;
-
-        return model;
+        return binding;
     }
 
 } // namespace ui::screen::settings::model_manager
