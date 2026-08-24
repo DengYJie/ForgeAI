@@ -51,8 +51,6 @@ namespace ui::screen::main {
 
         void setupConnections();
 
-        void render(const MainState &state);
-
         MainViewModel *m_viewModel = nullptr;
         ui::screen::chat::ChatViewModel *m_chatViewModel = nullptr;
         ui::screen::work::WorkViewModel *m_workViewModel = nullptr;

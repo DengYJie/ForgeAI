@@ -2,9 +2,23 @@
 #include <QtGlobal>
 #include <QDateTime>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 namespace core::logging {
 
     static void customQtMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+#ifdef Q_OS_WIN
+        const QString debugLine = QStringLiteral("[%1] %2\n")
+                                      .arg(context.category && qstrcmp(context.category, "default") != 0
+                                               ? QString::fromUtf8(context.category)
+                                               : QStringLiteral("qt"),
+                                           msg);
+        const std::wstring wideLine = debugLine.toStdWString();
+        OutputDebugStringW(wideLine.c_str());
+#endif
+
         LogLevel level = LogLevel::Info;
         switch (type) {
             case QtDebugMsg:    level = LogLevel::Debug; break;

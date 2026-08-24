@@ -2,15 +2,25 @@
 
 #include "ui/base/BaseViewModel.h"
 #include "application/usecase/settings/SettingsUseCases.h"
+#include <QList>
 #include <QString>
 
 namespace ui::screen::settings {
+    struct SettingsProviderNavItem {
+        QString id;
+        QString category;
+        QString title;
+
+        bool operator==(const SettingsProviderNavItem &other) const = default;
+    };
+
     /**
      * @brief 设置主界面页面级状态载体
      */
     struct SettingsState {
         bool isLoading = false;       ///< 是否正处于设置加载状态
         QString statusMessage;        ///< 页面状态栏/Toast 提示信息文本
+        QList<SettingsProviderNavItem> providers;
 
         bool operator==(const SettingsState &other) const = default;
     };

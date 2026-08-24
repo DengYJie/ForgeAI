@@ -1,22 +1,15 @@
 #include "SettingsCoordinator.h"
-#include "ui/screen/settings/model_manager/ModelManagerDialog.h"
 
 namespace ui::screen::settings {
     SettingsCoordinator::SettingsCoordinator(
-        core::model::ModelRegistry *modelRegistry,
-        application::usecase::settings::RefreshModelsUseCase *refreshUseCase,
+        model_manager::ModelManagerViewModel *viewModel,
         QObject *parent
     ) : QObject(parent),
-        m_modelRegistry(modelRegistry),
-        m_refreshUseCase(refreshUseCase) {
+        m_viewModel(viewModel) {
     }
 
     void SettingsCoordinator::openModelManager(QWidget *parent) {
-        model_manager::ModelManagerDialog dialog(
-            m_modelRegistry,
-            m_refreshUseCase,
-            parent
-        );
-        dialog.exec();
+        Q_UNUSED(parent);
+        emit providerPageRequested(QStringLiteral("model"));
     }
 } // namespace ui::screen::settings

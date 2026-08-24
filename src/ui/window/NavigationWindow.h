@@ -71,6 +71,12 @@ public:
     );
 
     /**
+     * @brief 只注册内容页，不向当前导航面板添加导航项
+     * @details 用于临时替换 mainChromeWidget 的子导航场景，仍复用 NavigationView 的 StackContentHost。
+     */
+    void addContentPage(const QString &routeKey, QWidget *interfaceWidget);
+
+    /**
      * @brief 切换当前显示的子页面
      * @param routeKey 目标路由标识
      */
@@ -99,6 +105,9 @@ public:
      * @return NavigationView 指针
      */
     fluent::navigation::NavigationView *navigationView() const { return m_navigationView; }
+
+Q_SIGNALS:
+    void routeChanged(const QString &routeKey);
 
 protected:
     void initNavigation();

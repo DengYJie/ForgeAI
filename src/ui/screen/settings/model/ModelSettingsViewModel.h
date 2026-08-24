@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QWidget>
 
 namespace ui::screen::settings {
     /**
@@ -15,13 +16,15 @@ namespace ui::screen::settings {
 
         /**
          * @brief 发起打开模型与服务商管理器意图
+         * @param parent 宿主顶层窗口
          */
-        void requestOpenModelManager();
+        void requestOpenModelManager(QWidget *parent = nullptr);
 
     Q_SIGNALS:
         /**
          * @brief 请求打开模型管理器对话框信号
+         * @param parent 宿主顶层窗口
          */
-        void modelManagerRequested();
+        void modelManagerRequested(QWidget *parent = nullptr);
     };
 } // namespace ui::screen::settings

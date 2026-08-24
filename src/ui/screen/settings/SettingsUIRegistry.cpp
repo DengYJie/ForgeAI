@@ -1,4 +1,5 @@
 #include "SettingsUIRegistry.h"
+
 #include <algorithm>
 
 namespace ui::screen::settings {
@@ -6,6 +7,10 @@ namespace ui::screen::settings {
         if (factory) {
             m_factories.append(factory);
         }
+    }
+
+    void SettingsUIRegistry::registerProviderPageFactory(std::shared_ptr<ISettingsProviderPageFactory> factory) {
+        if (factory) m_providerPageFactories.append(std::move(factory));
     }
 
     QList<std::shared_ptr<ISettingsUIFactory>> SettingsUIRegistry::allFactories() const {
@@ -24,5 +29,20 @@ namespace ui::screen::settings {
             return a->itemOrder() < b->itemOrder();
         });
         return sorted;
+    }
+
+    ISettingsProviderPageFactory *SettingsUIRegistry::providerPageFactory(const QString &providerId) const {
+        for (const auto &factory : m_providerPageFactories) {
+            if (factory->providerId() == providerId) return factory.get();
+        }
+        return nullptr;
+    }
+
+    QList<std::shared_ptr<ISettingsProviderPageFactory>> SettingsUIRegistry::providerPageFactories() const {
+        auto result = m_providerPageFactories;
+        std::stable_sort(result.begin(), result.end(), [](const auto &a, const auto &b) {
+            return a->categoryOrder() < b->categoryOrder();
+        });
+        return result;
     }
 } // namespace ui::screen::settings

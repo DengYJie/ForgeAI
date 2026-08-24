@@ -16,6 +16,7 @@ namespace core::settings {
 
         QString id() const override;
         QString category() const override;
+        QString title() const override;
         bool useSeparateFile() const override { return false; }
         QString configFileName() const override { return ""; }
     };

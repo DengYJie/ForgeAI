@@ -1,13 +1,10 @@
 #pragma once
 #include <QObject>
+#include <QString>
 #include <QWidget>
 
-namespace core::model {
-    class ModelRegistry;
-}
-
-namespace application::usecase::settings {
-    class RefreshModelsUseCase;
+namespace ui::screen::settings::model_manager {
+    class ModelManagerViewModel;
 }
 
 namespace ui::screen::settings {
@@ -20,26 +17,26 @@ namespace ui::screen::settings {
 
     public:
         /**
-         * @param modelRegistry 模型注册中心指针
-         * @param refreshUseCase 模型探测刷新业务用例指针
+         * @param viewModel 模型管理器 ViewModel
          * @param parent 父 QObject
          */
         explicit SettingsCoordinator(
-            core::model::ModelRegistry *modelRegistry,
-            application::usecase::settings::RefreshModelsUseCase *refreshUseCase,
+            model_manager::ModelManagerViewModel *viewModel,
             QObject *parent = nullptr
         );
 
         ~SettingsCoordinator() override = default;
 
         /**
-         * @brief 模态弹出模型与服务商管理对话框 (ModelManagerDialog)
-         * @param parent 宿主窗口或父控件
+         * @brief 请求激活模型与服务商 provider 页面
+         * @param parent 兼容旧入口的宿主控件参数，当前不再创建弹窗
          */
         void openModelManager(QWidget *parent = nullptr);
 
+    signals:
+        void providerPageRequested(const QString &providerId);
+
     private:
-        core::model::ModelRegistry *m_modelRegistry = nullptr;
-        application::usecase::settings::RefreshModelsUseCase *m_refreshUseCase = nullptr;
+        model_manager::ModelManagerViewModel *m_viewModel = nullptr;
     };
 } // namespace ui::screen::settings

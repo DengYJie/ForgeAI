@@ -274,8 +274,8 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/logging/LoggingSettingsUIFactory.cpp
         src/ui/screen/settings/model/ModelSettingsViewModel.h
         src/ui/screen/settings/model/ModelSettingsViewModel.cpp
-        src/ui/screen/settings/model/ModelSettingsUIFactory.h
-        src/ui/screen/settings/model/ModelSettingsUIFactory.cpp
+        src/ui/screen/settings/model/ModelSettingsPageFactory.h
+        src/ui/screen/settings/model/ModelSettingsPageFactory.cpp
         src/ui/screen/settings/model_manager/ModelItemCard.h
         src/ui/screen/settings/model_manager/ModelItemCard.cpp
         src/ui/screen/settings/model_manager/ProviderNavigationItem.h
@@ -288,8 +288,14 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/model_manager/AddProviderDialog.cpp
         src/ui/screen/settings/model_manager/AddModelDialog.h
         src/ui/screen/settings/model_manager/AddModelDialog.cpp
-        src/ui/screen/settings/model_manager/ModelManagerDialog.h
-        src/ui/screen/settings/model_manager/ModelManagerDialog.cpp
+        src/ui/screen/settings/model_manager/ModelActionsSplitButton.h
+        src/ui/screen/settings/model_manager/ModelActionsSplitButton.cpp
+        src/ui/screen/settings/model_manager/ModelManagerViewModel.h
+        src/ui/screen/settings/model_manager/ModelManagerViewModel.cpp
+        src/ui/screen/settings/model_manager/ModelManagerPage.h
+        src/ui/screen/settings/model_manager/ModelManagerPage.cpp
+        src/ui/screen/settings/model_manager/ModelManagerWindow.h
+        src/ui/screen/settings/model_manager/ModelManagerWindow.cpp
         src/ui/screen/settings/SettingsViewModel.h
         src/ui/screen/settings/SettingsViewModel.cpp
         src/ui/screen/settings/SettingsPage.h
@@ -382,10 +388,16 @@ set(PROJECT_SOURCES
         src/application/usecase/settings/LoadSettingsUseCase.cpp
         src/application/usecase/settings/SaveSettingUseCase.h
         src/application/usecase/settings/SaveSettingUseCase.cpp
+        src/application/usecase/settings/GetSettingsProvidersUseCase.h
+        src/application/usecase/settings/GetSettingsProvidersUseCase.cpp
         src/application/usecase/settings/GetModelsUseCase.h
         src/application/usecase/settings/GetModelsUseCase.cpp
         src/application/usecase/settings/RefreshModelsUseCase.h
         src/application/usecase/settings/RefreshModelsUseCase.cpp
+        src/application/usecase/settings/SaveProviderUseCase.h
+        src/application/usecase/settings/SaveProviderUseCase.cpp
+        src/application/usecase/settings/DeleteProviderUseCase.h
+        src/application/usecase/settings/DeleteProviderUseCase.cpp
 
         src/app/ApplicationContext.h
         src/app/ApplicationContext.cpp

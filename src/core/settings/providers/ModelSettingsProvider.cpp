@@ -14,4 +14,8 @@ namespace core::settings {
         return QStringLiteral("模型与服务商");
     }
 
+    QString ModelSettingsProvider::title() const {
+        return QStringLiteral("模型与服务商");
+    }
+
 } // namespace core::settings

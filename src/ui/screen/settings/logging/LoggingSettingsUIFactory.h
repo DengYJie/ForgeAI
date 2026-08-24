@@ -15,6 +15,7 @@ namespace ui::screen::settings {
         explicit LoggingLevelSettingsUIFactory(LoggingSettingsViewModel *viewModel);
 
         QString id() const override { return QStringLiteral("logging.level"); }
+        QString providerId() const override { return QStringLiteral("logging"); }
         QString categoryId() const override { return QStringLiteral("diagnostics"); }
         QString categoryDisplayName() const override;
         int categoryOrder() const override { return 20; }
@@ -40,6 +41,7 @@ namespace ui::screen::settings {
         explicit LoggingStorageSettingsUIFactory(LoggingSettingsViewModel *viewModel);
 
         QString id() const override { return QStringLiteral("logging.storage"); }
+        QString providerId() const override { return QStringLiteral("logging"); }
         QString categoryId() const override { return QStringLiteral("diagnostics"); }
         QString categoryDisplayName() const override;
         int categoryOrder() const override { return 20; }
@@ -65,6 +67,7 @@ namespace ui::screen::settings {
         explicit LoggingOpenDirSettingsUIFactory(LoggingSettingsViewModel *viewModel);
 
         QString id() const override { return QStringLiteral("logging.open_dir"); }
+        QString providerId() const override { return QStringLiteral("logging"); }
         QString categoryId() const override { return QStringLiteral("diagnostics"); }
         QString categoryDisplayName() const override;
         int categoryOrder() const override { return 20; }
@@ -90,6 +93,7 @@ namespace ui::screen::settings {
         explicit LoggingExportSettingsUIFactory(LoggingSettingsViewModel *viewModel);
 
         QString id() const override { return QStringLiteral("logging.export"); }
+        QString providerId() const override { return QStringLiteral("logging"); }
         QString categoryId() const override { return QStringLiteral("diagnostics"); }
         QString categoryDisplayName() const override;
         int categoryOrder() const override { return 20; }

@@ -30,6 +30,9 @@ namespace core::settings {
          */
         virtual QString category() const = 0;
 
+        /** Provider 页面与设置导航项的显示标题。 */
+        virtual QString title() const = 0;
+
         /**
          * @brief 是否采用独立的独立配置文件持久化
          * @return true 存储于独立配置文件，false 汇聚存储于全局 config.json

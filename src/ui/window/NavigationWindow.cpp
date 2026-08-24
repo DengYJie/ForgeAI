@@ -1,5 +1,6 @@
 #include "ui/window/NavigationWindow.h"
 #include <FluentQt/Navigation.h>
+#include <QDebug>
 
 #include "ui/navigation/NavigationHistory.h"
 #include "ui/navigation/NavigationIndicator.h"
@@ -130,6 +131,9 @@ void NavigationWindow::initNavigation() {
                 const QString routeKey = m_indexToRouteMap.value(index);
                 if (!routeKey.isEmpty() && m_panel)
                     m_panel->setCurrentItem(routeKey);
+                if (!routeKey.isEmpty()) {
+                    Q_EMIT routeChanged(routeKey);
+                }
             });
 
     setContentWidget(m_navigationView);
@@ -173,6 +177,17 @@ void NavigationWindow::addSubInterface(
                      visualSource);
 }
 
+void NavigationWindow::addContentPage(const QString &routeKey, QWidget *interfaceWidget) {
+    if (!m_navigationView || !interfaceWidget || routeKey.isEmpty() || m_routeToIndexMap.contains(routeKey)) return;
+
+    auto *contentHost = m_navigationView->contentHost();
+    const int index = contentHost->count();
+    contentHost->insertPage(index, interfaceWidget);
+    m_routeToIndexMap.insert(routeKey, index);
+    m_indexToRouteMap.insert(index, routeKey);
+    qDebug().noquote() << "[NavigationWindow] add content page route=" << routeKey << "index=" << index;
+}
+
 void NavigationWindow::switchTo(const QString &routeKey) {
     if (!m_routeToIndexMap.contains(routeKey) || !m_navigationView) return;
 
@@ -185,6 +200,12 @@ void NavigationWindow::switchTo(const QString &routeKey) {
     const int currentIndex = contentHost->currentIndex();
     const int direction = targetIndex >= currentIndex ? 1 : -1;
 
+    qDebug().noquote() << "[NavigationWindow] switch route=" << routeKey
+                       << "from=" << currentIndex << "to=" << targetIndex;
+    if (targetIndex == currentIndex) {
+        Q_EMIT routeChanged(routeKey);
+        return;
+    }
     contentHost->setCurrentIndex(targetIndex, direction, true);
 }
 

@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>
+#include <QDebug>
 #include <FluentQt/TextFields.h>
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/Scrolling.h>
@@ -31,8 +32,16 @@ namespace ui::screen::settings::model_manager {
         m_scrollView->setWidgetResizable(true);
         m_scrollView->setFrameShape(QFrame::NoFrame);
         m_scrollView->setHorizontalScrollBarVisibility(fluent::scrolling::ScrollView::ScrollBarVisibility::Hidden);
+        if (m_scrollView->viewport()) {
+            QPalette pal = m_scrollView->viewport()->palette();
+            pal.setColor(QPalette::Window, themeColorsRef().bgLayer);
+            pal.setColor(QPalette::Base, themeColorsRef().bgLayer);
+            m_scrollView->viewport()->setPalette(pal);
+            m_scrollView->viewport()->setAutoFillBackground(true);
+        }
 
         m_listContainer = new QWidget(m_scrollView);
+        m_listContainer->setAutoFillBackground(false);
         auto *listLayout = new QVBoxLayout(m_listContainer);
         listLayout->setContentsMargins(0, 4, 0, 4);
         listLayout->setSpacing(2);
@@ -50,6 +59,22 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ProviderNavigationPane::setProviders(const QList<domain::model::ModelProvider> &providers) {
+        if (!shouldRebuildProviderItems(providers)) {
+            qDebug().noquote() << "[ProviderNavigationPane] reuse provider items count=" << providers.size();
+            m_providers = providers;
+            for (const auto &provider : m_providers) {
+                if (auto *item = m_itemMap.value(provider.id, nullptr)) {
+                    item->setProvider(provider);
+                }
+            }
+            if (!m_currentSelectedId.isEmpty()) {
+                selectProvider(m_currentSelectedId);
+            }
+            filterProviders(m_searchBox ? m_searchBox->text() : QString());
+            return;
+        }
+
+        qDebug().noquote() << "[ProviderNavigationPane] rebuild provider items count=" << providers.size();
         m_providers = providers;
         m_itemMap.clear();
 
@@ -86,6 +111,14 @@ namespace ui::screen::settings::model_manager {
         }
     }
 
+    bool ProviderNavigationPane::shouldRebuildProviderItems(const QList<domain::model::ModelProvider> &providers) const {
+        if (providers.size() != m_providers.size()) return true;
+        for (int i = 0; i < providers.size(); ++i) {
+            if (providers.at(i).id != m_providers.at(i).id) return true;
+        }
+        return false;
+    }
+
     void ProviderNavigationPane::selectProvider(const QString &providerId) {
         m_currentSelectedId = providerId;
         for (auto it = m_itemMap.begin(); it != m_itemMap.end(); ++it) {
@@ -105,18 +138,21 @@ namespace ui::screen::settings::model_manager {
 
     void ProviderNavigationPane::paintEvent(QPaintEvent *) {
         QPainter painter(this);
-        const bool isDark = (effectiveTheme() == fluent::FluentElement::Dark);
         const auto &colors = themeColorsRef();
 
-        // 绘制半透明 Pane 次级背景与右侧 1px 分割线
-        QColor bgColor = isDark ? QColor(255, 255, 255, 6) : QColor(0, 0, 0, 4);
-        painter.fillRect(rect(), bgColor);
-
+        // 与工作台 surface 共用 bgLayer；导航只额外绘制轻量分隔线。
         painter.setPen(colors.strokeDivider);
         painter.drawLine(rect().topRight(), rect().bottomRight());
     }
 
     void ProviderNavigationPane::onThemeUpdated() {
+        if (m_scrollView && m_scrollView->viewport()) {
+            QPalette pal = m_scrollView->viewport()->palette();
+            pal.setColor(QPalette::Window, themeColorsRef().bgLayer);
+            pal.setColor(QPalette::Base, themeColorsRef().bgLayer);
+            m_scrollView->viewport()->setPalette(pal);
+            m_scrollView->viewport()->setAutoFillBackground(true);
+        }
         update();
     }
 

@@ -4,6 +4,16 @@
 #include <memory>
 
 namespace ui::screen::settings {
+    /** 可选扩展：为一个 Provider 提供完整的自定义页面。 */
+    class ISettingsProviderPageFactory {
+    public:
+        virtual ~ISettingsProviderPageFactory() = default;
+        virtual QString providerId() const = 0;
+        virtual int categoryOrder() const { return 0; }
+        virtual QString iconGlyph() const = 0;
+        virtual QWidget *createProviderPage(QWidget *parent) = 0;
+    };
+
     /**
      * @brief 设置卡片 UI 工厂抽象接口
      * @details 负责提供单个设置项或设置组的元数据描述（标题、副标题、图标、分类、排序），并负责创建对应的交互控件
@@ -17,6 +27,9 @@ namespace ui::screen::settings {
          * @return 稳定唯一的 Factory ID (如 "model.manager", "appearance.theme", "logging.level")
          */
         virtual QString id() const = 0;
+
+        /** 所属 SettingsProvider 的稳定 ID。 */
+        virtual QString providerId() const = 0;
 
         /**
          * @brief 获取分类标识符（机器可读稳定 ID，如 "model", "appearance", "diagnostics"）

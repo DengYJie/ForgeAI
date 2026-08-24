@@ -20,6 +20,9 @@
 #include "application/usecase/work/WorkUseCases.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
 #include "application/usecase/settings/SettingsUseCases.h"
+#include "application/usecase/settings/GetSettingsProvidersUseCase.h"
+#include "application/usecase/settings/SaveProviderUseCase.h"
+#include "application/usecase/settings/DeleteProviderUseCase.h"
 #include "ui/screen/main/MainViewModel.h"
 #include "ui/screen/chat/ChatViewModel.h"
 #include "ui/screen/work/WorkViewModel.h"
@@ -30,6 +33,7 @@
 #include "ui/screen/settings/appearance/AppearanceSettingsViewModel.h"
 #include "ui/screen/settings/logging/LoggingSettingsViewModel.h"
 #include "ui/screen/settings/model/ModelSettingsViewModel.h"
+#include "ui/screen/settings/model_manager/ModelManagerViewModel.h"
 
 namespace app {
     /**
@@ -77,6 +81,7 @@ namespace app {
         ui::screen::settings::AppearanceSettingsViewModel *appearanceSettingsViewModel() const;
         ui::screen::settings::LoggingSettingsViewModel *loggingSettingsViewModel() const;
         ui::screen::settings::ModelSettingsViewModel *modelSettingsViewModel() const;
+        ui::screen::settings::model_manager::ModelManagerViewModel *modelManagerViewModel() const;
         ui::screen::settings::SettingsViewModel *settingsViewModel() const;
 
     private:
@@ -123,8 +128,11 @@ namespace app {
         // 设置业务用例
         std::unique_ptr<application::usecase::settings::LoadSettingsUseCase> m_loadSettingsUseCase;
         std::unique_ptr<application::usecase::settings::SaveSettingUseCase> m_saveSettingUseCase;
+        std::unique_ptr<application::usecase::settings::GetSettingsProvidersUseCase> m_getSettingsProvidersUseCase;
         std::unique_ptr<application::usecase::settings::GetModelsUseCase> m_getModelsUseCase;
         std::unique_ptr<application::usecase::settings::RefreshModelsUseCase> m_refreshModelsUseCase;
+        std::unique_ptr<application::usecase::settings::SaveProviderUseCase> m_saveProviderUseCase;
+        std::unique_ptr<application::usecase::settings::DeleteProviderUseCase> m_deleteProviderUseCase;
 
         // 全局 ViewModels
         std::unique_ptr<ui::screen::main::MainViewModel> m_mainViewModel;
@@ -136,6 +144,7 @@ namespace app {
         std::unique_ptr<ui::screen::settings::AppearanceSettingsViewModel> m_appearanceSettingsViewModel;
         std::unique_ptr<ui::screen::settings::LoggingSettingsViewModel> m_loggingSettingsViewModel;
         std::unique_ptr<ui::screen::settings::ModelSettingsViewModel> m_modelSettingsViewModel;
+        std::unique_ptr<ui::screen::settings::model_manager::ModelManagerViewModel> m_modelManagerViewModel;
         std::unique_ptr<ui::screen::settings::SettingsViewModel> m_settingsViewModel;
         std::unique_ptr<ui::screen::settings::SettingsCoordinator> m_settingsCoordinator;
         std::unique_ptr<ui::screen::settings::SettingsUIRegistry> m_settingsUiRegistry;

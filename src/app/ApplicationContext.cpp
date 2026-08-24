@@ -10,7 +10,7 @@
 #include "llm/protocol/openai_responses/OpenAIResponsesAdapter.h"
 #include "ui/screen/settings/appearance/AppearanceSettingsUIFactory.h"
 #include "ui/screen/settings/logging/LoggingSettingsUIFactory.h"
-#include "ui/screen/settings/model/ModelSettingsUIFactory.h"
+#include "ui/screen/settings/model/ModelSettingsPageFactory.h"
 #include <QSysInfo>
 #include <QUuid>
 
@@ -111,11 +111,14 @@ namespace app {
         // 6. 设置业务用例初始化
         m_loadSettingsUseCase = std::make_unique<application::usecase::settings::LoadSettingsUseCase>(m_settingsService.get());
         m_saveSettingUseCase = std::make_unique<application::usecase::settings::SaveSettingUseCase>(m_settingsService.get());
+        m_getSettingsProvidersUseCase = std::make_unique<application::usecase::settings::GetSettingsProvidersUseCase>(m_settingsService.get());
         m_getModelsUseCase = std::make_unique<application::usecase::settings::GetModelsUseCase>(m_modelService.get());
         m_refreshModelsUseCase = std::make_unique<application::usecase::settings::RefreshModelsUseCase>(
             m_discoveryGateway.get(),
             m_modelRegistry
         );
+        m_saveProviderUseCase = std::make_unique<application::usecase::settings::SaveProviderUseCase>(m_modelService.get());
+        m_deleteProviderUseCase = std::make_unique<application::usecase::settings::DeleteProviderUseCase>(m_modelService.get());
 
         // 7. ViewModels 表现层构造
         m_mainViewModel = std::make_unique<ui::screen::main::MainViewModel>();
@@ -127,18 +130,23 @@ namespace app {
         m_appearanceSettingsViewModel = std::make_unique<ui::screen::settings::AppearanceSettingsViewModel>(m_appearanceSettingsProvider.get());
         m_loggingSettingsViewModel = std::make_unique<ui::screen::settings::LoggingSettingsViewModel>(m_loggingSettingsProvider.get());
         m_modelSettingsViewModel = std::make_unique<ui::screen::settings::ModelSettingsViewModel>();
+        m_modelManagerViewModel = std::make_unique<ui::screen::settings::model_manager::ModelManagerViewModel>(
+            m_getModelsUseCase.get(),
+            m_saveProviderUseCase.get(),
+            m_deleteProviderUseCase.get(),
+            m_refreshModelsUseCase.get()
+        );
         m_settingsViewModel = std::make_unique<ui::screen::settings::SettingsViewModel>(settingsUseCases());
 
         m_settingsCoordinator = std::make_unique<ui::screen::settings::SettingsCoordinator>(
-            m_modelRegistry.get(),
-            m_refreshModelsUseCase.get()
+            m_modelManagerViewModel.get()
         );
 
-        // 监听模型设置触发打开弹窗信号
+        // 兼容旧的模型设置入口：触发时切换到模型与服务商 provider 页面。
         QObject::connect(m_modelSettingsViewModel.get(), &ui::screen::settings::ModelSettingsViewModel::modelManagerRequested,
-                         [this]() {
+                         [this](QWidget *parent) {
                              if (m_settingsCoordinator) {
-                                 m_settingsCoordinator->openModelManager();
+                                 m_settingsCoordinator->openModelManager(parent);
                              }
                          });
 
@@ -155,8 +163,9 @@ namespace app {
     void ApplicationContext::registerSettings() {
         m_settingsUiRegistry = std::make_unique<ui::screen::settings::SettingsUIRegistry>();
 
-        m_settingsUiRegistry->registerFactory(
-            std::make_shared<ui::screen::settings::ModelSettingsUIFactory>(m_modelSettingsViewModel.get())
+        m_settingsUiRegistry->registerProviderPageFactory(
+            std::make_shared<ui::screen::settings::ModelSettingsPageFactory>(
+                m_modelManagerViewModel.get())
         );
 
         m_settingsUiRegistry->registerFactory(
@@ -250,8 +259,11 @@ namespace app {
         application::usecase::settings::SettingsUseCases s;
         s.loadSettings = m_loadSettingsUseCase.get();
         s.saveSetting = m_saveSettingUseCase.get();
+        s.getSettingsProviders = m_getSettingsProvidersUseCase.get();
         s.getModels = m_getModelsUseCase.get();
         s.refreshModels = m_refreshModelsUseCase.get();
+        s.saveProvider = m_saveProviderUseCase.get();
+        s.deleteProvider = m_deleteProviderUseCase.get();
         s.modelRegistry = m_modelRegistry;
         return s;
     }
@@ -282,6 +294,10 @@ namespace app {
 
     ui::screen::settings::ModelSettingsViewModel *ApplicationContext::modelSettingsViewModel() const {
         return m_modelSettingsViewModel.get();
+    }
+
+    ui::screen::settings::model_manager::ModelManagerViewModel *ApplicationContext::modelManagerViewModel() const {
+        return m_modelManagerViewModel.get();
     }
 
     ui::screen::settings::SettingsViewModel *ApplicationContext::settingsViewModel() const {

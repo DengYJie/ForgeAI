@@ -30,6 +30,7 @@ namespace core::settings {
 
         QString id() const override { return QStringLiteral("appearance"); }
         QString category() const override { return QStringLiteral("外观与行为"); }
+        QString title() const override { return QStringLiteral("应用主题"); }
         bool useSeparateFile() const override { return false; }
         QString configFileName() const override { return QString(); }
 

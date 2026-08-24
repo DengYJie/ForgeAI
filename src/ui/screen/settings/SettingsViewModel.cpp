@@ -20,8 +20,21 @@ namespace ui::screen::settings {
             m_useCases.loadSettings->execute();
         }
 
-        updateState([](SettingsState &s) {
+        QList<SettingsProviderNavItem> providers;
+        if (m_useCases.getSettingsProviders) {
+            const auto summaries = m_useCases.getSettingsProviders->execute();
+            for (const auto &summary : summaries) {
+                providers.append({
+                    summary.id,
+                    summary.category,
+                    summary.title
+                });
+            }
+        }
+
+        updateState([providers](SettingsState &s) {
             s.isLoading = false;
+            s.providers = providers;
         });
     }
 

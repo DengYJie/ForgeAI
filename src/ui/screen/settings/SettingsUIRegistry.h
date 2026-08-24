@@ -18,6 +18,7 @@ namespace ui::screen::settings {
          * @param factory 工厂共享指针
          */
         void registerFactory(std::shared_ptr<ISettingsUIFactory> factory);
+        void registerProviderPageFactory(std::shared_ptr<ISettingsProviderPageFactory> factory);
 
         /**
          * @brief 获取所有已注册的 UI 工厂原始列表
@@ -31,7 +32,11 @@ namespace ui::screen::settings {
          */
         QList<std::shared_ptr<ISettingsUIFactory>> sortedFactories() const;
 
+        ISettingsProviderPageFactory *providerPageFactory(const QString &providerId) const;
+        QList<std::shared_ptr<ISettingsProviderPageFactory>> providerPageFactories() const;
+
     private:
         QList<std::shared_ptr<ISettingsUIFactory>> m_factories;
+        QList<std::shared_ptr<ISettingsProviderPageFactory>> m_providerPageFactories;
     };
 } // namespace ui::screen::settings

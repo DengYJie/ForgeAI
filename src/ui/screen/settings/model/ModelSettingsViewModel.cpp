@@ -5,7 +5,7 @@ namespace ui::screen::settings {
         : QObject(parent) {
     }
 
-    void ModelSettingsViewModel::requestOpenModelManager() {
-        emit modelManagerRequested();
+    void ModelSettingsViewModel::requestOpenModelManager(QWidget *parent) {
+        Q_EMIT modelManagerRequested(parent);
     }
 } // namespace ui::screen::settings

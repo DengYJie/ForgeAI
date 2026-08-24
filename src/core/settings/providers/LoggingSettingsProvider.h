@@ -22,6 +22,7 @@ namespace core::settings {
 
         QString id() const override { return QStringLiteral("logging"); }
         QString category() const override { return QStringLiteral("日志与诊断"); }
+        QString title() const override { return QStringLiteral("日志与诊断"); }
         bool useSeparateFile() const override { return false; }
         QString configFileName() const override { return QString(); }
 

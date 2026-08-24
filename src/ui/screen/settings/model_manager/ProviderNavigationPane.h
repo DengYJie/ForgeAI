@@ -44,6 +44,7 @@ namespace ui::screen::settings::model_manager {
     private:
         void setupUi();
         void filterProviders(const QString &keyword);
+        bool shouldRebuildProviderItems(const QList<domain::model::ModelProvider> &providers) const;
 
         fluent::textfields::LineEdit *m_searchBox = nullptr;
         fluent::scrolling::ScrollView *m_scrollView = nullptr;

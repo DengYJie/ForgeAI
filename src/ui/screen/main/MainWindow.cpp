@@ -31,9 +31,6 @@ namespace ui::screen::main {
         m_settingsCoordinator(settingsCoordinator) {
         setupUi();
         setupConnections();
-        if (m_viewModel) {
-            m_viewModel->observe(this, &MainWindow::render);
-        }
     }
 
     MainWindow::~MainWindow() = default;
@@ -76,38 +73,41 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        // 2. 注册底部设置项 (Settings)
-        auto *settingsPage = new ui::screen::settings::SettingsPage(
+        // 2. 注册底部设置按钮。settings 本身不再是内容页，只负责进入设置 provider 路由。
+        auto *settingsRoutes = new ui::screen::settings::SettingsPage(
             m_settingsViewModel,
             m_settingsUiRegistry,
             m_settingsCoordinator,
+            navigationView(),
+            navigationPanel(),
             this
         );
+        settingsRoutes->registerProviderRoutes(this);
+
         addSubInterface(
             QStringLiteral("settings"),
-            settingsPage,
+            nullptr,
             Typography::Icons::Settings,
             tr("设置"),
             QString(),
             ui::navigation::NavigationItemPosition::Bottom,
-            true,
+            false,
             std::make_shared<ui::animation::AnimatedSettingsVisualSource>()
         );
+        connect(navigationPanel(), &ui::navigation::NavigationPanel::itemSelected,
+                this, [this, settingsRoutes](const QString &routeKey) {
+                    if (routeKey != QStringLiteral("settings")) return;
+
+                    const QString initialRoute = settingsRoutes->initialProviderRouteKey();
+                    if (!initialRoute.isEmpty()) {
+                        switchTo(initialRoute);
+                    }
+                });
+
+        switchTo(QStringLiteral("chat"));
     }
 
     void MainWindow::setupConnections() {
-        if (!m_viewModel) return;
-
-        if (m_panel) {
-            connect(m_panel, &ui::navigation::NavigationPanel::itemSelected,
-                    m_viewModel, &MainViewModel::navigateTo);
-        }
     }
 
-    void MainWindow::render(const MainState &state) {
-        // 同步路由切换
-        if (!state.currentRoute.isEmpty()) {
-            switchTo(state.currentRoute);
-        }
-    }
 } // namespace ui::screen::main

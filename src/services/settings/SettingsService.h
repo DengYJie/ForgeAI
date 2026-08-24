@@ -32,6 +32,11 @@ namespace services::settings {
          */
         void saveAllSync() override;
 
+        /**
+         * @brief 获取所有设置 Provider 的只读展示摘要
+         */
+        QList<domain::service::SettingsProviderSummary> providerSummaries() const override;
+
     private:
         core::settings::SettingsRegistry *m_registry = nullptr;
     };

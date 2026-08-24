@@ -15,6 +15,7 @@ namespace ui::screen::settings {
         ~AppearanceSettingsUIFactory() override = default;
 
         QString id() const override { return QStringLiteral("appearance.theme"); }
+        QString providerId() const override { return QStringLiteral("appearance"); }
         QString categoryId() const override { return QStringLiteral("appearance"); }
         QString categoryDisplayName() const override;
         int categoryOrder() const override { return 10; }
