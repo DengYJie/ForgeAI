@@ -10,10 +10,6 @@
 
 namespace ui::screen::settings {
 
-    // ==========================================
-    // 1. LoggingLevelSettingsUIFactory
-    // ==========================================
-
     LoggingLevelSettingsUIFactory::LoggingLevelSettingsUIFactory(LoggingSettingsViewModel *viewModel)
         : m_viewModel(viewModel) {
     }
@@ -62,10 +58,6 @@ namespace ui::screen::settings {
         return combo;
     }
 
-    // ==========================================
-    // 2. LoggingStorageSettingsUIFactory
-    // ==========================================
-
     LoggingStorageSettingsUIFactory::LoggingStorageSettingsUIFactory(LoggingSettingsViewModel *viewModel)
         : m_viewModel(viewModel) {
     }
@@ -92,7 +84,7 @@ namespace ui::screen::settings {
         auto *container = new QWidget(parent);
         auto *layout = new QHBoxLayout(container);
         layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(16);
+        layout->setSpacing(12);
 
         auto *sizeLabel = new fluent::textfields::Label(
             m_viewModel->formattedLogSize(),
@@ -104,6 +96,9 @@ namespace ui::screen::settings {
         auto *clearBtn = new fluent::basicinput::Button(container);
         clearBtn->setText(QObject::tr("清除日志"));
         clearBtn->setMinimumWidth(100);
+        clearBtn->setCriticalOnHover(true);
+        clearBtn->setIconGlyph(Typography::Icons::Delete);
+        clearBtn->setFluentLayout(fluent::basicinput::Button::IconBefore);
 
         layout->addWidget(sizeLabel, 0, Qt::AlignVCenter);
         layout->addWidget(clearBtn, 0, Qt::AlignVCenter);
@@ -131,10 +126,6 @@ namespace ui::screen::settings {
         return container;
     }
 
-    // ==========================================
-    // 3. LoggingOpenDirSettingsUIFactory
-    // ==========================================
-
     LoggingOpenDirSettingsUIFactory::LoggingOpenDirSettingsUIFactory(LoggingSettingsViewModel *viewModel)
         : m_viewModel(viewModel) {
     }
@@ -159,6 +150,8 @@ namespace ui::screen::settings {
         auto *btn = new fluent::basicinput::Button(parent);
         btn->setText(QObject::tr("打开日志目录"));
         btn->setMinimumWidth(130);
+        btn->setIconGlyph(Typography::Icons::Folder);
+        btn->setFluentLayout(fluent::basicinput::Button::IconBefore);
 
         auto *vm = m_viewModel;
         QObject::connect(btn, &fluent::basicinput::Button::clicked, [vm]() {
@@ -169,10 +162,6 @@ namespace ui::screen::settings {
 
         return btn;
     }
-
-    // ==========================================
-    // 4. LoggingExportSettingsUIFactory
-    // ==========================================
 
     LoggingExportSettingsUIFactory::LoggingExportSettingsUIFactory(LoggingSettingsViewModel *viewModel)
         : m_viewModel(viewModel) {
@@ -198,6 +187,9 @@ namespace ui::screen::settings {
         auto *btn = new fluent::basicinput::Button(parent);
         btn->setText(QObject::tr("导出诊断日志"));
         btn->setMinimumWidth(130);
+        btn->setFluentStyle(fluent::basicinput::Button::Accent);
+        btn->setIconGlyph(Typography::Icons::Download);
+        btn->setFluentLayout(fluent::basicinput::Button::IconBefore);
 
         auto *vm = m_viewModel;
         QObject::connect(btn, &fluent::basicinput::Button::clicked, parent, [parent, vm]() {

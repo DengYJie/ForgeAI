@@ -71,7 +71,7 @@ protected:
     FlatExpander* m_expander = nullptr;
     QWidget* m_contentWidget = nullptr;
 
-    // --- 标准卡片复用组件 (Decoupled UI components for tool cards) ---
+    /** @brief 标准卡片复用组件 */
     fluent::layout::Card* m_cardSurface = nullptr;
     fluent::textfields::Label* m_section1Label = nullptr;
     fluent::layout::Card* m_section1Card = nullptr;
