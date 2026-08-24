@@ -1,11 +1,12 @@
-#include "ProviderNavigationPane.h"
+﻿#include "ProviderNavigationPane.h"
 
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QVBoxLayout>
-#include <QDebug>
+
+#include <algorithm>
 
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/Collections.h>
@@ -98,7 +99,7 @@ namespace ui::screen::settings::model_manager {
                     const QPoint pos = mouseEvent->pos();
                     const QModelIndex idx = m_listView->indexAt(pos);
                     if (idx.isValid()) {
-                        const QRect itemRect = static_cast<const QAbstractItemView *>(m_listView)->visualRect(idx);
+                        const QRect itemRect = static_cast<const QAbstractItemView*>(m_listView)->visualRect(idx);
                         const QRect btnRect(itemRect.right() - 28, itemRect.top() + (itemRect.height() - 24) / 2, 24, 24);
                         if (btnRect.contains(pos)) {
                             if (event->type() == QEvent::MouseButtonRelease) {
@@ -117,16 +118,26 @@ namespace ui::screen::settings::model_manager {
 
     void ProviderNavigationPane::setProviders(const QList<domain::model::ModelProvider>& providers) {
         if (!m_listModel) return;
-        if (m_listModel->providers() == providers) return;
 
-        qInfo().noquote() << QStringLiteral("[ProviderNavigationPane] setProviders: 传入 %1 个服务商").arg(providers.size());
-        m_listModel->setProviders(providers);
+        QList<domain::model::ModelProvider> sortedProviders = providers;
+        std::sort(sortedProviders.begin(), sortedProviders.end(),
+            [](const domain::model::ModelProvider& left, const domain::model::ModelProvider& right) {
+                if (left.isEnabled != right.isEnabled) return left.isEnabled > right.isEnabled;
+
+                const int nameOrder = QString::localeAwareCompare(left.name, right.name);
+                if (nameOrder != 0) return nameOrder < 0;
+                return left.id < right.id;
+            });
+
+        if (m_listModel->providers() == sortedProviders) return;
+
+        m_listModel->setProviders(sortedProviders);
 
         if (!m_currentSelectedId.isEmpty()) {
             selectProvider(m_currentSelectedId);
         }
-        else if (!providers.isEmpty()) {
-            selectProvider(providers.first().id);
+        else if (!sortedProviders.isEmpty()) {
+            selectProvider(sortedProviders.first().id);
         }
     }
 
@@ -172,7 +183,7 @@ namespace ui::screen::settings::model_manager {
         auto* toggleAction = menu->addAction(provider.isEnabled ? tr("停用服务商") : tr("启用服务商"));
         connect(toggleAction, &QAction::triggered, this, [this, providerId] {
             selectProvider(providerId);
-        });
+            });
 
         const int menuWidth = menu->sizeHint().width();
         const QPoint rightAlignedPos(globalPos.x() - menuWidth, globalPos.y() + 4);

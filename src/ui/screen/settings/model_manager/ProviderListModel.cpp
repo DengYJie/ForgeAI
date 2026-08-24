@@ -1,24 +1,26 @@
-#include "ProviderListModel.h"
+﻿#include "ProviderListModel.h"
 
-#include <QIcon>
+#include <algorithm>
+
 #include <QFile>
+#include <QIcon>
 
 namespace ui::screen::settings::model_manager {
 
-    ProviderListModel::ProviderListModel(QObject *parent)
+    ProviderListModel::ProviderListModel(QObject* parent)
         : QAbstractListModel(parent) {}
 
-    int ProviderListModel::rowCount(const QModelIndex &parent) const {
+    int ProviderListModel::rowCount(const QModelIndex& parent) const {
         if (parent.isValid()) return 0;
         return static_cast<int>(m_providers.size());
     }
 
-    QVariant ProviderListModel::data(const QModelIndex &index, int role) const {
+    QVariant ProviderListModel::data(const QModelIndex& index, int role) const {
         if (!index.isValid() || index.row() < 0 || index.row() >= m_providers.size()) {
             return {};
         }
 
-        const auto &provider = m_providers.at(index.row());
+        const auto& provider = m_providers.at(index.row());
         switch (role) {
         case Qt::DisplayRole:
         case ProviderNameRole:
@@ -43,8 +45,36 @@ namespace ui::screen::settings::model_manager {
         }
     }
 
-    void ProviderListModel::setProviders(const QList<domain::model::ModelProvider> &providers) {
+    void ProviderListModel::setProviders(const QList<domain::model::ModelProvider>& providers) {
         if (m_providers == providers) return;
+
+        // Editing provider settings must not reset the view: a reset invalidates
+        // ListView's current index, which can make it select the first row.
+        // The model structure is unchanged as long as the provider IDs and their
+        // order are unchanged, so update those rows in place instead.
+        const bool sameStructure = m_providers.size() == providers.size()
+            && std::equal(m_providers.cbegin(), m_providers.cend(), providers.cbegin(),
+                [](const domain::model::ModelProvider& current, const domain::model::ModelProvider& next) {
+                    return current.id == next.id;
+                });
+        if (sameStructure) {
+            for (int row = 0; row < providers.size(); ++row) {
+                if (m_providers.at(row) == providers.at(row)) continue;
+
+                m_providers[row] = providers.at(row);
+                const QModelIndex changedIndex = index(row, 0);
+                Q_EMIT dataChanged(changedIndex, changedIndex, {
+                    Qt::DisplayRole,
+                    Qt::DecorationRole,
+                    ProviderNameRole,
+                    ProviderTypeRole,
+                    ProviderEnabledRole,
+                    ProviderIconPathRole,
+                    });
+            }
+            return;
+        }
+
         beginResetModel();
         m_providers = providers;
         endResetModel();
@@ -55,14 +85,14 @@ namespace ui::screen::settings::model_manager {
         return m_providers.at(row);
     }
 
-    std::optional<domain::model::ModelProvider> ProviderListModel::findProvider(const QString &providerId) const {
-        for (const auto &p : m_providers) {
+    std::optional<domain::model::ModelProvider> ProviderListModel::findProvider(const QString& providerId) const {
+        for (const auto& p : m_providers) {
             if (p.id == providerId) return p;
         }
         return std::nullopt;
     }
 
-    int ProviderListModel::rowForProvider(const QString &providerId) const {
+    int ProviderListModel::rowForProvider(const QString& providerId) const {
         for (int i = 0; i < m_providers.size(); ++i) {
             if (m_providers.at(i).id == providerId) return i;
         }

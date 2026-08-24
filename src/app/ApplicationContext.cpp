@@ -119,6 +119,7 @@ namespace app {
         );
         m_saveProviderUseCase = std::make_unique<application::usecase::settings::SaveProviderUseCase>(m_modelService.get());
         m_deleteProviderUseCase = std::make_unique<application::usecase::settings::DeleteProviderUseCase>(m_modelService.get());
+        m_testProviderConnectionUseCase = std::make_unique<application::usecase::settings::TestProviderConnectionUseCase>(m_discoveryGateway.get());
 
         // 7. ViewModels 表现层构造
         m_mainViewModel = std::make_unique<ui::screen::main::MainViewModel>();
@@ -133,7 +134,8 @@ namespace app {
             m_getModelsUseCase.get(),
             m_saveProviderUseCase.get(),
             m_deleteProviderUseCase.get(),
-            m_refreshModelsUseCase.get()
+            m_refreshModelsUseCase.get(),
+            m_testProviderConnectionUseCase.get()
         );
         // 8. 显式 DI 注册所有 Settings UIFactories
         registerSettings();

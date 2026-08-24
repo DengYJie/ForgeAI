@@ -9,9 +9,13 @@ namespace application::usecase::settings {
         m_modelService(modelService) {
         if (m_modelService) {
             connect(m_modelService, &domain::service::IModelService::providersChanged,
-                    this, &GetModelsUseCase::modelsChanged);
+                    this, [this] {
+                emit providersChanged();
+            });
             connect(m_modelService, &domain::service::IModelService::modelsChanged,
-                    this, &GetModelsUseCase::modelsChanged);
+                    this, [this] {
+                emit modelsChanged();
+            });
         }
     }
 

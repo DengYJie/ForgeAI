@@ -30,6 +30,7 @@ namespace application::usecase::settings {
         QList<domain::model::ResolvedModel> getEnabledResolvedModels() const;
 
     Q_SIGNALS:
+        void providersChanged();
         void modelsChanged();
 
     private:

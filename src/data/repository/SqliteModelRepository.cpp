@@ -177,6 +177,43 @@ namespace data::repository {
             return rm;
         }
 
+        QList<domain::model::ResolvedModel> getCustomResolvedModels(
+            const QSqlDatabase &db, const QString &whereClause, const QVariantList &arguments = {}) {
+            QList<domain::model::ResolvedModel> list;
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "SELECT "
+                "  COALESCE(pp.id, cp.id), COALESCE(pp.name, cp.name), COALESCE(pp.icon, cp.icon), "
+                "  COALESCE(pp.doc_url, ''), COALESCE(pp.env_var_name, ''), COALESCE(pp.type, cp.type), "
+                "  COALESCE(pp.base_url, cp.base_url), pp.proxy_url, COALESCE(pp.timeout_ms, cp.timeout_ms), "
+                "  COALESCE(uo.is_enabled, cp.is_enabled, 0), uo.base_url_override, COALESCE(uo.api_key, cp.api_key), "
+                "  ucm.provider_id, ucm.remote_model_id, ucm.canonical_model_id, "
+                "  0.0, 0.0, 0.0, 0.0, 'USD', "
+                "  NULL, NULL, NULL, NULL, '', ucm.is_enabled, 1, 'User', "
+                "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
+                "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
+                "  cm.modalities_input, cm.modalities_output, "
+                "  cm.default_temperature, cm.default_top_p, cm.default_enable_thinking, cm.default_thinking_budget_tokens, "
+                "  cm.open_weights, cm.knowledge_cutoff, cm.release_date "
+                "FROM user_custom_models ucm "
+                "LEFT JOIN preset_providers pp ON pp.id = ucm.provider_id "
+                "LEFT JOIN user_provider_overrides uo ON uo.provider_id = pp.id "
+                "LEFT JOIN user_custom_providers cp ON cp.id = ucm.provider_id "
+                "LEFT JOIN canonical_models cm ON cm.id = ucm.canonical_model_id "
+                "WHERE %1 "
+                "ORDER BY COALESCE(pp.name, cp.name) ASC, ucm.remote_model_id ASC;"
+            ).arg(whereClause));
+            for (qsizetype i = 0; i < arguments.size(); ++i) {
+                query.bindValue(i, arguments.at(i));
+            }
+            if (!query.exec()) {
+                qWarning() << "[getCustomResolvedModels] error:" << query.lastError().text();
+                return list;
+            }
+            while (query.next()) list.append(buildResolvedFromRow(query));
+            return list;
+        }
+
     } // anonymous namespace
 
     SqliteModelRepository::SqliteModelRepository(const QString &connectionName)
@@ -321,6 +358,7 @@ namespace data::repository {
             "  provider_id TEXT NOT NULL,"
             "  remote_model_id TEXT NOT NULL,"
             "  display_name TEXT NOT NULL,"
+            "  canonical_model_id TEXT,"
             "  is_enabled INTEGER DEFAULT 1,"
             "  PRIMARY KEY (provider_id, remote_model_id)"
             ");"
@@ -679,7 +717,7 @@ namespace data::repository {
         // 自定义模型
         QSqlQuery queryB(db);
         queryB.prepare(QStringLiteral(
-            "SELECT provider_id, remote_model_id, NULL, 0.0, 0.0, 0.0, 0.0, 'USD', "
+            "SELECT provider_id, remote_model_id, canonical_model_id, 0.0, 0.0, 0.0, 0.0, 'USD', "
             "       NULL, NULL, NULL, NULL, '', is_enabled, 1, 'User' "
             "FROM user_custom_models WHERE provider_id = ? "
             "ORDER BY remote_model_id ASC;"
@@ -695,19 +733,32 @@ namespace data::repository {
     void SqliteModelRepository::saveProviderModel(const domain::model::ProviderModel &binding) {
         auto db = getDatabase();
 
-        if (binding.isCustom || binding.origin == domain::model::DataOrigin::User) {
+        QSqlQuery presetBindingQuery(db);
+        presetBindingQuery.prepare(QStringLiteral(
+            "SELECT 1 FROM preset_provider_models WHERE provider_id = ? AND remote_model_id = ?;"));
+        presetBindingQuery.bindValue(0, binding.providerId);
+        presetBindingQuery.bindValue(1, binding.remoteModelId);
+        const bool isPresetBinding = presetBindingQuery.exec() && presetBindingQuery.next();
+
+        // Discovery marks all fetched models as User. An existing preset binding
+        // only needs an enable-state override; newly discovered IDs are stored
+        // as user custom models.
+        if (!isPresetBinding && (binding.isCustom || binding.origin == domain::model::DataOrigin::User)) {
             QSqlQuery q(db);
             q.prepare(QStringLiteral(
-                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, is_enabled) "
-                "VALUES (?, ?, ?, ?) "
+                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, canonical_model_id, is_enabled) "
+                "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(provider_id, remote_model_id) DO UPDATE SET "
                 "  display_name = excluded.display_name, "
+                "  canonical_model_id = excluded.canonical_model_id, "
                 "  is_enabled = excluded.is_enabled;"
             ));
             q.bindValue(0, binding.providerId);
             q.bindValue(1, binding.remoteModelId);
             q.bindValue(2, binding.remoteModelId);
-            q.bindValue(3, binding.isEnabled ? 1 : 0);
+            q.bindValue(3, binding.canonicalModelId.has_value()
+                ? QVariant(binding.canonicalModelId.value()) : QVariant());
+            q.bindValue(4, binding.isEnabled ? 1 : 0);
             if (!q.exec()) qWarning() << "[saveProviderModel] custom error:" << q.lastError().text();
         } else {
             QSqlQuery q(db);
@@ -764,6 +815,7 @@ namespace data::repository {
         if (query.exec()) {
             while (query.next()) list.append(buildResolvedFromRow(query));
         }
+        list.append(getCustomResolvedModels(db, QStringLiteral("ucm.provider_id = ?"), {providerId}));
         return list;
     }
 
@@ -793,6 +845,7 @@ namespace data::repository {
             "ORDER BY pp.name ASC, cm.family ASC, pm.remote_model_id ASC;"
         ), db);
         while (query.next()) list.append(buildResolvedFromRow(query));
+        list.append(getCustomResolvedModels(db, QStringLiteral("1 = 1")));
         return list;
     }
 
@@ -823,6 +876,7 @@ namespace data::repository {
             "ORDER BY pp.name ASC, cm.family ASC, pm.remote_model_id ASC;"
         ), db);
         while (query.next()) list.append(buildResolvedFromRow(query));
+        list.append(getCustomResolvedModels(db, QStringLiteral("COALESCE(uo.is_enabled, cp.is_enabled, 0) = 1 AND ucm.is_enabled = 1")));
         return list;
     }
 
@@ -856,6 +910,12 @@ namespace data::repository {
         query.bindValue(0, providerId);
         query.bindValue(1, remoteModelId);
         if (query.exec() && query.next()) return buildResolvedFromRow(query);
+
+        const auto customModels = getCustomResolvedModels(
+            db,
+            QStringLiteral("ucm.provider_id = ? AND ucm.remote_model_id = ?"),
+            {providerId, remoteModelId});
+        if (!customModels.isEmpty()) return customModels.first();
         return std::nullopt;
     }
 

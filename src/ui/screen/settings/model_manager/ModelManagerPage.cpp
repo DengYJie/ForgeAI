@@ -64,6 +64,9 @@ namespace ui::screen::settings::model_manager {
         connect(m_detailView, &ProviderDetailView::refreshModelsRequested, this, [this](const QString &id) {
             if (m_viewModel) m_viewModel->refreshModels(id);
         });
+        connect(m_detailView, &ProviderDetailView::testConnectionRequested, this, [this](const QString &id, const QString &baseUrl, const QString &apiKey) {
+            if (m_viewModel) m_viewModel->testConnection(id, baseUrl, apiKey);
+        });
     }
 
     void ModelManagerPage::renderState(const ModelManagerState &state) {
@@ -71,6 +74,7 @@ namespace ui::screen::settings::model_manager {
         if (!state.selectedProviderId.isEmpty()) m_navPane->selectProvider(state.selectedProviderId);
         m_detailView->setProviderData(state.selectedProvider, state.selectedProviderModels);
         m_detailView->setRefreshing(state.isRefreshing);
+        m_detailView->setTestingConnection(state.isTestingConnection && state.testingProviderId == state.selectedProviderId);
     }
 
     void ModelManagerPage::onAddProvider() {

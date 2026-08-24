@@ -3,7 +3,10 @@
 #include "application/usecase/settings/SaveProviderUseCase.h"
 #include "application/usecase/settings/DeleteProviderUseCase.h"
 #include "application/usecase/settings/RefreshModelsUseCase.h"
+#include "application/usecase/settings/TestProviderConnectionUseCase.h"
 #include <QDebug>
+
+#include <algorithm>
 
 namespace ui::screen::settings::model_manager {
 
@@ -12,16 +15,30 @@ namespace ui::screen::settings::model_manager {
         application::usecase::settings::SaveProviderUseCase *saveProviderUseCase,
         application::usecase::settings::DeleteProviderUseCase *deleteProviderUseCase,
         application::usecase::settings::RefreshModelsUseCase *refreshModelsUseCase,
+        application::usecase::settings::TestProviderConnectionUseCase *testProviderConnectionUseCase,
         QObject *parent
     ) : BaseViewModel<ModelManagerViewModel, ModelManagerState>(parent),
         m_getModelsUseCase(getModelsUseCase),
         m_saveProviderUseCase(saveProviderUseCase),
         m_deleteProviderUseCase(deleteProviderUseCase),
-        m_refreshModelsUseCase(refreshModelsUseCase) {
+        m_refreshModelsUseCase(refreshModelsUseCase),
+        m_testProviderConnectionUseCase(testProviderConnectionUseCase) {
 
         if (m_getModelsUseCase) {
+            connect(m_getModelsUseCase, &application::usecase::settings::GetModelsUseCase::providersChanged,
+                    this, [this] {
+                if (m_applyingLocalProviderChange) {
+                    return;
+                }
+                loadProviders();
+            });
             connect(m_getModelsUseCase, &application::usecase::settings::GetModelsUseCase::modelsChanged,
-                    this, &ModelManagerViewModel::loadProviders);
+                    this, [this] {
+                if (m_applyingLocalProviderChange || m_state.isRefreshing) {
+                    return;
+                }
+                refreshSelectedProviderModels();
+            });
         }
 
         if (m_refreshModelsUseCase) {
@@ -36,7 +53,9 @@ namespace ui::screen::settings::model_manager {
             connect(m_refreshModelsUseCase, &application::usecase::settings::RefreshModelsUseCase::discoveryFinished,
                     this, [this](const QString &providerId, int count) {
                 Q_EMIT toastRequested(tr("成功刷新 %1 个可用模型").arg(count), false);
-                loadProviders();
+                if (providerId == m_state.selectedProviderId) {
+                    refreshSelectedProviderModels();
+                }
                 updateState([](ModelManagerState &s) {
                     s.isRefreshing = false;
                     s.refreshingProviderId.clear();
@@ -52,12 +71,46 @@ namespace ui::screen::settings::model_manager {
                 });
             });
         }
+
+        if (m_testProviderConnectionUseCase) {
+            connect(m_testProviderConnectionUseCase, &application::usecase::settings::TestProviderConnectionUseCase::testStarted,
+                    this, [this](const QString &providerId) {
+                updateState([&providerId](ModelManagerState &s) {
+                    s.isTestingConnection = true;
+                    s.testingProviderId = providerId;
+                });
+            });
+            connect(m_testProviderConnectionUseCase, &application::usecase::settings::TestProviderConnectionUseCase::testSucceeded,
+                    this, [this](const QString &) {
+                Q_EMIT toastRequested(tr("连接测试成功。"), false);
+                updateState([](ModelManagerState &s) {
+                    s.isTestingConnection = false;
+                    s.testingProviderId.clear();
+                });
+            });
+            connect(m_testProviderConnectionUseCase, &application::usecase::settings::TestProviderConnectionUseCase::testFailed,
+                    this, [this](const QString &, const QString &errorMessage) {
+                Q_EMIT toastRequested(tr("连接测试失败: %1").arg(errorMessage), true);
+                updateState([](ModelManagerState &s) {
+                    s.isTestingConnection = false;
+                    s.testingProviderId.clear();
+                });
+            });
+        }
     }
 
     void ModelManagerViewModel::loadProviders() {
         if (!m_getModelsUseCase) return;
 
-        const auto providers = m_getModelsUseCase->getAllProviders();
+        auto providers = m_getModelsUseCase->getAllProviders();
+        std::sort(providers.begin(), providers.end(),
+            [](const domain::model::ModelProvider &left, const domain::model::ModelProvider &right) {
+                if (left.isEnabled != right.isEnabled) return left.isEnabled > right.isEnabled;
+
+                const int nameOrder = QString::localeAwareCompare(left.name, right.name);
+                if (nameOrder != 0) return nameOrder < 0;
+                return left.id < right.id;
+            });
         qInfo().noquote() << QStringLiteral("[ModelManagerViewModel] loadProviders: 从用例获取到 %1 个服务商").arg(providers.size());
         updateState([this, &providers](ModelManagerState &s) {
             s.providers = providers;
@@ -68,7 +121,9 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ModelManagerViewModel::selectProvider(const QString &providerId) {
-        if (m_state.selectedProviderId == providerId) return;
+        if (m_state.selectedProviderId == providerId) {
+            return;
+        }
 
         updateState([this, &providerId](ModelManagerState &s) {
             applyProviderSelection(s, providerId);
@@ -77,7 +132,9 @@ namespace ui::screen::settings::model_manager {
 
     void ModelManagerViewModel::saveProvider(const domain::model::ModelProvider &provider) {
         if (m_saveProviderUseCase) {
+            m_applyingLocalProviderChange = true;
             m_saveProviderUseCase->execute(provider);
+            m_applyingLocalProviderChange = false;
         }
 
         updateState([this, &provider](ModelManagerState &s) {
@@ -112,7 +169,9 @@ namespace ui::screen::settings::model_manager {
         if (intent.isEnabled.has_value()) modifiedProvider.isEnabled = intent.isEnabled.value();
 
         if (m_saveProviderUseCase) {
+            m_applyingLocalProviderChange = true;
             m_saveProviderUseCase->execute(modifiedProvider);
+            m_applyingLocalProviderChange = false;
         }
 
         updateState([this, modifiedProvider](ModelManagerState &s) {
@@ -130,7 +189,9 @@ namespace ui::screen::settings::model_manager {
 
     void ModelManagerViewModel::deleteProvider(const QString &providerId) {
         if (m_deleteProviderUseCase) {
+            m_applyingLocalProviderChange = true;
             m_deleteProviderUseCase->execute(providerId);
+            m_applyingLocalProviderChange = false;
         }
 
         updateState([this, &providerId](ModelManagerState &s) {
@@ -161,9 +222,26 @@ namespace ui::screen::settings::model_manager {
         }
     }
 
+    void ModelManagerViewModel::testConnection(const QString &providerId, const QString &baseUrl, const QString &apiKey) {
+        if (!m_testProviderConnectionUseCase) return;
+
+        for (const auto &provider : m_state.providers) {
+            if (provider.id == providerId) {
+                auto testProvider = provider;
+                testProvider.baseUrl = baseUrl;
+                testProvider.apiKey = apiKey;
+                m_testProviderConnectionUseCase->execute(testProvider);
+                return;
+            }
+        }
+        Q_EMIT toastRequested(tr("服务商不存在，无法测试连接。"), true);
+    }
+
     void ModelManagerViewModel::addProvider(const domain::model::ModelProvider &provider) {
         if (m_saveProviderUseCase) {
+            m_applyingLocalProviderChange = true;
             m_saveProviderUseCase->execute(provider);
+            m_applyingLocalProviderChange = false;
         }
 
         updateState([this, &provider](ModelManagerState &s) {
@@ -187,7 +265,20 @@ namespace ui::screen::settings::model_manager {
         // 预留自定义模型添加
     }
 
+    void ModelManagerViewModel::refreshSelectedProviderModels() {
+        if (!m_getModelsUseCase || m_state.selectedProviderId.isEmpty()) return;
+
+        const QString providerId = m_state.selectedProviderId;
+        const auto models = m_getModelsUseCase->getModelsForProvider(providerId);
+        updateState([&models](ModelManagerState &s) {
+            s.selectedProviderModels = models;
+        });
+    }
+
     void ModelManagerViewModel::applyProviderSelection(ModelManagerState &state, const QString &preferredId) {
+        // `preferredId` can alias state.selectedProviderId (as in loadProviders).
+        // Preserve it before clearing the state so a refresh retains selection.
+        QString targetId = preferredId;
         state.selectedProviderId.clear();
         state.selectedProvider.reset();
         state.selectedProviderModels.clear();
@@ -196,7 +287,6 @@ namespace ui::screen::settings::model_manager {
             return;
         }
 
-        QString targetId = preferredId;
         if (targetId.isEmpty()) {
             targetId = state.providers.first().id;
         }

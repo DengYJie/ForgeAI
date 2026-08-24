@@ -31,6 +31,7 @@ namespace ui::screen::settings::model_manager {
         void setProviderData(const std::optional<domain::model::ModelProvider> &provider, const QList<domain::model::ResolvedModel> &models = {});
         const domain::model::ModelProvider &provider() const { return m_provider; }
         void setRefreshing(bool refreshing);
+        void setTestingConnection(bool testing);
 
     Q_SIGNALS:
         void baseUrlEditRequested(const QString &providerId, const QString &baseUrl);
@@ -55,6 +56,7 @@ namespace ui::screen::settings::model_manager {
         QList<domain::model::ResolvedModel> m_models;
         bool m_hasProvider = false;
         bool m_syncingTree = false;
+        bool m_testingConnection = false;
         
         // View-local edit state for debouncing
         QString m_pendingBaseUrl;

@@ -412,6 +412,8 @@ set(PROJECT_SOURCES
         src/application/usecase/settings/GetModelsUseCase.cpp
         src/application/usecase/settings/RefreshModelsUseCase.h
         src/application/usecase/settings/RefreshModelsUseCase.cpp
+        src/application/usecase/settings/TestProviderConnectionUseCase.h
+        src/application/usecase/settings/TestProviderConnectionUseCase.cpp
         src/application/usecase/settings/SaveProviderUseCase.h
         src/application/usecase/settings/SaveProviderUseCase.cpp
         src/application/usecase/settings/DeleteProviderUseCase.h

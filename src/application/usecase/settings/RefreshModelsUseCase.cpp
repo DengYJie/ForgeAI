@@ -58,7 +58,8 @@ namespace application::usecase::settings {
 
         auto optProvider = m_registry->getProvider(m_currentProviderId);
         if (optProvider.has_value()) {
-            for (const auto &binding : models) {
+            const auto hydratedModels = m_registry->hydrateDiscoveredModels(m_currentProviderId, models);
+            for (const auto &binding : hydratedModels) {
                 m_registry->saveProviderModel(binding);
             }
 

@@ -13,6 +13,7 @@ namespace application::usecase::settings {
     class SaveProviderUseCase;
     class DeleteProviderUseCase;
     class RefreshModelsUseCase;
+    class TestProviderConnectionUseCase;
 }
 
 namespace ui::screen::settings::model_manager {
@@ -28,6 +29,8 @@ namespace ui::screen::settings::model_manager {
         bool isLoading = false;
         bool isRefreshing = false;
         QString refreshingProviderId;
+        bool isTestingConnection = false;
+        QString testingProviderId;
         QString errorMessage;
 
         bool operator==(const ModelManagerState &other) const = default;
@@ -55,6 +58,7 @@ namespace ui::screen::settings::model_manager {
             application::usecase::settings::SaveProviderUseCase *saveProviderUseCase,
             application::usecase::settings::DeleteProviderUseCase *deleteProviderUseCase,
             application::usecase::settings::RefreshModelsUseCase *refreshModelsUseCase,
+            application::usecase::settings::TestProviderConnectionUseCase *testProviderConnectionUseCase,
             QObject *parent = nullptr
         );
 
@@ -66,6 +70,7 @@ namespace ui::screen::settings::model_manager {
         void updateProvider(const UpdateProviderIntent &intent);
         void deleteProvider(const QString &providerId);
         void refreshModels(const QString &providerId);
+        void testConnection(const QString &providerId, const QString &baseUrl, const QString &apiKey);
         void addProvider(const domain::model::ModelProvider &provider);
         void addModel(const domain::model::ProviderModel &binding);
 
@@ -80,11 +85,14 @@ namespace ui::screen::settings::model_manager {
 
     private:
         void applyProviderSelection(ModelManagerState &state, const QString &preferredId = QString());
+        void refreshSelectedProviderModels();
 
         application::usecase::settings::GetModelsUseCase *m_getModelsUseCase = nullptr;
         application::usecase::settings::SaveProviderUseCase *m_saveProviderUseCase = nullptr;
         application::usecase::settings::DeleteProviderUseCase *m_deleteProviderUseCase = nullptr;
         application::usecase::settings::RefreshModelsUseCase *m_refreshModelsUseCase = nullptr;
+        application::usecase::settings::TestProviderConnectionUseCase *m_testProviderConnectionUseCase = nullptr;
+        bool m_applyingLocalProviderChange = false;
     };
 
 } // namespace ui::screen::settings::model_manager

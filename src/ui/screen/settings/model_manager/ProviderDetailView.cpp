@@ -222,7 +222,7 @@ namespace ui::screen::settings::model_manager {
         m_modelTreeView->setItemDelegate(treeDelegate);
 
         connect(m_modelTreeView, &QTreeView::clicked, this, [this](const QModelIndex &index) {
-            if (!index.parent().isValid()) {
+            if (!m_syncingTree && !index.parent().isValid()) {
                 m_modelTreeView->toggleExpanded(index);
             }
         });
@@ -258,7 +258,16 @@ namespace ui::screen::settings::model_manager {
     }
 
     void ProviderDetailView::setProviderData(const std::optional<domain::model::ModelProvider> &provider, const QList<domain::model::ResolvedModel> &models) {
-        m_debounceTimer.stop();
+        const QString nextProviderId = provider.has_value() ? provider->id : QString();
+        const QString currentProviderId = m_hasProvider ? m_provider.id : QString();
+        const bool providerChanged = currentProviderId != nextProviderId;
+        if (providerChanged) {
+            m_debounceTimer.stop();
+            m_pendingBaseUrl.clear();
+            m_pendingApiKey.clear();
+            m_baseUrlDirty = false;
+            m_apiKeyDirty = false;
+        }
         m_hasProvider = provider.has_value();
         m_provider = provider.value_or(domain::model::ModelProvider{});
         m_models = models;
@@ -267,8 +276,14 @@ namespace ui::screen::settings::model_manager {
         const QSignalBlocker keyBlocker(m_keyEdit);
         m_nameLabel->setText(m_hasProvider ? m_provider.name : QString());
         m_enableSwitch->setIsOn(m_hasProvider && m_provider.isEnabled);
-        m_urlEdit->setText(m_provider.baseUrl);
-        m_keyEdit->setText(m_provider.apiKey);
+        // Do not overwrite an in-progress local edit when unrelated state updates
+        // (for example, connection-test state) are rendered for the same provider.
+        if (providerChanged || !m_baseUrlDirty) {
+            m_urlEdit->setText(m_provider.baseUrl);
+        }
+        if (providerChanged || !m_apiKeyDirty) {
+            m_keyEdit->setText(m_provider.apiKey);
+        }
         rebuildModelTree();
     }
 
@@ -321,7 +336,16 @@ namespace ui::screen::settings::model_manager {
         }
     }
 
+    void ProviderDetailView::setTestingConnection(bool testing) {
+        m_testingConnection = testing;
+        if (m_testBtn) {
+            m_testBtn->setText(testing ? tr("检测中...") : tr("检测"));
+            m_testBtn->setEnabled(!testing && m_hasProvider);
+        }
+    }
+
     void ProviderDetailView::testConnection() {
+        if (!m_hasProvider || m_testingConnection) return;
         QString baseUrl = m_urlEdit->text().trimmed();
         QString apiKey = m_keyEdit->text().trimmed();
 

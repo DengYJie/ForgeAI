@@ -24,6 +24,7 @@
 #include "application/usecase/settings/GetSettingsProvidersUseCase.h"
 #include "application/usecase/settings/SaveProviderUseCase.h"
 #include "application/usecase/settings/DeleteProviderUseCase.h"
+#include "application/usecase/settings/TestProviderConnectionUseCase.h"
 #include "ui/screen/main/MainViewModel.h"
 #include "ui/screen/chat/ChatViewModel.h"
 #include "ui/screen/work/WorkViewModel.h"
@@ -127,6 +128,7 @@ namespace app {
         std::unique_ptr<application::usecase::settings::RefreshModelsUseCase> m_refreshModelsUseCase;
         std::unique_ptr<application::usecase::settings::SaveProviderUseCase> m_saveProviderUseCase;
         std::unique_ptr<application::usecase::settings::DeleteProviderUseCase> m_deleteProviderUseCase;
+        std::unique_ptr<application::usecase::settings::TestProviderConnectionUseCase> m_testProviderConnectionUseCase;
 
         // 全局 ViewModels
         std::unique_ptr<ui::screen::main::MainViewModel> m_mainViewModel;

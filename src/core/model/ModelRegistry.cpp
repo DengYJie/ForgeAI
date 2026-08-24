@@ -3,6 +3,15 @@
 
 namespace core::model {
 
+    namespace {
+        QString unqualifiedModelId(QString modelId) {
+            modelId = modelId.trimmed();
+            while (modelId.endsWith(QLatin1Char('/'))) modelId.chop(1);
+            const int separator = modelId.lastIndexOf(QLatin1Char('/'));
+            return separator >= 0 ? modelId.mid(separator + 1) : modelId;
+        }
+    } // namespace
+
     ModelRegistry::ModelRegistry(std::shared_ptr<domain::repository::IModelRepository> repository, QObject *parent)
         : QObject(parent), m_repository(std::move(repository)) {
     }
@@ -151,13 +160,36 @@ namespace core::model {
         const QString &providerId,
         const QList<domain::model::ProviderModel> &discoveredModels) const {
         QList<domain::model::ProviderModel> result;
+        const QList<domain::model::CanonicalModel> canonicalModels = m_repository
+            ? m_repository->getAllCanonicalModels()
+            : QList<domain::model::CanonicalModel>{};
+        QHash<QString, QString> canonicalIds;
+        for (const auto &canonical : canonicalModels) {
+            canonicalIds.insert(canonical.id, canonical.id);
+        }
+
         for (const auto &raw : discoveredModels) {
             domain::model::ProviderModel pm = raw;
             pm.providerId = providerId;
             if (m_repository) {
-                auto optCm = m_repository->getCanonicalModel(raw.remoteModelId);
-                if (optCm.has_value()) {
-                    pm.canonicalModelId = optCm->id;
+                const auto exactMatch = canonicalIds.constFind(raw.remoteModelId);
+                if (exactMatch != canonicalIds.cend()) {
+                    pm.canonicalModelId = exactMatch.value();
+                } else {
+                    const QString unqualifiedId = unqualifiedModelId(raw.remoteModelId);
+                    QList<domain::model::CanonicalModel> candidates;
+                    for (const auto &canonical : canonicalModels) {
+                        if (unqualifiedModelId(canonical.id).compare(unqualifiedId, Qt::CaseInsensitive) == 0) {
+                            candidates.append(canonical);
+                        }
+                    }
+
+                    // A suffix is safe only when it identifies one canonical
+                    // model. Ambiguous names remain unhydrated rather than
+                    // assigning metadata from the wrong provider/model.
+                    if (candidates.size() == 1) {
+                        pm.canonicalModelId = candidates.first().id;
+                    }
                 }
             }
             result.append(pm);
