@@ -55,5 +55,11 @@ namespace domain::service {
             const QString &sessionId,
             const QString &currentSessionId
         ) = 0;
+        virtual void setSessionPinned(QList<ui::screen::chat::ChatSessionItemData>& sessions,
+                                      const QString& sessionId, bool pinned) = 0;
+        virtual void setSessionArchived(QList<ui::screen::chat::ChatSessionItemData>& sessions,
+                                        const QString& sessionId, bool archived) = 0;
+        virtual void setSessionTitle(QList<ui::screen::chat::ChatSessionItemData>& sessions,
+                                     const QString& sessionId, const QString& title) = 0;
     };
 } // namespace domain::service

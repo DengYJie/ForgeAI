@@ -103,6 +103,8 @@ namespace ui::screen::chat {
          */
         void sessionPinToggled(const QString &id, bool pinned);
 
+        void sessionArchiveRequested(const QString &id);
+
     private:
         void setupUi();
 

@@ -1,8 +1,34 @@
 #include "ChatViewModel.h"
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QFile>
+#include <QJsonObject>
+#include <algorithm>
 
 namespace ui::screen::chat {
     namespace {
+        QStringList canonicalReasoningEfforts(const QString& canonicalId) {
+            static QHash<QString, QStringList> cache;
+            static bool loaded = false;
+            if (!loaded) {
+                loaded = true;
+                QFile file(QStringLiteral(":/config/models.json"));
+                if (file.open(QIODevice::ReadOnly)) {
+                    const QJsonObject models = QJsonDocument::fromJson(file.readAll()).object();
+                    for (auto it = models.begin(); it != models.end(); ++it) {
+                        QStringList values;
+                        for (const auto& option : it.value().toObject().value(QStringLiteral("reasoning_options")).toArray()) {
+                            const QJsonObject object = option.toObject();
+                            if (object.value(QStringLiteral("type")).toString() != QStringLiteral("effort")) continue;
+                            for (const auto& value : object.value(QStringLiteral("values")).toArray()) values.append(value.toString());
+                        }
+                        cache.insert(it.key(), values);
+                    }
+                }
+            }
+            return cache.value(canonicalId);
+        }
         QString extractMessageText(const domain::conversation::Message &msg) {
             QString result;
             for (const auto &block : msg.blocks) {
@@ -47,9 +73,10 @@ namespace ui::screen::chat {
                     s.messages = m_useCases.loadSessionDetail->execute(s.currentSessionId);
                 }
             } else {
-                s.currentSessionId = QStringLiteral("session_1");
+                s.currentSessionId = QUuid::createUuid().toString();
                 s.sessionTitle = QStringLiteral("新对话");
             }
+            refreshAvailableModels(s);
             recalculateAnchors(s);
         });
     }
@@ -57,6 +84,11 @@ namespace ui::screen::chat {
     ChatViewModel::~ChatViewModel() = default;
 
     void ChatViewModel::setupUseCaseConnections() {
+        if (m_useCases.getModels) {
+            connect(m_useCases.getModels, &application::usecase::settings::GetModelsUseCase::modelsChanged, this, [this] {
+                updateState([this](ChatState& state) { refreshAvailableModels(state); });
+            });
+        }
         if (!m_useCases.sendMessage) return;
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::userMessageCreated,
@@ -66,6 +98,7 @@ namespace ui::screen::chat {
                 const bool isFirstMessage = s.messages.isEmpty();
                 s.messages.append(msg);
                 s.isGenerating = true;
+                s.streamingMessageId = {};
 
                 if (isFirstMessage && !s.sessionTitleManuallyEdited) {
                     const QString newTitle = autoTitle(s.messages);
@@ -76,11 +109,65 @@ namespace ui::screen::chat {
             });
         });
 
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::tokenReceived,
+                this, [this](const QString& sessionId, const QString& token) {
+            updateState([sessionId, token](ChatState& s) {
+                if (s.currentSessionId != sessionId || token.isEmpty()) return;
+                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
+                if (it == s.messages.end()) {
+                    domain::conversation::Message streaming;
+                    streaming.id = QUuid::createUuid(); streaming.role = domain::MessageRole::Assistant;
+                    streaming.status = domain::MessageStatus::Sending; streaming.createdAt = QDateTime::currentDateTime();
+                    streaming.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
+                    s.streamingMessageId = streaming.id; s.messages.append(std::move(streaming));
+                    return;
+                }
+                for (auto& block : it->blocks) {
+                    if (block.isText()) { std::get<domain::conversation::TextBlock>(block.payload).text += token; return; }
+                }
+                it->blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
+            });
+        });
+
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::thoughtReceived,
+                this, [this](const QString& sessionId, const QString& thought) {
+            updateState([sessionId, thought](ChatState& s) {
+                if (s.currentSessionId != sessionId || thought.isEmpty()) return;
+                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
+                if (it == s.messages.end()) {
+                    domain::conversation::Message streaming;
+                    streaming.id = QUuid::createUuid(); streaming.role = domain::MessageRole::Assistant;
+                    streaming.status = domain::MessageStatus::Sending; streaming.createdAt = QDateTime::currentDateTime();
+                    streaming.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
+                    s.streamingMessageId = streaming.id; s.messages.append(std::move(streaming));
+                    return;
+                }
+                for (auto& block : it->blocks) {
+                    if (block.isThought()) { std::get<domain::conversation::ThoughtBlock>(block.payload).thought += thought; return; }
+                }
+                it->blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
+            });
+        });
+
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::toolCallReceived,
+                this, [this](const QString& sessionId, const domain::agent::ToolCall& call) {
+            updateState([sessionId, call](ChatState& s) {
+                if (s.currentSessionId != sessionId) return;
+                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
+                if (it == s.messages.end()) return;
+                domain::conversation::ToolCallBlock calls; calls.calls.append(call);
+                it->blocks.append({domain::BlockType::ToolCall, calls});
+            });
+        });
+
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::replyGenerated,
                 this, [this](const QString &sessionId, const domain::conversation::Message &msg) {
             updateState([sessionId, msg](ChatState &s) {
                 if (s.currentSessionId != sessionId) return;
-                s.messages.append(msg);
+                const auto streaming = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
+                if (streaming != s.messages.end()) *streaming = msg;
+                else s.messages.append(msg);
+                s.streamingMessageId = {};
                 recalculateAnchors(s);
             });
         });
@@ -90,6 +177,7 @@ namespace ui::screen::chat {
             updateState([sessionId](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
+                    s.streamingMessageId = {};
                     s.statusMessage.clear();
                     s.lastError.reset();
                 }
@@ -101,6 +189,7 @@ namespace ui::screen::chat {
             updateState([sessionId, error](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
+                    s.streamingMessageId = {};
                     s.lastError = error;
                     s.statusMessage = error.userMessage.isEmpty() ? error.message : error.userMessage;
                 }
@@ -185,7 +274,9 @@ namespace ui::screen::chat {
         if (trimmed.isEmpty()) return;
 
         if (m_useCases.sendMessage) {
-            m_useCases.sendMessage->execute(m_state.currentSessionId, trimmed);
+            m_useCases.sendMessage->execute(m_state.currentSessionId, trimmed,
+                                            m_state.currentModelProviderId, m_state.currentModelId,
+                                            m_state.useWebSearch, m_state.useDeepThinking, m_state.reasoningEffort);
         }
     }
 
@@ -200,9 +291,90 @@ namespace ui::screen::chat {
         });
     }
 
+    void ChatViewModel::clearCurrentSession() {
+        stopGeneration();
+        updateState([this](ChatState& s) {
+            if (m_useCases.clearSession) m_useCases.clearSession->execute(s.currentSessionId);
+            s.messages.clear();
+            s.streamingMessageId = {};
+            s.statusMessage.clear();
+            s.lastError.reset();
+            recalculateAnchors(s);
+        });
+    }
+
+    void ChatViewModel::setSessionPinned(const QString& sessionId, bool pinned) {
+        updateState([this, sessionId, pinned](ChatState& s) {
+            if (m_useCases.setSessionPinned) m_useCases.setSessionPinned->execute(s.sessions, sessionId, pinned);
+        });
+    }
+
+    void ChatViewModel::setSessionArchived(const QString& sessionId, bool archived) {
+        updateState([this, sessionId, archived](ChatState& s) {
+            if (m_useCases.setSessionArchived)
+                m_useCases.setSessionArchived->execute(s.sessions, sessionId, archived);
+            if (archived && s.currentSessionId == sessionId) {
+                const auto next = std::find_if(s.sessions.cbegin(), s.sessions.cend(),
+                    [](const ChatSessionItemData& item) { return !item.isArchived; });
+                if (next != s.sessions.cend()) {
+                    s.currentSessionId = next->id;
+                    s.sessionTitle = next->title;
+                    s.sessionTitleManuallyEdited = next->title != QStringLiteral("新对话");
+                    s.messages = m_useCases.loadSessionDetail
+                        ? m_useCases.loadSessionDetail->execute(next->id)
+                        : QList<domain::conversation::Message>{};
+                } else if (m_useCases.createSession) {
+                    const QString newId = m_useCases.createSession->execute(s.sessions, {});
+                    s.currentSessionId = newId;
+                    s.sessionTitle = QStringLiteral("新对话");
+                    s.sessionTitleManuallyEdited = false;
+                    s.messages.clear();
+                }
+                s.isGenerating = false;
+                recalculateAnchors(s);
+            }
+        });
+    }
+
+    void ChatViewModel::setWebSearchEnabled(bool enabled) {
+        updateState([enabled](ChatState& state) { state.useWebSearch = enabled; });
+    }
+
+    void ChatViewModel::setDeepThinkingEnabled(bool enabled) {
+        updateState([enabled](ChatState& state) { state.useDeepThinking = enabled; });
+    }
+
+    void ChatViewModel::setReasoningEffort(const QString& effort) {
+        updateState([effort](ChatState& state) {
+            state.reasoningEffort = effort;
+            state.useDeepThinking = !effort.isEmpty() && effort != QStringLiteral("none");
+        });
+    }
+
     void ChatViewModel::setModelName(const QString &modelName) {
         updateState([modelName](ChatState &s) {
-            s.currentModelName = modelName;
+            const auto it = std::find_if(s.availableModels.cbegin(), s.availableModels.cend(), [&](const ChatModelOption& option) {
+                return option.displayName == modelName;
+            });
+            if (it != s.availableModels.cend()) {
+                s.currentModelName = it->displayName;
+                s.currentModelProviderId = it->providerId;
+                s.currentModelId = it->modelId;
+            }
+        });
+    }
+
+    void ChatViewModel::setModel(const QString &providerId, const QString &modelId) {
+        updateState([providerId, modelId](ChatState &s) {
+            const auto it = std::find_if(s.availableModels.cbegin(), s.availableModels.cend(), [&](const ChatModelOption& option) {
+                return option.providerId == providerId && option.modelId == modelId;
+            });
+            if (it == s.availableModels.cend()) return;
+            s.currentModelProviderId = it->providerId;
+            s.currentModelId = it->modelId;
+            s.currentModelName = it->displayName;
+            s.reasoningEffort = it->reasoningEfforts.contains(QStringLiteral("medium"))
+                ? QStringLiteral("medium") : (it->reasoningEfforts.isEmpty() ? QString() : it->reasoningEfforts.first());
         });
     }
 
@@ -225,6 +397,48 @@ namespace ui::screen::chat {
         updateState([index](ChatState &s) {
             s.activeAnchorIndex = index;
         });
+    }
+
+    void ChatViewModel::refreshAvailableModels(ChatState &s) const {
+        s.availableModels.clear();
+        if (!m_useCases.getModels) return;
+        const auto models = m_useCases.getModels->getEnabledResolvedModels();
+        for (const auto& model : models) {
+            const auto capabilities = model.effectiveCapabilities();
+            QStringList efforts;
+            const QJsonArray options = QJsonDocument::fromJson(model.binding.reasoningOptionsJson.toUtf8()).array();
+            for (const auto& option : options) {
+                const QJsonObject object = option.toObject();
+                if (object.value(QStringLiteral("type")).toString() != QStringLiteral("effort")) continue;
+                for (const auto& value : object.value(QStringLiteral("values")).toArray()) efforts.append(value.toString());
+            }
+            if (efforts.isEmpty() && model.binding.canonicalModelId.has_value())
+                efforts = canonicalReasoningEfforts(*model.binding.canonicalModelId);
+            s.availableModels.append({
+                model.provider.id, model.requestModelId(), model.displayName(), model.provider.name,
+                capabilities.testFlag(domain::model::ModelCapability::Vision)
+                    || capabilities.testFlag(domain::model::ModelCapability::Pdf)
+                    || capabilities.testFlag(domain::model::ModelCapability::Audio)
+                    || capabilities.testFlag(domain::model::ModelCapability::Video),
+                model.provider.type == domain::model::ProviderType::OpenAIResponses,
+                capabilities.testFlag(domain::model::ModelCapability::Thinking), efforts
+            });
+        }
+        if (s.availableModels.isEmpty()) {
+            s.currentModelProviderId.clear();
+            s.currentModelId.clear();
+            s.currentModelName = QStringLiteral("选择模型");
+            return;
+        }
+        const auto current = std::find_if(s.availableModels.cbegin(), s.availableModels.cend(), [&](const ChatModelOption& option) {
+            return option.providerId == s.currentModelProviderId && option.modelId == s.currentModelId;
+        });
+        if (current == s.availableModels.cend()) {
+            const ChatModelOption& fallback = s.availableModels.first();
+            s.currentModelProviderId = fallback.providerId;
+            s.currentModelId = fallback.modelId;
+            s.currentModelName = fallback.displayName;
+        }
     }
 
     void ChatViewModel::recalculateAnchors(ChatState &s) {
@@ -254,12 +468,13 @@ namespace ui::screen::chat {
         }
     }
 
-    void ChatViewModel::syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title) {
-        for (auto &sess : s.sessions) {
-            if (sess.id == sessionId) {
-                sess.title = title;
-                return;
-            }
+    void ChatViewModel::syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title) const {
+        if (m_useCases.setSessionTitle) {
+            m_useCases.setSessionTitle->execute(s.sessions, sessionId, title);
+            return;
+        }
+        for (auto &session : s.sessions) {
+            if (session.id == sessionId) { session.title = title; break; }
         }
     }
 

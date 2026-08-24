@@ -6,6 +6,7 @@
 #include "core/logging/LogCategory.h"
 #include <QDateTime>
 #include <QUuid>
+#include <algorithm>
 
 namespace application::usecase::chat {
 
@@ -24,7 +25,9 @@ namespace application::usecase::chat {
         cancelCurrent();
     }
 
-    void SendMessageUseCase::execute(const QString &sessionId, const QString &text) {
+    void SendMessageUseCase::execute(const QString &sessionId, const QString &text,
+                                     const QString &providerId, const QString &modelId,
+                                     bool useWebSearch, bool useDeepThinking, const QString& reasoningEffort) {
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty() || sessionId.isEmpty()) return;
         
@@ -39,9 +42,8 @@ namespace application::usecase::chat {
             return;
         }
         
-        domain::model::ModelProvider provider;
-        auto providers = m_modelService->getActiveProviders();
-        if (providers.isEmpty()) {
+        const auto models = m_modelService->getEnabledResolvedModels();
+        if (models.isEmpty()) {
             domain::llm::ChatError err;
             err.category = domain::llm::ChatErrorCategory::Configuration;
             err.code = QStringLiteral("NoActiveProvider");
@@ -51,7 +53,20 @@ namespace application::usecase::chat {
             emit generationFailed(sessionId, err);
             return;
         }
-        provider = providers.first(); // 真实逻辑应是获取当前激活的 provider
+        const auto selected = std::find_if(models.cbegin(), models.cend(), [&](const domain::model::ResolvedModel& model) {
+            return (providerId.isEmpty() || model.provider.id == providerId)
+                && (modelId.isEmpty() || model.requestModelId() == modelId);
+        });
+        if (selected == models.cend()) {
+            domain::llm::ChatError err;
+            err.category = domain::llm::ChatErrorCategory::Configuration;
+            err.code = QStringLiteral("SelectedModelUnavailable");
+            err.message = QStringLiteral("The selected model is no longer enabled.");
+            err.userMessage = QStringLiteral("所选模型不可用，请重新选择。");
+            emit generationFailed(sessionId, err);
+            return;
+        }
+        const domain::model::ModelProvider provider = selected->provider;
         
         // 2. 创建并保存用户消息
         domain::conversation::Message userMsg;
@@ -86,8 +101,11 @@ namespace application::usecase::chat {
         
         // 3. 构建 ChatRequest
         domain::llm::ChatRequest request;
-        request.model = "gpt-4o"; // TODO: get from active model selection
+        request.model = selected->requestModelId();
         request.stream = true;
+        request.useWebSearch = useWebSearch;
+        request.useDeepThinking = useDeepThinking;
+        request.reasoningEffort = reasoningEffort;
         
         // 将 conversation history 转换为 ChatMessage
         for (const auto &msg : history) {

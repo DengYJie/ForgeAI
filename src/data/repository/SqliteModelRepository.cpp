@@ -4,6 +4,7 @@
 #include "data/importer/ModelsDevImporter.h"
 
 #include <QSqlQuery>
+#include <QSqlRecord>
 #include <QSqlError>
 #include <QVariant>
 #include <QFile>
@@ -168,6 +169,8 @@ namespace data::repository {
             rm.binding.isEnabled      = q.value(25).toInt() != 0;
             rm.binding.isCustom       = q.value(26).toInt() != 0;
             rm.binding.origin         = stringToOrigin(q.value(27).toString());
+            const int reasoningOptionsColumn = q.record().indexOf(QStringLiteral("reasoning_options"));
+            if (reasoningOptionsColumn >= 0) rm.binding.reasoningOptionsJson = q.value(reasoningOptionsColumn).toString();
 
             // CanonicalModel (offset 28..44)
             if (!q.value(28).isNull()) {
@@ -307,6 +310,7 @@ namespace data::repository {
             "  max_output_override INTEGER,"
             "  capabilities_override INTEGER,"
             "  reasoning_field TEXT,"
+            "  reasoning_options TEXT,"
             "  is_enabled INTEGER DEFAULT 1,"
             "  is_custom INTEGER DEFAULT 0,"
             "  origin TEXT DEFAULT 'BuiltIn',"
@@ -489,9 +493,9 @@ namespace data::repository {
             "INSERT INTO preset_provider_models ("
             "  provider_id, remote_model_id, canonical_model_id, pricing_input, pricing_output, "
             "  pricing_cache_read, pricing_cache_write, pricing_currency, context_limit_override, "
-            "  max_input_override, max_output_override, capabilities_override, reasoning_field, "
+            "  max_input_override, max_output_override, capabilities_override, reasoning_field, reasoning_options, "
             "  is_enabled, is_custom, origin"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
         ));
         for (const auto &binding : importResult.providerModels) {
             bindingQuery.bindValue(0,  binding.providerId);
@@ -515,9 +519,10 @@ namespace data::repository {
             bindingQuery.bindValue(11, binding.capabilitiesOverride.has_value()
                                            ? QVariant(static_cast<qint64>(*binding.capabilitiesOverride)) : QVariant());
             bindingQuery.bindValue(12, binding.reasoningField);
-            bindingQuery.bindValue(13, binding.isEnabled ? 1 : 0);
-            bindingQuery.bindValue(14, binding.isCustom  ? 1 : 0);
-            bindingQuery.bindValue(15, originToString(binding.origin));
+            bindingQuery.bindValue(13, binding.reasoningOptionsJson);
+            bindingQuery.bindValue(14, binding.isEnabled ? 1 : 0);
+            bindingQuery.bindValue(15, binding.isCustom  ? 1 : 0);
+            bindingQuery.bindValue(16, originToString(binding.origin));
             if (!bindingQuery.exec())
                 qWarning() << "[seed] binding insert failed:" << bindingQuery.lastError().text();
         }
@@ -802,7 +807,7 @@ namespace data::repository {
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
             "  cm.modalities_input, cm.modalities_output, "
             "  cm.default_temperature, cm.default_top_p, cm.default_enable_thinking, cm.default_thinking_budget_tokens, "
-            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date "
+            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date, pm.reasoning_options AS reasoning_options "
             "FROM preset_provider_models pm "
             "JOIN preset_providers pp ON pm.provider_id = pp.id "
             "LEFT JOIN user_provider_overrides uo ON pp.id = uo.provider_id "
@@ -836,7 +841,7 @@ namespace data::repository {
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
             "  cm.modalities_input, cm.modalities_output, "
             "  cm.default_temperature, cm.default_top_p, cm.default_enable_thinking, cm.default_thinking_budget_tokens, "
-            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date "
+            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date, pm.reasoning_options AS reasoning_options "
             "FROM preset_provider_models pm "
             "JOIN preset_providers pp ON pm.provider_id = pp.id "
             "LEFT JOIN user_provider_overrides uo ON pp.id = uo.provider_id "
@@ -866,7 +871,7 @@ namespace data::repository {
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
             "  cm.modalities_input, cm.modalities_output, "
             "  cm.default_temperature, cm.default_top_p, cm.default_enable_thinking, cm.default_thinking_budget_tokens, "
-            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date "
+            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date, pm.reasoning_options AS reasoning_options "
             "FROM preset_provider_models pm "
             "JOIN preset_providers pp ON pm.provider_id = pp.id "
             "LEFT JOIN user_provider_overrides uo ON pp.id = uo.provider_id "
@@ -899,7 +904,7 @@ namespace data::repository {
             "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
             "  cm.modalities_input, cm.modalities_output, "
             "  cm.default_temperature, cm.default_top_p, cm.default_enable_thinking, cm.default_thinking_budget_tokens, "
-            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date "
+            "  cm.open_weights, cm.knowledge_cutoff, cm.release_date, pm.reasoning_options AS reasoning_options "
             "FROM preset_provider_models pm "
             "JOIN preset_providers pp ON pm.provider_id = pp.id "
             "LEFT JOIN user_provider_overrides uo ON pp.id = uo.provider_id "

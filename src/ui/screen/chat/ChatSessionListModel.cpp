@@ -26,6 +26,8 @@ namespace ui::screen::chat {
                 return item.id;
             case IsPinnedRole:
                 return item.isPinned;
+            case IsArchivedRole:
+                return item.isArchived;
             case TimestampRole:
                 return item.timestamp;
             default:
@@ -38,6 +40,7 @@ namespace ui::screen::chat {
             {IdRole, "id"},
             {TitleRole, "title"},
             {IsPinnedRole, "isPinned"},
+            {IsArchivedRole, "isArchived"},
             {TimestampRole, "timestamp"}
         };
     }

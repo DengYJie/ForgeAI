@@ -5,6 +5,7 @@
 
 namespace domain::repository {
     class IConversationRepository;
+    class IMessageTranscriptRepository;
 }
 
 namespace services::conversation {
@@ -17,6 +18,7 @@ namespace services::conversation {
     public:
         explicit ConversationService(
             domain::repository::IConversationRepository *conversationRepo = nullptr,
+            domain::repository::IMessageTranscriptRepository *transcriptRepo = nullptr,
             QObject *parent = nullptr
         );
 
@@ -38,9 +40,16 @@ namespace services::conversation {
             const QString &sessionId,
             const QString &currentSessionId
         ) override;
+        void setSessionPinned(QList<ui::screen::chat::ChatSessionItemData>& sessions,
+                              const QString& sessionId, bool pinned) override;
+        void setSessionArchived(QList<ui::screen::chat::ChatSessionItemData>& sessions,
+                                const QString& sessionId, bool archived) override;
+        void setSessionTitle(QList<ui::screen::chat::ChatSessionItemData>& sessions,
+                             const QString& sessionId, const QString& title) override;
 
     private:
         domain::repository::IConversationRepository *m_conversationRepo = nullptr;
+        domain::repository::IMessageTranscriptRepository *m_transcriptRepo = nullptr;
         QMap<QString, QList<domain::conversation::Message>> m_memoryMessages;
     };
 } // namespace services::conversation

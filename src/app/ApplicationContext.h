@@ -4,6 +4,7 @@
 #include <QObject>
 #include "data/sqlite/DatabaseManager.h"
 #include "data/repository/SqliteConversationRepository.h"
+#include "data/repository/JsonlMessageRepository.h"
 #include "data/repository/SqliteModelRepository.h"
 #include "core/model/ModelRegistry.h"
 #include "core/settings/SettingsRegistry.h"
@@ -84,6 +85,7 @@ namespace app {
 
         // 仓储与基础组件
         std::unique_ptr<data::repository::SqliteConversationRepository> m_conversationRepo;
+        std::unique_ptr<data::repository::JsonlMessageRepository> m_messageTranscriptRepo;
         std::shared_ptr<data::repository::SqliteModelRepository> m_modelRepo;
         std::shared_ptr<core::model::ModelRegistry> m_modelRegistry;
 
@@ -111,6 +113,10 @@ namespace app {
         std::unique_ptr<application::usecase::conversation::LoadSessionDetailUseCase> m_loadSessionDetailUseCase;
         std::unique_ptr<application::usecase::conversation::CreateSessionUseCase> m_createSessionUseCase;
         std::unique_ptr<application::usecase::conversation::DeleteSessionUseCase> m_deleteSessionUseCase;
+        std::unique_ptr<application::usecase::conversation::ClearSessionUseCase> m_clearSessionUseCase;
+        std::unique_ptr<application::usecase::conversation::SetSessionPinnedUseCase> m_setSessionPinnedUseCase;
+        std::unique_ptr<application::usecase::conversation::SetSessionArchivedUseCase> m_setSessionArchivedUseCase;
+        std::unique_ptr<application::usecase::conversation::SetSessionTitleUseCase> m_setSessionTitleUseCase;
 
         // 工作流业务用例
         std::unique_ptr<application::usecase::work::StartTaskUseCase> m_startTaskUseCase;

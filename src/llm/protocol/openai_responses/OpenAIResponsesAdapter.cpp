@@ -75,6 +75,14 @@ namespace llm::protocol::openai_responses {
             }
             bodyObj.insert("tools", toolsArr);
         }
+        if (request.useWebSearch) {
+            QJsonArray tools = bodyObj.value("tools").toArray();
+            tools.append(QJsonObject{{"type", "web_search_preview"}});
+            bodyObj.insert("tools", tools);
+        }
+        if (request.useDeepThinking) {
+            bodyObj.insert("reasoning", QJsonObject{{"effort", request.reasoningEffort.isEmpty() ? QStringLiteral("medium") : request.reasoningEffort}});
+        }
 
         if (request.temperature.has_value()) {
             bodyObj.insert("temperature", request.temperature.value());

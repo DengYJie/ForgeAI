@@ -12,6 +12,17 @@
 #include <optional>
 
 namespace ui::screen::chat {
+    struct ChatModelOption {
+        QString providerId;
+        QString modelId;
+        QString displayName;
+        QString providerName;
+        bool supportsAttachments = false;
+        bool supportsWebSearch = false;
+        bool supportsDeepThinking = false;
+        QStringList reasoningEfforts;
+        bool operator==(const ChatModelOption&) const = default;
+    };
     /**
      * @brief 对话页面的权威单一不可变状态快照
      */
@@ -23,8 +34,15 @@ namespace ui::screen::chat {
         bool sessionTitleManuallyEdited = false;            ///< 用户是否手动改过标题（若是则首条提问不自动覆盖）
 
         // 模型与生成控制
-        QString currentModelName = QStringLiteral("DeepSeek-R1"); ///< 当前激活的模型名称
+        QString currentModelName = QStringLiteral("选择模型"); ///< 当前激活的模型名称
+        QString currentModelProviderId;
+        QString currentModelId;
+        QList<ChatModelOption> availableModels;
         bool isGenerating = false;                          ///< 当前是否处于大模型回复生成中
+        bool useWebSearch = false;
+        bool useDeepThinking = false;
+        QString reasoningEffort;
+        QUuid streamingMessageId;                           ///< 当前流式 assistant 占位消息
         QString statusMessage;                              ///< 底部状态栏展示的状态/错误消息
         std::optional<domain::llm::ChatError> lastError;    ///< 最近一次请求遭遇的错误上下文与行动指引
 
@@ -79,12 +97,19 @@ namespace ui::screen::chat {
          * @brief 中止当前正在进行的大模型生成任务
          */
         void stopGeneration();
+        void clearCurrentSession();
+        void setSessionPinned(const QString& sessionId, bool pinned);
+        void setSessionArchived(const QString& sessionId, bool archived);
+        void setWebSearchEnabled(bool enabled);
+        void setDeepThinkingEnabled(bool enabled);
+        void setReasoningEffort(const QString& effort);
 
         /**
          * @brief 切换当前所选大模型
          * @param modelName 模型名称
          */
         void setModelName(const QString &modelName);
+        void setModel(const QString &providerId, const QString &modelId);
 
         /**
          * @brief 根据消息 ID 定位并高亮对应时间线锚点
@@ -111,8 +136,9 @@ namespace ui::screen::chat {
         void setupUseCaseConnections();
 
         static void recalculateAnchors(ChatState &s);
+        void refreshAvailableModels(ChatState &s) const;
 
-        static void syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title);
+        void syncSessionTitle(ChatState &s, const QString &sessionId, const QString &title) const;
 
         application::usecase::chat::ChatUseCases m_useCases;
     };

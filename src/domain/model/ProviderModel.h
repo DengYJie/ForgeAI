@@ -40,6 +40,7 @@ namespace domain::model {
         std::optional<ModelCapabilities> capabilitiesOverride; ///< 能力开关覆盖
 
         QString reasoningField;               ///< 思考流专用字段名
+        QString reasoningOptionsJson;         ///< models.dev 的 provider-model 推理选项原始 JSON
         bool isEnabled = true;                ///< 是否启用
         bool isCustom = false;                ///< 是否为用户自定义添加
         DataOrigin origin = DataOrigin::BuiltIn;

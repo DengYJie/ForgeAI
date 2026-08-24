@@ -26,6 +26,7 @@ namespace data::repository {
             "    agent_id TEXT,"
             "    title TEXT NOT NULL,"
             "    is_pinned INTEGER DEFAULT 0,"
+            "    is_archived INTEGER DEFAULT 0,"
             "    created_at INTEGER NOT NULL,"
             "    updated_at INTEGER NOT NULL"
             ");"
@@ -40,7 +41,7 @@ namespace data::repository {
         if (!db.isOpen()) return result;
 
         QSqlQuery query(db);
-        if (!query.exec(QStringLiteral("SELECT id, project_id, agent_id, title, is_pinned, created_at, updated_at FROM conversation ORDER BY updated_at DESC;"))) {
+        if (!query.exec(QStringLiteral("SELECT id, project_id, agent_id, title, is_pinned, is_archived, created_at, updated_at FROM conversation ORDER BY updated_at DESC;"))) {
             return result;
         }
 
@@ -53,8 +54,9 @@ namespace data::repository {
             if (!agentStr.isEmpty()) conv.agentId = QUuid::fromString(agentStr);
             conv.title = query.value(3).toString();
             conv.isPinned = query.value(4).toBool();
-            conv.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(5).toLongLong());
-            conv.updatedAt = QDateTime::fromMSecsSinceEpoch(query.value(6).toLongLong());
+            conv.isArchived = query.value(5).toBool();
+            conv.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(6).toLongLong());
+            conv.updatedAt = QDateTime::fromMSecsSinceEpoch(query.value(7).toLongLong());
             result.append(conv);
         }
         return result;
@@ -65,7 +67,7 @@ namespace data::repository {
         if (!db.isOpen()) return std::nullopt;
 
         QSqlQuery query(db);
-        query.prepare(QStringLiteral("SELECT id, project_id, agent_id, title, is_pinned, created_at, updated_at FROM conversation WHERE id = ?;"));
+        query.prepare(QStringLiteral("SELECT id, project_id, agent_id, title, is_pinned, is_archived, created_at, updated_at FROM conversation WHERE id = ?;"));
         query.addBindValue(id.toString());
         if (!query.exec() || !query.next()) {
             return std::nullopt;
@@ -79,8 +81,9 @@ namespace data::repository {
         if (!agentStr.isEmpty()) conv.agentId = QUuid::fromString(agentStr);
         conv.title = query.value(3).toString();
         conv.isPinned = query.value(4).toBool();
-        conv.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(5).toLongLong());
-        conv.updatedAt = QDateTime::fromMSecsSinceEpoch(query.value(6).toLongLong());
+        conv.isArchived = query.value(5).toBool();
+        conv.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(6).toLongLong());
+        conv.updatedAt = QDateTime::fromMSecsSinceEpoch(query.value(7).toLongLong());
         return conv;
     }
 
@@ -90,14 +93,15 @@ namespace data::repository {
 
         QSqlQuery query(db);
         query.prepare(QStringLiteral(
-            "INSERT OR REPLACE INTO conversation (id, project_id, agent_id, title, is_pinned, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?);"
+            "INSERT OR REPLACE INTO conversation (id, project_id, agent_id, title, is_pinned, is_archived, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
         ));
         query.addBindValue(conversation.id.toString());
         query.addBindValue(conversation.projectId.has_value() ? conversation.projectId->toString() : QString());
         query.addBindValue(conversation.agentId.has_value() ? conversation.agentId->toString() : QString());
         query.addBindValue(conversation.title);
         query.addBindValue(conversation.isPinned ? 1 : 0);
+        query.addBindValue(conversation.isArchived ? 1 : 0);
         query.addBindValue(conversation.createdAt.toMSecsSinceEpoch());
         query.addBindValue(conversation.updatedAt.toMSecsSinceEpoch());
         query.exec();

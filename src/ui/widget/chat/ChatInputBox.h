@@ -36,10 +36,15 @@ namespace ui::widget::chat {
         SendState sendState() const { return m_sendState; }
 
         void setModelName(const QString &name) const;
+        void setModelPresentation(const QString& name, const QString& reasoningEffort) const;
+        void setToolAvailability(bool attachments, bool webSearch, bool deepThinking) const;
+        QWidget* modelAnchor() const;
 
         QString modelName() const;
 
         QString text() const;
+        bool webSearchEnabled() const;
+        bool deepThinkingEnabled() const;
 
         void setText(const QString &text) const;
 

@@ -1,4 +1,5 @@
 #include "ApplicationContext.h"
+#include <QDir>
 #include "core/logging/LoggingService.h"
 #include "core/logging/sinks/ConsoleSink.h"
 #include "core/logging/sinks/RollingFileSink.h"
@@ -31,6 +32,8 @@ namespace app {
 
         // 1. 仓储与基础组件初始化
         m_conversationRepo = std::make_unique<data::repository::SqliteConversationRepository>();
+        m_messageTranscriptRepo = std::make_unique<data::repository::JsonlMessageRepository>(
+            QDir::homePath() + QStringLiteral("/.forgeai/sessions"));
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
         m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
 
@@ -74,7 +77,8 @@ namespace app {
         m_discoveryGateway = std::make_unique<llm::ModelDiscoveryService>(m_httpClient, m_protocolRegistry);
 
         // 2. 领域服务层初始化
-        m_conversationService = std::make_unique<services::conversation::ConversationService>(m_conversationRepo.get());
+        m_conversationService = std::make_unique<services::conversation::ConversationService>(
+            m_conversationRepo.get(), m_messageTranscriptRepo.get());
         m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
         m_settingsService = std::make_unique<services::settings::SettingsService>(m_settingsRegistry.get());
 
@@ -97,6 +101,18 @@ namespace app {
             m_conversationService.get()
         );
         m_deleteSessionUseCase = std::make_unique<application::usecase::conversation::DeleteSessionUseCase>(
+            m_conversationService.get()
+        );
+        m_clearSessionUseCase = std::make_unique<application::usecase::conversation::ClearSessionUseCase>(
+            m_conversationService.get()
+        );
+        m_setSessionPinnedUseCase = std::make_unique<application::usecase::conversation::SetSessionPinnedUseCase>(
+            m_conversationService.get()
+        );
+        m_setSessionArchivedUseCase = std::make_unique<application::usecase::conversation::SetSessionArchivedUseCase>(
+            m_conversationService.get()
+        );
+        m_setSessionTitleUseCase = std::make_unique<application::usecase::conversation::SetSessionTitleUseCase>(
             m_conversationService.get()
         );
 
@@ -221,6 +237,11 @@ namespace app {
         c.loadSessionDetail = m_loadSessionDetailUseCase.get();
         c.createSession = m_createSessionUseCase.get();
         c.deleteSession = m_deleteSessionUseCase.get();
+        c.clearSession = m_clearSessionUseCase.get();
+        c.setSessionPinned = m_setSessionPinnedUseCase.get();
+        c.setSessionArchived = m_setSessionArchivedUseCase.get();
+        c.setSessionTitle = m_setSessionTitleUseCase.get();
+        c.getModels = m_getModelsUseCase.get();
         return c;
     }
 

@@ -114,11 +114,8 @@ namespace ui::screen::chat {
                     emit sessionPinToggled(id, pinned);
                 });
 
-        connect(m_delegate, &ChatSessionDelegate::deleteClicked,
-                this, [this](const QString &id) {
-                    removeSession(id);
-                    emit sessionDeleted(id);
-                });
+        connect(m_delegate, &ChatSessionDelegate::archiveClicked,
+                this, [this](const QString& id) { emit sessionArchiveRequested(id); });
 
         mainLayout->addWidget(m_listView, 1);
         // 会话列表数据由 ChatViewModel 通过 render() 分发，无需在此硬编码

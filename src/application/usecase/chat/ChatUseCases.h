@@ -6,6 +6,11 @@
 #include "application/usecase/conversation/LoadSessionDetailUseCase.h"
 #include "application/usecase/conversation/CreateSessionUseCase.h"
 #include "application/usecase/conversation/DeleteSessionUseCase.h"
+#include "application/usecase/conversation/ClearSessionUseCase.h"
+#include "application/usecase/conversation/SetSessionPinnedUseCase.h"
+#include "application/usecase/conversation/SetSessionArchivedUseCase.h"
+#include "application/usecase/conversation/SetSessionTitleUseCase.h"
+#include "application/usecase/settings/GetModelsUseCase.h"
 
 namespace application::usecase::chat {
     /**
@@ -19,5 +24,10 @@ namespace application::usecase::chat {
         conversation::LoadSessionDetailUseCase *loadSessionDetail = nullptr;   ///< 加载会话历史消息流详情用例
         conversation::CreateSessionUseCase *createSession = nullptr;           ///< 占位复用/新建会话用例
         conversation::DeleteSessionUseCase *deleteSession = nullptr;           ///< 删除会话并邻近回退用例
+        conversation::ClearSessionUseCase *clearSession = nullptr;             ///< 清空当前会话消息
+        conversation::SetSessionPinnedUseCase *setSessionPinned = nullptr;
+        conversation::SetSessionArchivedUseCase *setSessionArchived = nullptr;
+        conversation::SetSessionTitleUseCase *setSessionTitle = nullptr;
+        settings::GetModelsUseCase *getModels = nullptr;                       ///< 可选模型查询与变更通知
     };
 } // namespace application::usecase::chat

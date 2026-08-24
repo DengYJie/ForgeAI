@@ -21,6 +21,9 @@ namespace domain::llm {
 
         // 未来为 Function Calling 预留
         std::optional<QList<domain::agent::ToolDefinition>> tools;
+        bool useWebSearch = false;
+        bool useDeepThinking = false;
+        QString reasoningEffort;
 
         bool operator==(const ChatRequest &other) const = default;
     };

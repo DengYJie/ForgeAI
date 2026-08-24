@@ -397,6 +397,14 @@ set(PROJECT_SOURCES
         src/application/usecase/conversation/CreateSessionUseCase.cpp
         src/application/usecase/conversation/DeleteSessionUseCase.h
         src/application/usecase/conversation/DeleteSessionUseCase.cpp
+        src/application/usecase/conversation/ClearSessionUseCase.h
+        src/application/usecase/conversation/ClearSessionUseCase.cpp
+        src/application/usecase/conversation/SetSessionPinnedUseCase.h
+        src/application/usecase/conversation/SetSessionPinnedUseCase.cpp
+        src/application/usecase/conversation/SetSessionArchivedUseCase.h
+        src/application/usecase/conversation/SetSessionArchivedUseCase.cpp
+        src/application/usecase/conversation/SetSessionTitleUseCase.h
+        src/application/usecase/conversation/SetSessionTitleUseCase.cpp
 
         src/application/usecase/work/WorkUseCases.h
         src/application/usecase/work/StartTaskUseCase.h
@@ -491,6 +499,32 @@ if (BUILD_TESTING)
         src/ui/widget/MarkdownStyle.cpp
         src/ui/widget/MarkdownView.h
         src/ui/widget/MarkdownView.cpp
+        src/ui/widget/message/MessageCardWidget.h
+        src/ui/widget/message/MessageCardWidget.cpp
+        src/ui/widget/message/MessageListView.h
+        src/ui/widget/message/MessageListView.cpp
+        src/ui/widget/message/ProcessGroupWidget.h
+        src/ui/widget/message/ProcessGroupWidget.cpp
+        src/ui/widget/message/blocks/ThinkingBlockWidget.h
+        src/ui/widget/message/blocks/ThinkingBlockWidget.cpp
+        src/ui/widget/message/blocks/AbstractToolBlockWidget.h
+        src/ui/widget/message/blocks/AbstractToolBlockWidget.cpp
+        src/ui/widget/message/blocks/ToolWidgetFactory.h
+        src/ui/widget/message/blocks/ToolWidgetFactory.cpp
+        src/ui/widget/message/blocks/tools/BashToolWidget.h
+        src/ui/widget/message/blocks/tools/BashToolWidget.cpp
+        src/ui/widget/message/blocks/tools/FileReadToolWidget.h
+        src/ui/widget/message/blocks/tools/FileReadToolWidget.cpp
+        src/ui/widget/message/blocks/tools/FileDiffToolWidget.h
+        src/ui/widget/message/blocks/tools/FileDiffToolWidget.cpp
+        src/ui/widget/message/blocks/tools/GenericToolWidget.h
+        src/ui/widget/message/blocks/tools/GenericToolWidget.cpp
+        src/ui/widget/message/blocks/ImageBlockWidget.h
+        src/ui/widget/message/blocks/ImageBlockWidget.cpp
+        src/ui/widget/message/blocks/ErrorBlockWidget.h
+        src/ui/widget/message/blocks/ErrorBlockWidget.cpp
+        src/ui/widget/message/blocks/FlatExpander.h
+        src/ui/widget/message/blocks/FlatExpander.cpp
     )
     target_compile_definitions(MarkdownCoreTests PRIVATE CMARK_GFM_STATIC_DEFINE CMARK_GFM_EXTENSIONS_STATIC_DEFINE)
     target_include_directories(MarkdownCoreTests PRIVATE

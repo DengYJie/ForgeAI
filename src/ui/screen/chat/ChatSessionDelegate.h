@@ -30,12 +30,11 @@ namespace ui::screen::chat {
 
         void pinClicked(const QString &id, bool pinned);
 
-        void deleteClicked(const QString &id);
+        void archiveClicked(const QString &id);
 
     private:
         QRect pinButtonRect(const QRect &itemRect) const;
-
-        QRect deleteButtonRect(const QRect &itemRect) const;
+        QRect archiveButtonRect(const QRect &itemRect) const;
 
         QPoint m_hoveredPos = QPoint(-1, -1);
     };

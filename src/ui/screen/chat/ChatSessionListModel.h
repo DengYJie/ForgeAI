@@ -9,10 +9,12 @@ namespace ui::screen::chat {
         QString id;
         QString title;
         bool isPinned = false;
+        bool isArchived = false;
         qint64 timestamp = 0;
 
         bool operator==(const ChatSessionItemData &other) const {
-            return id == other.id && title == other.title && isPinned == other.isPinned && timestamp == other.timestamp;
+            return id == other.id && title == other.title && isPinned == other.isPinned
+                && isArchived == other.isArchived && timestamp == other.timestamp;
         }
     };
 
@@ -24,6 +26,7 @@ namespace ui::screen::chat {
             IdRole = Qt::UserRole + 1,
             TitleRole,
             IsPinnedRole,
+            IsArchivedRole,
             TimestampRole
         };
 

@@ -1,5 +1,6 @@
 #include "ModelsDevImporter.h"
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonValue>
 
 namespace data::importer {
@@ -135,6 +136,8 @@ namespace data::importer {
 
         QJsonObject interleavedObj = modelObj.value(QStringLiteral("interleaved")).toObject();
         binding.reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
+        const QJsonArray reasoningOptions = modelObj.value(QStringLiteral("reasoning_options")).toArray();
+        binding.reasoningOptionsJson = QString::fromUtf8(QJsonDocument(reasoningOptions).toJson(QJsonDocument::Compact));
 
         binding.isEnabled = true;
         binding.isCustom = false;

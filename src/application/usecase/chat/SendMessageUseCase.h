@@ -33,7 +33,9 @@ namespace application::usecase::chat {
         /**
          * @brief 执行发送提问业务逻辑
          */
-        void execute(const QString &sessionId, const QString &text);
+        void execute(const QString &sessionId, const QString &text,
+                     const QString &providerId = {}, const QString &modelId = {},
+                     bool useWebSearch = false, bool useDeepThinking = false, const QString& reasoningEffort = {});
         
         /**
          * @brief 取消当前的生成请求

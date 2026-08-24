@@ -19,6 +19,7 @@ namespace domain::conversation {
         domain::ConversationMode mode = domain::ConversationMode::Normal; ///< 会话运行模式
 
         bool isPinned = false; ///< 是否置顶
+        bool isArchived = false; ///< 是否已归档（归档会话不显示在默认列表）
         QDateTime createdAt; ///< 创建时间
         QDateTime updatedAt; ///< 最后更新时间
     };

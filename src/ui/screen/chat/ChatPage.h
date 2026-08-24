@@ -2,6 +2,7 @@
 
 #include "ui/base/BasePage.h"
 #include "domain/conversation/Message.h"
+#include <QVector>
 
 class QVBoxLayout;
 
@@ -44,6 +45,16 @@ namespace ui::screen::chat {
 
     private:
         void setupUi();
+        void updateModelChoices(const ChatState& state);
+        void showModelPicker();
+        void showFullModelPicker(const QPoint& globalOrigin = {});
+        void rebuildModelPicker(const QString& query);
+        struct ModelChoice {
+            QString providerId;
+            QString modelId;
+            QString displayName;
+            QString providerName;
+        };
 
         /**
          * @brief 响应单向状态流更新，对界面全部组件执行声明式渲染
@@ -61,7 +72,15 @@ namespace ui::screen::chat {
         ui::widget::chat::ChatHeader *m_header = nullptr;
         ui::widget::chat::ChatAnchorBar *m_anchorBar = nullptr;
         ui::widget::message::MessageListView *m_messageListView = nullptr;
+        fluent::textfields::Label* m_emptyStateLabel = nullptr;
         QWidget *m_mainRight = nullptr;
         ui::widget::chat::ChatInputBox *m_inputBox = nullptr;
+        fluent::textfields::Label* m_statusLabel = nullptr;
+        QVector<ModelChoice> m_modelChoices;
+        QString m_currentModelProviderId;
+        QString m_currentModelId;
+        QWidget* m_modelPickerPopup = nullptr;
+        QWidget* m_modelPickerRows = nullptr;
+        QPoint m_modelPickerOrigin;
     };
 } // namespace ui::screen::chat

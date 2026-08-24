@@ -12,7 +12,7 @@ namespace ui::widget::chat {
         constexpr int kMinInputHeight = 48;
         constexpr int kMaxInputHeight = 140;
         constexpr int kMinBoxWidth = 400;
-        constexpr int kMaxBoxWidth = 660;
+        constexpr int kMaxBoxWidth = 1400;
         constexpr int kShadowMargin = 8;
         constexpr int kShadowLayers = 8;
         constexpr qreal kShadowIntensity = 0.18;
@@ -93,8 +93,9 @@ namespace ui::widget::chat {
         m_modelButton = new fluent::basicinput::Button(this);
         m_modelButton->setFluentStyle(fluent::basicinput::Button::Subtle);
         m_modelButton->setFluentLayout(fluent::basicinput::Button::TextOnly);
-        m_modelButton->setText(QStringLiteral("DeepSeek-R1  ▾"));
+        m_modelButton->setText(QStringLiteral("选择模型  ▾"));
         m_modelButton->setFixedHeight(28);
+        m_modelButton->setMinimumWidth(168);
         QFont modelFont = themeFont(Typography::FontRole::Caption).toQFont();
         m_modelButton->setFont(modelFont);
         m_modelButton->setToolTip(tr("切换当前会话模型"));
@@ -133,9 +134,22 @@ namespace ui::widget::chat {
     }
 
     void ChatInputBox::setModelName(const QString &name) const {
+        setModelPresentation(name, {});
+    }
+
+    void ChatInputBox::setModelPresentation(const QString& name, const QString& reasoningEffort) const {
         if (m_modelButton) {
-            m_modelButton->setText(QStringLiteral("%1  ▾").arg(name));
+            const QString effortLabel = reasoningEffort.isEmpty() ? QString() : QStringLiteral("  %1").arg(reasoningEffort);
+            m_modelButton->setText(QStringLiteral("%1%2  ▾").arg(name, effortLabel));
         }
+    }
+
+    void ChatInputBox::setToolAvailability(bool attachments, bool webSearch, bool deepThinking) const {
+        m_attachButton->setEnabled(attachments);
+        m_webSearchButton->setEnabled(webSearch);
+        m_deepThinkButton->setEnabled(deepThinking);
+        if (!webSearch) m_webSearchButton->setChecked(false);
+        if (!deepThinking) m_deepThinkButton->setChecked(false);
     }
 
     QString ChatInputBox::modelName() const {
@@ -145,9 +159,15 @@ namespace ui::widget::chat {
         return text.trimmed();
     }
 
+    QWidget* ChatInputBox::modelAnchor() const { return m_modelButton; }
+
     QString ChatInputBox::text() const {
         return m_textEdit ? m_textEdit->toPlainText() : QString();
     }
+
+    bool ChatInputBox::webSearchEnabled() const { return m_webSearchButton && m_webSearchButton->isChecked(); }
+
+    bool ChatInputBox::deepThinkingEnabled() const { return m_deepThinkButton && m_deepThinkButton->isChecked(); }
 
     void ChatInputBox::setText(const QString &text) const {
         if (m_textEdit) {
