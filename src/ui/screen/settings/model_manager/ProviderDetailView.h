@@ -14,6 +14,7 @@ class QResizeEvent;
 
 namespace fluent::basicinput { class ToggleSwitch; class Button; }
 namespace fluent::collections { class TreeView; }
+namespace fluent::scrolling { class ScrollView; }
 namespace fluent::textfields { class Label; class LineEdit; class PasswordBox; }
 
 namespace ui::screen::settings::model_manager {
@@ -42,9 +43,8 @@ namespace ui::screen::settings::model_manager {
     private:
         void setupUi();
         void updateMargins();
+        void updateTreeHeight();
         void rebuildModelTree();
-        void syncModelStatesFromTree();
-        void setSubtreeCheckState(QStandardItem *item, Qt::CheckState state);
         void testConnection();
 
         domain::model::ModelProvider m_provider;
@@ -52,6 +52,10 @@ namespace ui::screen::settings::model_manager {
         bool m_syncingTree = false;
         QTimer m_debounceTimer;
 
+        QWidget *m_headerWidget = nullptr;
+        QHBoxLayout *m_headerLayout = nullptr;
+        fluent::scrolling::ScrollView *m_scrollView = nullptr;
+        QWidget *m_scrollContent = nullptr;
         QVBoxLayout *m_mainLayout = nullptr;
         fluent::textfields::Label *m_nameLabel = nullptr;
         fluent::textfields::Label *m_protocolLabel = nullptr;

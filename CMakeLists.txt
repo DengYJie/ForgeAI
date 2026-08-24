@@ -154,6 +154,12 @@ set(PROJECT_SOURCES
         src/ui/widget/MarkdownStyle.cpp
         src/ui/widget/MarkdownView.h
         src/ui/widget/MarkdownView.cpp
+        src/ui/widget/badge/ModelCapabilityStyle.h
+        src/ui/widget/badge/ModelCapabilityStyle.cpp
+        src/ui/widget/badge/ModelCapabilityBadge.h
+        src/ui/widget/badge/ModelCapabilityBadge.cpp
+        src/ui/widget/badge/ModelCapabilityBadgeGroup.h
+        src/ui/widget/badge/ModelCapabilityBadgeGroup.cpp
 
         src/ui/widget/chat/ChatHeader.h
         src/ui/widget/chat/ChatHeader.cpp
@@ -287,6 +293,8 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/model_manager/ProviderItemDelegate.cpp
         src/ui/screen/settings/model_manager/ProviderNavigationPane.h
         src/ui/screen/settings/model_manager/ProviderNavigationPane.cpp
+        src/ui/screen/settings/model_manager/ModelTreeItemDelegate.h
+        src/ui/screen/settings/model_manager/ModelTreeItemDelegate.cpp
         src/ui/screen/settings/model_manager/ProviderDetailView.h
         src/ui/screen/settings/model_manager/ProviderDetailView.cpp
         src/ui/screen/settings/model_manager/AddProviderDialog.h

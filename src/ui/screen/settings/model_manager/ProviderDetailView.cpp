@@ -1,30 +1,58 @@
 #include "ProviderDetailView.h"
 
-#include <QHBoxLayout>
-#include <QMap>
-#include <QPainter>
-#include <QResizeEvent>
-#include <QSignalBlocker>
-#include <QStandardItem>
-#include <QStandardItemModel>
-#include <QVBoxLayout>
-
-#include <functional>
-
+#include <QFile>
+#include <QIcon>
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/Collections.h>
+#include <FluentQt/Design.h>
 #include <FluentQt/Layout.h>
+#include <FluentQt/Scrolling.h>
 #include <FluentQt/StatusInfo.h>
 #include <FluentQt/TextFields.h>
 
 #include "ModelActionsSplitButton.h"
+#include "ModelTreeItemDelegate.h"
+#include "domain/model/ModelCapabilities.h"
 #include "network/QtHttpClient.h"
 
 namespace ui::screen::settings::model_manager {
 
     namespace {
-        constexpr int ModelIdRole = Qt::UserRole + 1;
         constexpr int kMaxContentWidth = 1064;
+
+        class TransparentScrollView : public fluent::scrolling::ScrollView {
+        public:
+            explicit TransparentScrollView(QWidget *parent = nullptr)
+                : fluent::scrolling::ScrollView(parent) {
+                setWidgetResizable(true);
+                setFrameShape(QFrame::NoFrame);
+                setHorizontalScrollMode(fluent::scrolling::ScrollView::ScrollMode::Disabled);
+                setHorizontalScrollBarVisibility(fluent::scrolling::ScrollView::ScrollBarVisibility::Hidden);
+                applyTransparentViewport();
+            }
+
+            void onThemeUpdated() override {
+                fluent::scrolling::ScrollView::onThemeUpdated();
+                applyTransparentViewport();
+            }
+
+        private:
+            void applyTransparentViewport() {
+                setAutoFillBackground(false);
+                setAttribute(Qt::WA_NoSystemBackground, true);
+                setAttribute(Qt::WA_TranslucentBackground, true);
+
+                if (auto *vp = viewport()) {
+                    vp->setAutoFillBackground(false);
+                    vp->setAttribute(Qt::WA_NoSystemBackground, true);
+                    vp->setAttribute(Qt::WA_TranslucentBackground, true);
+                    QPalette pal = vp->palette();
+                    pal.setColor(QPalette::Window, Qt::transparent);
+                    pal.setColor(QPalette::Base, Qt::transparent);
+                    vp->setPalette(pal);
+                }
+            }
+        };
 
         QString protocolDisplayName(domain::model::ProviderType type) {
             using Type = domain::model::ProviderType;
@@ -46,7 +74,7 @@ namespace ui::screen::settings::model_manager {
             if (!model.family.trimmed().isEmpty()) return model.family;
             return QObject::tr("其他模型");
         }
-    }
+    } // namespace
 
     ProviderDetailView::ProviderDetailView(QWidget *parent) : QWidget(parent) {
         setupUi();
@@ -58,45 +86,60 @@ namespace ui::screen::settings::model_manager {
             if (m_hasProvider) Q_EMIT providerChanged(m_provider);
         });
 
-        m_mainLayout = new QVBoxLayout(this);
-        m_mainLayout->setContentsMargins(32, 24, 32, 24);
-        m_mainLayout->setSpacing(24);
+        auto *rootLayout = new QVBoxLayout(this);
+        rootLayout->setContentsMargins(0, 0, 0, 0);
+        rootLayout->setSpacing(0);
 
-        // 1. 标题区：标题、副标题 (间距 4px)、右上角开关与关闭图标按钮
-        auto *header = new QWidget(this);
-        auto *headerLayout = new QHBoxLayout(header);
-        headerLayout->setContentsMargins(0, 0, 0, 0);
-        headerLayout->setSpacing(12);
+        // 1. 固定顶部标题区
+        m_headerWidget = new QWidget(this);
+        m_headerLayout = new QHBoxLayout(m_headerWidget);
+        m_headerLayout->setContentsMargins(32, 24, 32, 8);
+        m_headerLayout->setSpacing(12);
 
         auto *titleColumn = new QVBoxLayout();
         titleColumn->setContentsMargins(0, 0, 0, 0);
         titleColumn->setSpacing(4);
 
-        m_nameLabel = new fluent::textfields::Label(header);
+        m_nameLabel = new fluent::textfields::Label(m_headerWidget);
         m_nameLabel->setFluentTypography(Typography::FontRole::Title);
         m_nameLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
 
-        m_protocolLabel = new fluent::textfields::Label(header);
+        m_protocolLabel = new fluent::textfields::Label(m_headerWidget);
         m_protocolLabel->setFluentTypography(Typography::FontRole::Caption);
         m_protocolLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
 
         titleColumn->addWidget(m_nameLabel);
         titleColumn->addWidget(m_protocolLabel);
-        headerLayout->addLayout(titleColumn, 1);
+        m_headerLayout->addLayout(titleColumn, 1);
 
-        m_enableSwitch = new fluent::basicinput::ToggleSwitch(header);
+        m_enableSwitch = new fluent::basicinput::ToggleSwitch(m_headerWidget);
         connect(m_enableSwitch, &fluent::basicinput::ToggleSwitch::toggled, this, [this](bool checked) {
             if (!m_hasProvider) return;
             m_provider.isEnabled = checked;
             Q_EMIT providerChanged(m_provider);
         });
-        headerLayout->addWidget(m_enableSwitch, 0, Qt::AlignVCenter);
+        m_headerLayout->addWidget(m_enableSwitch, 0, Qt::AlignVCenter);
 
-        m_mainLayout->addWidget(header);
+        rootLayout->addWidget(m_headerWidget);
 
-        // 2. 连接配置卡片
-        auto *connectionCard = new fluent::layout::Card(this);
+        // 2. 下方透明可滚动内容区
+        m_scrollView = new TransparentScrollView(this);
+
+        m_scrollContent = new QWidget(m_scrollView);
+        m_scrollContent->setAutoFillBackground(false);
+        m_scrollContent->setAttribute(Qt::WA_TranslucentBackground, true);
+
+        m_mainLayout = new QVBoxLayout(m_scrollContent);
+        m_mainLayout->setContentsMargins(32, 8, 32, 24);
+        m_mainLayout->setSpacing(24);
+
+        m_scrollView->setWidget(m_scrollContent);
+        rootLayout->addWidget(m_scrollView, 1);
+
+        // 3. 连接配置卡片
+        auto *connectionCard = new fluent::layout::Card(m_scrollContent);
         connectionCard->setObjectName(QStringLiteral("providerConnectionCard"));
+        connectionCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         auto *connectionLayout = new QVBoxLayout(connectionCard);
         connectionLayout->setContentsMargins(20, 16, 20, 16);
         connectionLayout->setSpacing(12);
@@ -149,16 +192,16 @@ namespace ui::screen::settings::model_manager {
 
         m_mainLayout->addWidget(connectionCard);
 
-        // 3. 模型列表区
+        // 4. 模型列表区
         auto *modelHeader = new QHBoxLayout();
         modelHeader->setContentsMargins(0, 0, 0, 0);
         modelHeader->setSpacing(8);
 
-        m_modelCountLabel = new fluent::textfields::Label(this);
+        m_modelCountLabel = new fluent::textfields::Label(m_scrollContent);
         m_modelCountLabel->setFluentTypography(Typography::FontRole::BodyStrong);
         m_modelCountLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
 
-        m_actionButton = new ModelActionsSplitButton(this);
+        m_actionButton = new ModelActionsSplitButton(m_scrollContent);
         connect(m_actionButton, &ModelActionsSplitButton::refreshRequested, this, [this] {
             if (m_hasProvider) Q_EMIT refreshModelsRequested(m_provider.id);
         });
@@ -171,44 +214,80 @@ namespace ui::screen::settings::model_manager {
         modelHeader->addWidget(m_actionButton);
         m_mainLayout->addLayout(modelHeader);
 
-        m_modelTreeView = new fluent::collections::TreeView(this);
-        m_modelTreeView->setBackgroundVisible(true);
-        m_modelTreeView->setBorderVisible(true);
+        m_modelTreeView = new fluent::collections::TreeView(m_scrollContent);
+        m_modelTreeView->setBackgroundVisible(false);
+        m_modelTreeView->setBorderVisible(false);
         m_modelTreeView->setHeaderHidden(true);
-        m_modelTreeView->setUniformRowHeights(true);
-        m_modelTreeView->setIndentation(16);
-        m_modelTreeView->setSelectionIndicatorVisible(true);
-        m_modelTreeView->setIndicatorMotionAnimationEnabled(true);
-        m_modelTreeView->setScrollChainingEnabled(false);
+        m_modelTreeView->setRootIsDecorated(false);
+        m_modelTreeView->setUniformRowHeights(false);
+        m_modelTreeView->setIndentation(0);
+        m_modelTreeView->setSelectionMode(fluent::collections::SelectionMode::None);
+        m_modelTreeView->setFocusPolicy(Qt::NoFocus);
+        m_modelTreeView->setSelectionIndicatorVisible(false);
+        m_modelTreeView->setIndicatorMotionAnimationEnabled(false);
+        m_modelTreeView->setScrollChainingEnabled(true);
         m_modelTreeView->setOverscrollEnabled(false);
+        m_modelTreeView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_modelTreeView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_modelTreeView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_modelTreeView->setPlaceholderText(tr("没有可用模型"));
         m_modelTreeView->viewport()->setAutoFillBackground(false);
+        m_modelTreeView->setProperty("fluentPreserveParentSurface", true);
+
+        auto *treeDelegate = new ModelTreeItemDelegate(m_modelTreeView, this);
+        m_modelTreeView->setItemDelegate(treeDelegate);
+
+        connect(m_modelTreeView, &QTreeView::clicked, this, [this](const QModelIndex &index) {
+            if (!index.parent().isValid()) {
+                m_modelTreeView->toggleExpanded(index);
+            }
+        });
+        connect(m_modelTreeView, &fluent::collections::TreeView::expanded, this, &ProviderDetailView::updateTreeHeight);
+        connect(m_modelTreeView, &fluent::collections::TreeView::collapsed, this, &ProviderDetailView::updateTreeHeight);
 
         m_modelTreeModel = new QStandardItemModel(m_modelTreeView);
         m_modelTreeView->setModel(m_modelTreeModel);
 
-        connect(m_modelTreeModel, &QStandardItemModel::itemChanged, this, [this](QStandardItem *item) {
-            if (m_syncingTree || !item) return;
-            m_syncingTree = true;
-            if (item->hasChildren()) setSubtreeCheckState(item, item->checkState());
-            syncModelStatesFromTree();
-            m_syncingTree = false;
-            Q_EMIT providerChanged(m_provider);
-        });
-
-        m_mainLayout->addWidget(m_modelTreeView, 1);
+        m_mainLayout->addWidget(m_modelTreeView);
+        m_mainLayout->addStretch(1);
         updateMargins();
     }
 
+    void ProviderDetailView::updateTreeHeight() {
+        if (!m_modelTreeView || !m_modelTreeModel) return;
+        const int rootCount = m_modelTreeModel->rowCount();
+        if (rootCount == 0) {
+            m_modelTreeView->setFixedHeight(100);
+            return;
+        }
+        const auto spacing = themeSpacing();
+        int totalHeight = 0;
+        for (int i = 0; i < rootCount; ++i) {
+            const QModelIndex groupIdx = m_modelTreeModel->index(i, 0);
+            totalHeight += spacing.controlHeight.large + spacing.xSmall;
+            if (m_modelTreeView->isExpanded(groupIdx)) {
+                const int childCount = m_modelTreeModel->rowCount(groupIdx);
+                for (int c = 0; c < childCount; ++c) {
+                    const bool isLast = (c == childCount - 1);
+                    totalHeight += isLast ? (spacing.controlHeight.large + 2) : spacing.controlHeight.large;
+                }
+            }
+            totalHeight += spacing.gap.tight;
+        }
+        m_modelTreeView->setFixedHeight(totalHeight + spacing.medium);
+    }
+
     void ProviderDetailView::updateMargins() {
-        if (!m_mainLayout) return;
         const int w = width();
-        // 8px 栅格：左右基准 32px 留白；宽屏时动态计算 (w - 1064)/2 使主内容列精确水平居中
         const int marginH = (w > kMaxContentWidth + 64)
                                 ? (w - kMaxContentWidth) / 2
                                 : (w < 600 ? 16 : 32);
-        const int marginV = (w < 600) ? 16 : 24;
-        m_mainLayout->setContentsMargins(marginH, marginV, marginH, marginV);
+        if (m_headerLayout) {
+            m_headerLayout->setContentsMargins(marginH, 24, marginH, 8);
+        }
+        if (m_mainLayout) {
+            m_mainLayout->setContentsMargins(marginH, 8, marginH, 24);
+        }
     }
 
     void ProviderDetailView::resizeEvent(QResizeEvent *event) {
@@ -235,54 +314,38 @@ namespace ui::screen::settings::model_manager {
         m_syncingTree = true;
         m_modelTreeModel->clear();
         QMap<QString, QStandardItem *> groups;
+
+        QIcon brandIcon;
+        if (!m_provider.icon.isEmpty() && QFile::exists(m_provider.icon)) {
+            brandIcon = QIcon(m_provider.icon);
+        }
+
         for (const auto &model : m_provider.models) {
             const QString group = groupName(model);
             auto *groupItem = groups.value(group, nullptr);
             if (!groupItem) {
                 groupItem = new QStandardItem(group);
-                groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate);
+                groupItem->setData(true, IsGroupRole);
+                groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                 groups.insert(group, groupItem);
                 m_modelTreeModel->appendRow(groupItem);
             }
             auto *modelItem = new QStandardItem(model.displayName.isEmpty() ? model.id : model.displayName);
+            modelItem->setData(false, IsGroupRole);
             modelItem->setData(model.id, ModelIdRole);
+            modelItem->setData(static_cast<int>(model.capabilities), ModelCapabilitiesRole);
+            if (!brandIcon.isNull()) {
+                modelItem->setData(brandIcon, BrandIconRole);
+            }
             modelItem->setToolTip(model.id);
-            modelItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
-            modelItem->setCheckState(model.isEnabled ? Qt::Checked : Qt::Unchecked);
+            modelItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             groupItem->appendRow(modelItem);
         }
-        for (auto *group : groups) {
-            int checked = 0;
-            for (int row = 0; row < group->rowCount(); ++row)
-                checked += group->child(row)->checkState() == Qt::Checked;
-            group->setCheckState(checked == 0 ? Qt::Unchecked : checked == group->rowCount() ? Qt::Checked : Qt::PartiallyChecked);
-        }
+
         m_modelCountLabel->setText(tr("可用模型 (%1)").arg(m_provider.models.size()));
         m_modelTreeView->expandAll();
+        updateTreeHeight();
         m_syncingTree = false;
-    }
-
-    void ProviderDetailView::setSubtreeCheckState(QStandardItem *item, Qt::CheckState state) {
-        for (int row = 0; row < item->rowCount(); ++row) {
-            auto *child = item->child(row);
-            child->setCheckState(state);
-            setSubtreeCheckState(child, state);
-        }
-    }
-
-    void ProviderDetailView::syncModelStatesFromTree() {
-        std::function<void(QStandardItem *)> visit = [this, &visit](QStandardItem *item) {
-            for (int row = 0; row < item->rowCount(); ++row) {
-                auto *child = item->child(row);
-                const QString id = child->data(ModelIdRole).toString();
-                if (!id.isEmpty()) {
-                    for (auto &model : m_provider.models)
-                        if (model.id == id) model.isEnabled = child->checkState() == Qt::Checked;
-                }
-                visit(child);
-            }
-        };
-        visit(m_modelTreeModel->invisibleRootItem());
     }
 
     void ProviderDetailView::setRefreshing(bool refreshing) {
