@@ -279,8 +279,12 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/model/ModelSettingsPageFactory.cpp
         src/ui/screen/settings/model_manager/ModelItemCard.h
         src/ui/screen/settings/model_manager/ModelItemCard.cpp
-        src/ui/screen/settings/model_manager/ProviderNavigationItem.h
-        src/ui/screen/settings/model_manager/ProviderNavigationItem.cpp
+        src/ui/screen/settings/model_manager/ProviderListModel.h
+        src/ui/screen/settings/model_manager/ProviderListModel.cpp
+        src/ui/screen/settings/model_manager/ProviderFilterProxyModel.h
+        src/ui/screen/settings/model_manager/ProviderFilterProxyModel.cpp
+        src/ui/screen/settings/model_manager/ProviderItemDelegate.h
+        src/ui/screen/settings/model_manager/ProviderItemDelegate.cpp
         src/ui/screen/settings/model_manager/ProviderNavigationPane.h
         src/ui/screen/settings/model_manager/ProviderNavigationPane.cpp
         src/ui/screen/settings/model_manager/ProviderDetailView.h
@@ -295,8 +299,6 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/model_manager/ModelManagerViewModel.cpp
         src/ui/screen/settings/model_manager/ModelManagerPage.h
         src/ui/screen/settings/model_manager/ModelManagerPage.cpp
-        src/ui/screen/settings/model_manager/ModelManagerWindow.h
-        src/ui/screen/settings/model_manager/ModelManagerWindow.cpp
         src/ui/screen/settings/SettingsDescriptorBuilder.h
         src/ui/screen/settings/SettingsDescriptorBuilder.cpp
         src/ui/screen/settings/SettingsPageFactory.h

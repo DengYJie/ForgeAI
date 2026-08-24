@@ -2,6 +2,7 @@
 
 #include <QTimer>
 #include <QWidget>
+#include <QVBoxLayout>
 
 #include <FluentQt/FluentQt.h>
 
@@ -9,6 +10,7 @@
 
 class QStandardItem;
 class QStandardItemModel;
+class QResizeEvent;
 
 namespace fluent::basicinput { class ToggleSwitch; class Button; }
 namespace fluent::collections { class TreeView; }
@@ -28,18 +30,18 @@ namespace ui::screen::settings::model_manager {
         void setRefreshing(bool refreshing);
 
     Q_SIGNALS:
-        void closeRequested();
         void providerChanged(const domain::model::ModelProvider &provider);
         void providerDeleted(const QString &providerId);
         void refreshModelsRequested(const QString &providerId);
         void addModelRequested(const QString &providerId);
 
     protected:
-        void paintEvent(QPaintEvent *event) override;
+        void resizeEvent(QResizeEvent *event) override;
         void onThemeUpdated() override;
 
     private:
         void setupUi();
+        void updateMargins();
         void rebuildModelTree();
         void syncModelStatesFromTree();
         void setSubtreeCheckState(QStandardItem *item, Qt::CheckState state);
@@ -50,10 +52,10 @@ namespace ui::screen::settings::model_manager {
         bool m_syncingTree = false;
         QTimer m_debounceTimer;
 
+        QVBoxLayout *m_mainLayout = nullptr;
         fluent::textfields::Label *m_nameLabel = nullptr;
         fluent::textfields::Label *m_protocolLabel = nullptr;
         fluent::basicinput::ToggleSwitch *m_enableSwitch = nullptr;
-        fluent::basicinput::Button *m_closeBtn = nullptr;
         fluent::textfields::LineEdit *m_urlEdit = nullptr;
         fluent::textfields::PasswordBox *m_keyEdit = nullptr;
         fluent::basicinput::Button *m_testBtn = nullptr;
