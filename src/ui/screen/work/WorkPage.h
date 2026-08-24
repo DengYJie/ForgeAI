@@ -4,13 +4,12 @@
 
 class QVBoxLayout;
 
-namespace fluent::textfields {
-    class Label;
-}
-
 namespace ui::widget {
     class CollapsibleSplitView;
 }
+namespace ui::widget::chat { class ChatInputBox; class ChatHeader; }
+namespace fluent::textfields { class Label; }
+namespace ui::widget::message { class MessageListView; }
 
 namespace ui::screen::work {
     class WorkViewModel;
@@ -42,7 +41,9 @@ namespace ui::screen::work {
         QWidget *m_sidebarWidget = nullptr;
         QWidget *m_workAreaWidget = nullptr;
 
-        fluent::textfields::Label *m_titleLabel = nullptr;
-        fluent::textfields::Label *m_subtitleLabel = nullptr;
+        ui::widget::chat::ChatHeader *m_header = nullptr;
+        fluent::textfields::Label *m_projectPathLabel = nullptr;
+        ui::widget::chat::ChatInputBox *m_agentInput = nullptr;
+        ui::widget::message::MessageListView *m_messageList = nullptr;
     };
 } // namespace ui::screen::work

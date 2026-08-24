@@ -18,6 +18,8 @@
 #include "services/conversation/ConversationService.h"
 #include "services/model/ModelService.h"
 #include "services/settings/SettingsService.h"
+#include "services/agent/AgentToolService.h"
+#include "services/project/ProjectContextService.h"
 #include "application/usecase/chat/ChatUseCases.h"
 #include "application/usecase/work/WorkUseCases.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
@@ -105,10 +107,14 @@ namespace app {
         std::unique_ptr<services::conversation::ConversationService> m_conversationService;
         std::unique_ptr<services::model::ModelService> m_modelService;
         std::unique_ptr<services::settings::SettingsService> m_settingsService;
+        std::unique_ptr<services::agent::AgentToolService> m_agentToolService;
+        std::unique_ptr<services::agent::AgentToolService> m_workAgentToolService;
+        std::unique_ptr<services::project::ProjectContextService> m_projectContextService;
 
         // 对话业务用例
         std::unique_ptr<application::usecase::chat::SendMessageUseCase> m_sendMessageUseCase;
         std::unique_ptr<application::usecase::chat::StopGenerationUseCase> m_stopGenerationUseCase;
+        std::unique_ptr<application::usecase::chat::SendMessageUseCase> m_workAgentUseCase;
         std::unique_ptr<application::usecase::conversation::LoadSessionsUseCase> m_loadSessionsUseCase;
         std::unique_ptr<application::usecase::conversation::LoadSessionDetailUseCase> m_loadSessionDetailUseCase;
         std::unique_ptr<application::usecase::conversation::CreateSessionUseCase> m_createSessionUseCase;

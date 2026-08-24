@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QString>
+#include "domain/agent/ToolExecution.h"
+namespace domain::service { class IAgentToolService; }
 
 namespace application::usecase::work {
     /**
@@ -11,7 +13,7 @@ namespace application::usecase::work {
         Q_OBJECT
 
     public:
-        explicit StartTaskUseCase(QObject *parent = nullptr);
+        explicit StartTaskUseCase(domain::service::IAgentToolService* tools = nullptr, QObject *parent = nullptr);
         ~StartTaskUseCase() override = default;
 
         /**
@@ -24,5 +26,8 @@ namespace application::usecase::work {
         void taskStarted(const QString &task);
         void taskCompleted(const QString &task);
         void taskFailed(const QString &task, const QString &error);
+        void toolFinished(const domain::agent::ToolCall& call, const domain::agent::ToolResult& result);
+    private:
+        domain::service::IAgentToolService* m_tools = nullptr;
     };
 } // namespace application::usecase::work

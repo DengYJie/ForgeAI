@@ -81,15 +81,25 @@ namespace app {
             m_conversationRepo.get(), m_messageTranscriptRepo.get());
         m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
         m_settingsService = std::make_unique<services::settings::SettingsService>(m_settingsRegistry.get());
+        m_agentToolService = std::make_unique<services::agent::AgentToolService>(QDir::currentPath());
+        m_workAgentToolService = std::make_unique<services::agent::AgentToolService>(QDir::currentPath());
+        m_projectContextService = std::make_unique<services::project::ProjectContextService>();
 
         // 3. 对话业务用例初始化
         m_sendMessageUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
             m_chatGateway.get(),
             m_conversationService.get(),
-            m_modelService.get()
+            m_modelService.get(),
+            m_workAgentToolService.get()
         );
         m_stopGenerationUseCase = std::make_unique<application::usecase::chat::StopGenerationUseCase>(
             m_sendMessageUseCase.get()
+        );
+        m_workAgentUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
+            m_chatGateway.get(),
+            nullptr,
+            m_modelService.get(),
+            m_agentToolService.get()
         );
         m_loadSessionsUseCase = std::make_unique<application::usecase::conversation::LoadSessionsUseCase>(
             m_conversationService.get()
@@ -117,7 +127,7 @@ namespace app {
         );
 
         // 4. 工作流业务用例初始化
-        m_startTaskUseCase = std::make_unique<application::usecase::work::StartTaskUseCase>();
+        m_startTaskUseCase = std::make_unique<application::usecase::work::StartTaskUseCase>(m_agentToolService.get());
         m_cancelTaskUseCase = std::make_unique<application::usecase::work::CancelTaskUseCase>();
 
         // 5. 知识库业务用例初始化
@@ -140,7 +150,7 @@ namespace app {
         // 7. ViewModels 表现层构造
         m_mainViewModel = std::make_unique<ui::screen::main::MainViewModel>();
         m_chatViewModel = std::make_unique<ui::screen::chat::ChatViewModel>(chatUseCases());
-        m_workViewModel = std::make_unique<ui::screen::work::WorkViewModel>(workUseCases());
+        m_workViewModel = std::make_unique<ui::screen::work::WorkViewModel>(workUseCases(), m_projectContextService.get());
         m_knowledgeViewModel = std::make_unique<ui::screen::knowledge::KnowledgeViewModel>(knowledgeUseCases());
 
         // 7.5 设置系统局部 ViewModels 与页面 ViewModel
@@ -249,6 +259,8 @@ namespace app {
         application::usecase::work::WorkUseCases w;
         w.startTask = m_startTaskUseCase.get();
         w.cancelTask = m_cancelTaskUseCase.get();
+        w.agentConversation = m_workAgentUseCase.get();
+        w.agentTools = m_workAgentToolService.get();
         return w;
     }
 
