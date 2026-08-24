@@ -14,10 +14,13 @@ namespace ui::screen::knowledge {
     class KnowledgeViewModel;
 }
 
+namespace ui::navigation {
+    class NavigationController;
+}
+
 namespace ui::screen::settings {
-    class SettingsViewModel;
+    class SettingsNavigationModule;
     class SettingsUIRegistry;
-    class SettingsCoordinator;
 }
 
 namespace ui::screen::main {
@@ -36,27 +39,29 @@ namespace ui::screen::main {
             ui::screen::chat::ChatViewModel *chatViewModel = nullptr,
             ui::screen::work::WorkViewModel *workViewModel = nullptr,
             ui::screen::knowledge::KnowledgeViewModel *knowledgeViewModel = nullptr,
-            ui::screen::settings::SettingsViewModel *settingsViewModel = nullptr,
             ui::screen::settings::SettingsUIRegistry *settingsUiRegistry = nullptr,
-            ui::screen::settings::SettingsCoordinator *settingsCoordinator = nullptr,
             QWidget *parent = nullptr
         );
 
         ~MainWindow() override;
 
         MainViewModel *viewModel() const { return m_viewModel; }
+        ui::navigation::NavigationController *controller() const { return m_controller; }
+
+    protected:
+        void resizeEvent(QResizeEvent *event) override;
 
     private:
         void setupUi();
-
         void setupConnections();
 
         MainViewModel *m_viewModel = nullptr;
         ui::screen::chat::ChatViewModel *m_chatViewModel = nullptr;
         ui::screen::work::WorkViewModel *m_workViewModel = nullptr;
         ui::screen::knowledge::KnowledgeViewModel *m_knowledgeViewModel = nullptr;
-        ui::screen::settings::SettingsViewModel *m_settingsViewModel = nullptr;
         ui::screen::settings::SettingsUIRegistry *m_settingsUiRegistry = nullptr;
-        ui::screen::settings::SettingsCoordinator *m_settingsCoordinator = nullptr;
+
+        ui::navigation::NavigationController *m_controller = nullptr;
+        ui::screen::settings::SettingsNavigationModule *m_settingsModule = nullptr;
     };
 } // namespace ui::screen::main

@@ -56,9 +56,7 @@ namespace app {
             m_context->chatViewModel(),
             m_context->workViewModel(),
             m_context->knowledgeViewModel(),
-            m_context->settingsViewModel(),
-            m_context->settingsUiRegistry(),
-            m_context->settingsCoordinator()
+            m_context->settingsUiRegistry()
         );
         m_mainWindow->show();
         return m_qapp->exec();

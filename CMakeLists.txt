@@ -215,6 +215,11 @@ set(PROJECT_SOURCES
         src/ui/navigation/NavigationPanel.cpp
         src/ui/navigation/NavigationHistory.h
         src/ui/navigation/NavigationHistory.cpp
+        src/ui/navigation/NavigationTypes.h
+        src/ui/navigation/INavigationPresenter.h
+        src/ui/navigation/INavigationRegistrar.h
+        src/ui/navigation/NavigationController.h
+        src/ui/navigation/NavigationController.cpp
 
         src/ui/window/TitleBar.cpp
         src/ui/window/TitleBar.h
@@ -262,8 +267,6 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/ISettingsUIFactory.h
         src/ui/screen/settings/SettingsUIRegistry.h
         src/ui/screen/settings/SettingsUIRegistry.cpp
-        src/ui/screen/settings/SettingsCoordinator.h
-        src/ui/screen/settings/SettingsCoordinator.cpp
         src/ui/screen/settings/appearance/AppearanceSettingsViewModel.h
         src/ui/screen/settings/appearance/AppearanceSettingsViewModel.cpp
         src/ui/screen/settings/appearance/AppearanceSettingsUIFactory.h
@@ -272,8 +275,6 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/logging/LoggingSettingsViewModel.cpp
         src/ui/screen/settings/logging/LoggingSettingsUIFactory.h
         src/ui/screen/settings/logging/LoggingSettingsUIFactory.cpp
-        src/ui/screen/settings/model/ModelSettingsViewModel.h
-        src/ui/screen/settings/model/ModelSettingsViewModel.cpp
         src/ui/screen/settings/model/ModelSettingsPageFactory.h
         src/ui/screen/settings/model/ModelSettingsPageFactory.cpp
         src/ui/screen/settings/model_manager/ModelItemCard.h
@@ -296,10 +297,12 @@ set(PROJECT_SOURCES
         src/ui/screen/settings/model_manager/ModelManagerPage.cpp
         src/ui/screen/settings/model_manager/ModelManagerWindow.h
         src/ui/screen/settings/model_manager/ModelManagerWindow.cpp
-        src/ui/screen/settings/SettingsViewModel.h
-        src/ui/screen/settings/SettingsViewModel.cpp
-        src/ui/screen/settings/SettingsPage.h
-        src/ui/screen/settings/SettingsPage.cpp
+        src/ui/screen/settings/SettingsDescriptorBuilder.h
+        src/ui/screen/settings/SettingsDescriptorBuilder.cpp
+        src/ui/screen/settings/SettingsPageFactory.h
+        src/ui/screen/settings/SettingsPageFactory.cpp
+        src/ui/screen/settings/SettingsNavigationModule.h
+        src/ui/screen/settings/SettingsNavigationModule.cpp
 
         src/domain/Types.h
         src/domain/conversation/Conversation.h

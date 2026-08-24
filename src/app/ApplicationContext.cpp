@@ -126,30 +126,15 @@ namespace app {
         m_workViewModel = std::make_unique<ui::screen::work::WorkViewModel>(workUseCases());
         m_knowledgeViewModel = std::make_unique<ui::screen::knowledge::KnowledgeViewModel>(knowledgeUseCases());
 
-        // 7.5 设置系统局部 ViewModels、Coordinator 与页面 ViewModel
+        // 7.5 设置系统局部 ViewModels 与页面 ViewModel
         m_appearanceSettingsViewModel = std::make_unique<ui::screen::settings::AppearanceSettingsViewModel>(m_appearanceSettingsProvider.get());
         m_loggingSettingsViewModel = std::make_unique<ui::screen::settings::LoggingSettingsViewModel>(m_loggingSettingsProvider.get());
-        m_modelSettingsViewModel = std::make_unique<ui::screen::settings::ModelSettingsViewModel>();
         m_modelManagerViewModel = std::make_unique<ui::screen::settings::model_manager::ModelManagerViewModel>(
             m_getModelsUseCase.get(),
             m_saveProviderUseCase.get(),
             m_deleteProviderUseCase.get(),
             m_refreshModelsUseCase.get()
         );
-        m_settingsViewModel = std::make_unique<ui::screen::settings::SettingsViewModel>(settingsUseCases());
-
-        m_settingsCoordinator = std::make_unique<ui::screen::settings::SettingsCoordinator>(
-            m_modelManagerViewModel.get()
-        );
-
-        // 兼容旧的模型设置入口：触发时切换到模型与服务商 provider 页面。
-        QObject::connect(m_modelSettingsViewModel.get(), &ui::screen::settings::ModelSettingsViewModel::modelManagerRequested,
-                         [this](QWidget *parent) {
-                             if (m_settingsCoordinator) {
-                                 m_settingsCoordinator->openModelManager(parent);
-                             }
-                         });
-
         // 8. 显式 DI 注册所有 Settings UIFactories
         registerSettings();
     }
@@ -208,10 +193,6 @@ namespace app {
 
     ui::screen::settings::SettingsUIRegistry *ApplicationContext::settingsUiRegistry() const {
         return m_settingsUiRegistry.get();
-    }
-
-    ui::screen::settings::SettingsCoordinator *ApplicationContext::settingsCoordinator() const {
-        return m_settingsCoordinator.get();
     }
 
     domain::service::IConversationService *ApplicationContext::conversationService() const {
@@ -292,15 +273,7 @@ namespace app {
         return m_loggingSettingsViewModel.get();
     }
 
-    ui::screen::settings::ModelSettingsViewModel *ApplicationContext::modelSettingsViewModel() const {
-        return m_modelSettingsViewModel.get();
-    }
-
     ui::screen::settings::model_manager::ModelManagerViewModel *ApplicationContext::modelManagerViewModel() const {
         return m_modelManagerViewModel.get();
-    }
-
-    ui::screen::settings::SettingsViewModel *ApplicationContext::settingsViewModel() const {
-        return m_settingsViewModel.get();
     }
 } // namespace app

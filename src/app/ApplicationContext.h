@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <QObject>
 #include "data/sqlite/DatabaseManager.h"
 #include "data/repository/SqliteConversationRepository.h"
 #include "data/repository/SqliteModelRepository.h"
@@ -9,13 +10,13 @@
 #include "core/settings/providers/AppearanceSettingsProvider.h"
 #include "core/settings/providers/LoggingSettingsProvider.h"
 #include "core/settings/providers/ModelSettingsProvider.h"
-#include "services/conversation/ConversationService.h"
-#include "services/model/ModelService.h"
-#include "services/settings/SettingsService.h"
 #include "network/QtHttpClient.h"
 #include "llm/ProtocolRegistry.h"
 #include "llm/ModelProviderService.h"
 #include "llm/ModelDiscoveryService.h"
+#include "services/conversation/ConversationService.h"
+#include "services/model/ModelService.h"
+#include "services/settings/SettingsService.h"
 #include "application/usecase/chat/ChatUseCases.h"
 #include "application/usecase/work/WorkUseCases.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
@@ -27,12 +28,9 @@
 #include "ui/screen/chat/ChatViewModel.h"
 #include "ui/screen/work/WorkViewModel.h"
 #include "ui/screen/knowledge/KnowledgeViewModel.h"
-#include "ui/screen/settings/SettingsViewModel.h"
 #include "ui/screen/settings/SettingsUIRegistry.h"
-#include "ui/screen/settings/SettingsCoordinator.h"
 #include "ui/screen/settings/appearance/AppearanceSettingsViewModel.h"
 #include "ui/screen/settings/logging/LoggingSettingsViewModel.h"
-#include "ui/screen/settings/model/ModelSettingsViewModel.h"
 #include "ui/screen/settings/model_manager/ModelManagerViewModel.h"
 
 namespace app {
@@ -57,13 +55,11 @@ namespace app {
         core::model::ModelRegistry *modelRegistry() const;
         core::settings::SettingsRegistry *settingsRegistry() const;
         ui::screen::settings::SettingsUIRegistry *settingsUiRegistry() const;
-        ui::screen::settings::SettingsCoordinator *settingsCoordinator() const;
 
         // 4. 服务层
         domain::service::IConversationService *conversationService() const;
         domain::service::IModelService *modelService() const;
         domain::service::ISettingsService *settingsService() const;
-        
         application::ports::IChatModelGateway *chatModelGateway() const;
 
         // 5. UseCase 聚合包
@@ -80,9 +76,7 @@ namespace app {
 
         ui::screen::settings::AppearanceSettingsViewModel *appearanceSettingsViewModel() const;
         ui::screen::settings::LoggingSettingsViewModel *loggingSettingsViewModel() const;
-        ui::screen::settings::ModelSettingsViewModel *modelSettingsViewModel() const;
         ui::screen::settings::model_manager::ModelManagerViewModel *modelManagerViewModel() const;
-        ui::screen::settings::SettingsViewModel *settingsViewModel() const;
 
     private:
         void registerSettings();
@@ -140,13 +134,10 @@ namespace app {
         std::unique_ptr<ui::screen::work::WorkViewModel> m_workViewModel;
         std::unique_ptr<ui::screen::knowledge::KnowledgeViewModel> m_knowledgeViewModel;
 
-        // 设置体系 ViewModels & UI Registry & Coordinator
+        // 设置体系 ViewModels & UI Registry
         std::unique_ptr<ui::screen::settings::AppearanceSettingsViewModel> m_appearanceSettingsViewModel;
         std::unique_ptr<ui::screen::settings::LoggingSettingsViewModel> m_loggingSettingsViewModel;
-        std::unique_ptr<ui::screen::settings::ModelSettingsViewModel> m_modelSettingsViewModel;
         std::unique_ptr<ui::screen::settings::model_manager::ModelManagerViewModel> m_modelManagerViewModel;
-        std::unique_ptr<ui::screen::settings::SettingsViewModel> m_settingsViewModel;
-        std::unique_ptr<ui::screen::settings::SettingsCoordinator> m_settingsCoordinator;
         std::unique_ptr<ui::screen::settings::SettingsUIRegistry> m_settingsUiRegistry;
     };
 } // namespace app
