@@ -13,7 +13,7 @@
 namespace ui::screen::settings {
 
     namespace {
-        /** 参照 WinUI Gallery 设置卡片最大宽度与换行阈值 */
+        /** 设置卡片最大宽度与间距规范 */
         constexpr int kMaxContentWidth = 1064;
         constexpr int kCardSpacing = 4;
         constexpr int kStackedCardWidthThreshold = 560;
@@ -56,6 +56,43 @@ namespace ui::screen::settings {
             }
         };
 
+        /**
+         * @brief 动态计算边距以实现 1064px 水平居中的设置内容容器
+         */
+        class SettingsContentWidget : public QWidget {
+        public:
+            explicit SettingsContentWidget(QWidget *parent = nullptr) : QWidget(parent) {
+                setAutoFillBackground(false);
+            }
+
+            void setContentLayout(QVBoxLayout *layout) {
+                m_layout = layout;
+                setLayout(layout);
+                updateMargins();
+            }
+
+        protected:
+            void resizeEvent(QResizeEvent *event) override {
+                QWidget::resizeEvent(event);
+                updateMargins();
+            }
+
+        private:
+            void updateMargins() {
+                if (!m_layout) return;
+                const int w = width();
+                // 宽屏 (w > 1064 + 72): 两侧边距分配为 (w - 1064)/2，使得 1064px 内容列精确水平居中
+                // 窄屏 (w <= 1136): 使用标准 36px (超窄屏为 20px) 边距铺满视口
+                const int marginH = (w > kMaxContentWidth + 72)
+                                        ? (w - kMaxContentWidth) / 2
+                                        : (w < 800 ? 20 : 36);
+                const int marginV = (w < 800) ? 16 : 24;
+                m_layout->setContentsMargins(marginH, marginV, marginH, 36);
+            }
+
+            QVBoxLayout *m_layout = nullptr;
+        };
+
         class SettingsCardItem : public fluent::layout::Card {
         public:
             explicit SettingsCardItem(const QString &iconGlyph,
@@ -65,8 +102,8 @@ namespace ui::screen::settings {
                                       QWidget *parent = nullptr)
                 : fluent::layout::Card(parent), m_trailing(trailingWidget) {
                 setObjectName(QStringLiteral("settingsCardItem"));
-                setMinimumHeight(68);
-                setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                setMinimumHeight(64);
+                setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
                 m_layout = new QGridLayout(this);
                 m_layout->setContentsMargins(16, 12, 16, 12);
@@ -110,6 +147,14 @@ namespace ui::screen::settings {
                 }
             }
 
+            QSize sizeHint() const override {
+                return QSize(kMaxContentWidth, m_stacked ? 96 : 64);
+            }
+
+            QSize minimumSizeHint() const override {
+                return QSize(320, m_stacked ? 96 : 64);
+            }
+
             void setStacked(bool stacked) {
                 if (m_stacked == stacked || !m_trailing) return;
                 m_stacked = stacked;
@@ -120,7 +165,7 @@ namespace ui::screen::settings {
                     setMinimumHeight(96);
                 } else {
                     m_layout->addWidget(m_trailing, 0, 2, 1, 1, Qt::AlignRight | Qt::AlignVCenter);
-                    setMinimumHeight(68);
+                    setMinimumHeight(64);
                 }
                 m_trailing->show();
                 updateGeometry();
@@ -171,7 +216,7 @@ namespace ui::screen::settings {
 
     QWidget *SettingsPageFactory::createLazyPage(
         const SettingsProviderPageDescriptor &descriptor,
-        QList<QBoxLayout *> &pageLayouts,
+        QList<QVBoxLayout *> &pageLayouts,
         QList<QWidget *> &cards,
         QWidget *parent) {
 
@@ -194,62 +239,54 @@ namespace ui::screen::settings {
 
     QWidget *SettingsPageFactory::createGenericProviderPage(
         const SettingsProviderPageDescriptor &descriptor,
-        QList<QBoxLayout *> &pageLayouts,
+        QList<QVBoxLayout *> &pageLayouts,
         QList<QWidget *> &cards,
         QWidget *parent) {
 
         auto *scrollView = new SettingsScrollView(parent);
 
-        auto *contentWidget = new QWidget(scrollView);
-        contentWidget->setAutoFillBackground(false);
-
-        auto *rootLayout = new QHBoxLayout(contentWidget);
-        rootLayout->setContentsMargins(36, 24, 36, 36);
-        rootLayout->setSpacing(0);
-        pageLayouts.append(rootLayout);
-
-        auto *centerContainer = new QWidget(contentWidget);
-        centerContainer->setAutoFillBackground(false);
-        centerContainer->setMaximumWidth(kMaxContentWidth);
-        centerContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-
-        auto *contentLayout = new QVBoxLayout(centerContainer);
-        contentLayout->setContentsMargins(0, 0, 0, 0);
+        auto *contentWidget = new SettingsContentWidget(scrollView);
+        auto *contentLayout = new QVBoxLayout();
+        contentLayout->setContentsMargins(36, 24, 36, 36);
         contentLayout->setSpacing(kCardSpacing);
+        contentWidget->setContentLayout(contentLayout);
 
-        auto *pageTitle = new fluent::textfields::Label(descriptor.title, centerContainer);
+        pageLayouts.append(contentLayout);
+
+        auto *pageTitle = new fluent::textfields::Label(descriptor.title, contentWidget);
         pageTitle->setFluentTypography(Typography::FontRole::Title);
         pageTitle->setTextColorRole(fluent::textfields::Label::TextColorRole::Primary);
         contentLayout->addWidget(pageTitle);
-        contentLayout->addSpacing(8);
+        contentLayout->addSpacing(12);
 
         QString previousCategory;
         for (const auto &factory : descriptor.factories) {
             if (!factory) continue;
 
             const QString currentCategory = factory->categoryDisplayName();
+            // 仅在分类与大标题不同，且与上一分类不同时才渲染分区小标题，避免重复显示大标题同名小标题
             if (currentCategory != previousCategory && !currentCategory.isEmpty()) {
-                contentLayout->addSpacing(20);
-                contentLayout->addWidget(createSectionHeader(currentCategory, centerContainer));
-                contentLayout->addSpacing(2);
+                if (currentCategory != descriptor.title) {
+                    contentLayout->addSpacing(20);
+                    contentLayout->addWidget(createSectionHeader(currentCategory, contentWidget));
+                    contentLayout->addSpacing(4);
+                }
                 previousCategory = currentCategory;
             }
 
-            QWidget *trailingWidget = factory->createControlWidget(centerContainer);
+            QWidget *trailingWidget = factory->createControlWidget(contentWidget);
             QWidget *card = createSettingsCard(
                 factory->iconGlyph(),
                 factory->title(),
                 factory->subtitle(),
                 trailingWidget,
-                centerContainer
+                contentWidget
             );
             cards.append(card);
             contentLayout->addWidget(card);
         }
 
         contentLayout->addStretch();
-        rootLayout->addWidget(centerContainer, 1, Qt::AlignHCenter | Qt::AlignTop);
-
         scrollView->setWidget(contentWidget);
         return scrollView;
     }

@@ -10,7 +10,7 @@
 #include "ui/navigation/INavigationRegistrar.h"
 #include "ui/screen/settings/SettingsDescriptorBuilder.h"
 
-class QBoxLayout;
+class QVBoxLayout;
 
 namespace ui::navigation {
     class NavigationPanel;
@@ -70,7 +70,7 @@ namespace ui::screen::settings {
         QHash<QString, SettingsProviderPageDescriptor> m_routeToDescriptor;
         QHash<QString, QString> m_providerToRoute;
 
-        QList<QBoxLayout *> m_pageLayouts;
+        QList<QVBoxLayout *> m_pageLayouts;
         QList<QWidget *> m_cards;
     };
 

@@ -4,7 +4,7 @@
 #include <QList>
 #include "ui/screen/settings/SettingsDescriptorBuilder.h"
 
-class QBoxLayout;
+class QVBoxLayout;
 
 namespace ui::screen::settings {
 
@@ -16,14 +16,14 @@ namespace ui::screen::settings {
     public:
         static QWidget *createLazyPage(
             const SettingsProviderPageDescriptor &descriptor,
-            QList<QBoxLayout *> &pageLayouts,
+            QList<QVBoxLayout *> &pageLayouts,
             QList<QWidget *> &cards,
             QWidget *parent = nullptr
         );
 
         static QWidget *createGenericProviderPage(
             const SettingsProviderPageDescriptor &descriptor,
-            QList<QBoxLayout *> &pageLayouts,
+            QList<QVBoxLayout *> &pageLayouts,
             QList<QWidget *> &cards,
             QWidget *parent = nullptr
         );

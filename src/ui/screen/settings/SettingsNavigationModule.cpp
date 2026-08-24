@@ -2,7 +2,7 @@
 
 #include <FluentQt/Design.h>
 #include <QDebug>
-#include <QBoxLayout>
+#include <QVBoxLayout>
 
 #include "ui/animation/AnimatedSettingsVisualSource.h"
 #include "ui/navigation/NavigationPanel.h"
