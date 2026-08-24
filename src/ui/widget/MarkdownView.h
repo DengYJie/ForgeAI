@@ -132,9 +132,11 @@ signals:
 
 protected:
     bool viewportEvent(QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
 
 private:
     void rebuildDocument();

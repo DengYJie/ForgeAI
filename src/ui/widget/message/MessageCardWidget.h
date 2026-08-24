@@ -47,6 +47,8 @@ namespace ui::widget::message {
 
         // 数据驱动同步
         void syncMessage(const domain::conversation::Message& message);
+        // 虚拟列表复用到另一条消息前清理思考、工具等瞬态子控件。
+        void resetForReuse();
 
         // 插入外部错误诊断块
         void appendError(const QString& summary, const QString& details);

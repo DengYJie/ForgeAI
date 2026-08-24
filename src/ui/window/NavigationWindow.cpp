@@ -2,6 +2,7 @@
 #include <FluentQt/Navigation.h>
 #include <QDebug>
 #include <QMetaObject>
+#include <utility>
 
 #include "ui/navigation/NavigationIndicator.h"
 #include "ui/navigation/NavigationPanel.h"
@@ -14,7 +15,18 @@ NavigationWindow::NavigationWindow(QWidget *parent)
     initNavigation();
 }
 
-NavigationWindow::~NavigationWindow() = default;
+NavigationWindow::~NavigationWindow()
+{
+    // Members are destroyed before WindowBase destroys its child NavigationView
+    // and NavigationPanel instances.  Disconnect panel callbacks first: the
+    // destroyed() cleanup lambda captures this and must not touch m_surfaces
+    // after the QHash member has been torn down.
+    for (const auto& panel : std::as_const(m_surfaces)) {
+        if (panel) QObject::disconnect(panel, nullptr, this, nullptr);
+    }
+    m_surfaces.clear();
+    m_activeSurfaceId.clear();
+}
 
 void NavigationWindow::initNavigation() {
     m_navigationView = new fluent::navigation::NavigationView(this);

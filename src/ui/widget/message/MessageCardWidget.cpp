@@ -171,9 +171,12 @@ namespace ui::widget::message {
     void MessageCardWidget::freezeHeight()
     {
         if (m_isHeightFrozen) return;
+        // MarkdownView 的高度严格依赖可用宽度。不能用无宽度约束的 sizeHint()
+        // 固化卡片，否则在虚拟列表首次测量/宽度变化后会留下正文与操作栏之间的空白。
+        if (width() <= 1) return;
         m_isHeightFrozen = true;
         m_mainLayout->activate();
-        const int h = m_mainLayout->sizeHint().height();
+        const int h = m_mainLayout->totalHeightForWidth(width());
         if (h > 0) {
             setFixedHeight(h);
         }
@@ -205,6 +208,12 @@ namespace ui::widget::message {
 
     void MessageCardWidget::onThemeUpdated()
     {
+        if (m_markdownView) {
+            m_markdownView->onThemeUpdated();
+        }
+        if (m_processGroupWidget) {
+            m_processGroupWidget->onThemeUpdated();
+        }
         updateVisuals();
         update();
     }
@@ -398,6 +407,22 @@ namespace ui::widget::message {
         else if (m_errorWidget) {
             m_errorWidget->hide();
         }
+    }
+
+    void MessageCardWidget::resetForReuse()
+    {
+        unfreezeHeight();
+        if (m_processGroupWidget) {
+            m_mainLayout->removeWidget(m_processGroupWidget);
+            m_processGroupWidget->deleteLater();
+            m_processGroupWidget = nullptr;
+        }
+        m_thoughtWidgets.clear();
+        m_toolWidgets.clear();
+        m_errorWidget = nullptr;
+        m_message = {};
+        if (m_markdownView) m_markdownView->clear();
+        updateVisuals();
     }
 
     void MessageCardWidget::appendError(const QString& summary, const QString& details)

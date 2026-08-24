@@ -18,13 +18,17 @@ namespace ui::widget {
 
 MarkdownView::MarkdownView(QWidget *parent)
     : QAbstractScrollArea(parent)
-    , m_theme(ui::markdown::MarkdownTheme::light(font()))
+    , m_theme(fluent::FluentElement::currentTheme() == fluent::FluentElement::Dark
+          ? ui::markdown::MarkdownTheme::dark(font())
+          : ui::markdown::MarkdownTheme::light(font()))
     , m_resources(this)
 {
     setFrameShape(QFrame::NoFrame);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setFocusPolicy(Qt::StrongFocus);
+    // A message list should not hand initial keyboard focus to the first
+    // rendered Markdown block.  Click still enables selection/copy focus.
+    setFocusPolicy(Qt::ClickFocus);
     viewport()->setMouseTracking(true);
     connect(&m_resources, &ui::markdown::MarkdownImageResourceManager::imageUpdated, this, [this] {
         viewport()->update();
@@ -37,6 +41,9 @@ MarkdownView::~MarkdownView() = default;
 void MarkdownView::setMarkdown(const QString &markdown)
 {
     if (m_markdown == markdown) return;
+    // Message cards commonly receive content before their first show event.
+    // Resolve the inherited Fluent mode at the content-binding boundary too.
+    if (m_usesThemeStyleSheet) onThemeUpdated();
     m_markdown = markdown;
     rebuildDocument();
 }
@@ -217,6 +224,9 @@ void MarkdownView::setAutoFitHeight(bool enable)
 {
     if (m_autoFitHeight == enable) return;
     m_autoFitHeight = enable;
+    // Auto-fit Markdown must not absorb spare vertical layout space in a
+    // message card; otherwise the action bar is pushed far below short text.
+    setSizePolicy(QSizePolicy::Expanding, enable ? QSizePolicy::Fixed : QSizePolicy::Preferred);
     updateAutoFitHeight();
 }
 
@@ -228,10 +238,22 @@ bool MarkdownView::isAutoFitHeight() const
 void MarkdownView::onThemeUpdated()
 {
     if (m_usesThemeStyleSheet) {
-        const QColor window = palette().color(QPalette::Window);
-        m_theme = window.lightness() < 128 ? ui::markdown::MarkdownTheme::dark(font()) : ui::markdown::MarkdownTheme::light(font());
+        // Do not infer mode from QWidget palette or one surface color: both
+        // can be overridden/transparent. FluentElement resolves the exact
+        // inherited Light/Dark mode for this subtree.
+        m_theme = fluent::FluentElement::currentTheme() == fluent::FluentElement::Dark
+            ? ui::markdown::MarkdownTheme::dark(font())
+            : ui::markdown::MarkdownTheme::light(font());
     }
     relayout();
+}
+
+void MarkdownView::showEvent(QShowEvent* event)
+{
+    QAbstractScrollArea::showEvent(event);
+    // FluentElement callbacks are not guaranteed during a child widget's
+    // constructor. Resolve after it has entered the themed parent tree.
+    onThemeUpdated();
 }
 
 void MarkdownView::setAllowNetworkAccess(bool allow)
@@ -540,11 +562,6 @@ void MarkdownView::paintViewport(QPaintEvent* event)
     painter.translate(0, -verticalScrollBar()->value());
     m_metrics.visibleBlockCount = m_renderer.paint(painter, m_documentLayout, m_theme, QRectF(event->rect()).translated(0, verticalScrollBar()->value()), m_selection, m_hoveredBlock, m_resources.images(), m_copiedBlock);
     painter.restore();
-    if (hasFocus()) {
-        painter.setPen(QPen(m_theme.link, 1));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRect(viewport()->rect().adjusted(0, 0, -1, -1));
-    }
     m_metrics.lastPaintMs = paintTimer.elapsed();
 }
 
@@ -595,6 +612,16 @@ void MarkdownView::keyPressEvent(QKeyEvent* event)
     if (event->matches(QKeySequence::SelectAll)) { selectAll(); event->accept(); return; }
     if (event->matches(QKeySequence::Copy)) { copy(); event->accept(); return; }
     QAbstractScrollArea::keyPressEvent(event);
+}
+
+void MarkdownView::focusOutEvent(QFocusEvent* event)
+{
+    QAbstractScrollArea::focusOutEvent(event);
+    if (!m_selection.isValid()) return;
+    m_selection = {};
+    m_selectionAnchor = -1;
+    emit selectionChanged(false);
+    viewport()->update();
 }
 
 } // namespace ui::widget

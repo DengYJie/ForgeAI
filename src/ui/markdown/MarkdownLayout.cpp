@@ -34,7 +34,10 @@ struct InlineBuilder {
             for (const auto& child : node.children) add(*child, format, activeLink);
         }
         const int length = text.size() - start;
-        if (length > 0 && (format != QTextCharFormat{} || !activeLink.isEmpty())) {
+        // Do not append an empty format range for plain text: in QTextLayout a
+        // later empty range resets the inherited foreground to the platform
+        // default (black), overriding the themed base format.
+        if (length > 0 && (!format.isEmpty() || !activeLink.isEmpty())) {
             QTextLayout::FormatRange range{start, length, format};
             formats.push_back(range);
             if (!activeLink.isEmpty()) links.push_back({start, length, activeLink});

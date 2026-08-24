@@ -1,94 +1,99 @@
 #pragma once
 
-#include <QMap>
-#include <QScrollArea>
+#include <QHash>
 #include <QScrollBar>
 #include <QTimer>
 #include <QUuid>
 #include <QVariantAnimation>
+#include <QVector>
 
-#include <QVBoxLayout>
 #include "domain/conversation/Message.h"
 #include <FluentQt/Scrolling.h>
 
 namespace ui::widget::message {
 
-    class MessageCardWidget;
+class MessageCardWidget;
 
-    /**
-     * @brief 聊天消息列表控件
-     * 负责管理多个 MessageCardWidget 的增量 Diff 刷新与平滑滚底逻辑。
-     * 支持通过 setCustomScrollBar 注入外部自定义滚动条以实现特殊布局排版。
-     */
-    class MessageListView : public fluent::scrolling::ScrollView {
-        Q_OBJECT
-    public:
-        explicit MessageListView(QWidget* parent = nullptr);
-        ~MessageListView() override;
+/**
+ * A Qt Widgets virtual message list.
+ *
+ * Items retain only message data and a measured/estimated height.  Card
+ * widgets are owned by a small visible window plus preload area and returned
+ * to an object pool once they leave it.
+ */
+class MessageListView : public fluent::scrolling::ScrollView {
+    Q_OBJECT
+public:
+    explicit MessageListView(QWidget* parent = nullptr);
+    ~MessageListView() override;
 
-        // 唯一的外部数据输入口
-        void syncMessages(const QList<domain::conversation::Message>& messages);
+    void syncMessages(const QList<domain::conversation::Message>& messages);
+    void clear();
+    void setCustomScrollBar(QScrollBar* scrollBar);
+    void scrollToBottom();
+    void scrollToMessage(const QUuid& id);
+    void scrollToMessage(const QString& idString);
+    void setAvatarVisible(bool visible);
+    bool isAvatarVisible() const { return m_avatarVisible; }
+    void setHeaderVisible(bool visible);
+    bool isHeaderVisible() const { return m_headerVisible; }
 
-        // 清空列表
-        void clear();
+    int messageCount() const noexcept { return m_items.size(); }
+    int activeCardCount() const noexcept { return m_cardMap.size(); }
+    int pooledCardCount() const noexcept { return m_recycledCards.size(); }
 
-        // 注入外部自定义滚动条
-        void setCustomScrollBar(QScrollBar* scrollBar);
+Q_SIGNALS:
+    void topVisibleMessageChanged(const QUuid& id);
 
-        // 手动平滑滚到底部
-        void scrollToBottom();
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
+    void onThemeUpdated() override;
 
-        // 瞬间直达定位到指定消息
-        void scrollToMessage(const QUuid& id);
-        void scrollToMessage(const QString& idString);
+private slots:
+    void executeFollowBottom();
+    void scheduleFollowBottom();
+    void onCardHeightChanged();
+    void checkTopVisibleMessage();
+    void scheduleVirtualRefresh();
 
-        // 全局头像与头部显示开关控制
-        void setAvatarVisible(bool visible);
-        bool isAvatarVisible() const { return m_avatarVisible; }
-
-        void setHeaderVisible(bool visible);
-        bool isHeaderVisible() const { return m_headerVisible; }
-
-    Q_SIGNALS:
-        // 视口滚动时触发，通知当前位于视口顶部的消息ID
-        void topVisibleMessageChanged(const QUuid& id);
-
-    protected:
-        void resizeEvent(QResizeEvent* event) override;
-        void showEvent(QShowEvent* event) override;
-        void wheelEvent(QWheelEvent* event) override;
-
-        void onThemeUpdated() override;
-
-    private slots:
-        void executeFollowBottom();
-        void scheduleFollowBottom();
-        void onCardHeightChanged();
-        void checkTopVisibleMessage();
-
-    private:
-        void setupUi();
-        void bindScrollBarSignals(QScrollBar* bar);
-        void updateScrollGeometry();
-
-        QWidget* m_container = nullptr;
-        QVBoxLayout* m_layout = nullptr;
-
-        // UUID 到气泡 Widget 的映射表 (用于 Diff 比对)
-        QMap<QUuid, MessageCardWidget*> m_cardMap;
-        // 记录各卡片上一次的高度（用于视口滚动锚定）
-        QMap<MessageCardWidget*, int> m_cardLastHeights;
-
-        // 平滑滚动相关
-        QScrollBar* m_customScrollBar = nullptr;
-        QTimer* m_followTimer = nullptr;
-        QTimer* m_visibleCheckTimer = nullptr;
-        QVariantAnimation* m_scrollAnimation = nullptr;
-        bool m_autoScrollToBottom = true;
-        QUuid m_lastTopVisibleId;
-
-        bool m_avatarVisible = true;
-        bool m_headerVisible = true;
+private:
+    struct Item {
+        domain::conversation::Message message;
+        int y = 0;
+        int height = 0;
     };
+
+    void setupUi();
+    void bindScrollBarSignals(QScrollBar* bar);
+    void relayoutItems();
+    void updateVisibleCards();
+    void recycleCard(MessageCardWidget* card);
+    MessageCardWidget* acquireCard();
+    void bindCard(MessageCardWidget* card, const Item& item);
+    int findItemAtY(int y) const;
+    int estimatedHeight(const domain::conversation::Message& message) const;
+    int itemIndex(const QUuid& id) const;
+    void invalidateMeasuredHeights();
+
+    QWidget* m_container = nullptr;
+    QVector<Item> m_items;
+    QHash<QUuid, int> m_indexById;
+    QHash<QUuid, int> m_heightCache;
+    QHash<QUuid, MessageCardWidget*> m_cardMap;
+    QVector<MessageCardWidget*> m_recycledCards;
+
+    QScrollBar* m_customScrollBar = nullptr;
+    QTimer* m_followTimer = nullptr;
+    QTimer* m_visibleCheckTimer = nullptr;
+    QTimer* m_virtualRefreshTimer = nullptr;
+    QVariantAnimation* m_scrollAnimation = nullptr;
+    bool m_autoScrollToBottom = true;
+    bool m_isRefreshingCards = false;
+    QUuid m_lastTopVisibleId;
+    bool m_avatarVisible = true;
+    bool m_headerVisible = true;
+};
 
 } // namespace ui::widget::message

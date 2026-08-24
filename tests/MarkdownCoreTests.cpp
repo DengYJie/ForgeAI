@@ -7,11 +7,15 @@
 #include "ui/markdown/resource/MarkdownImageResourceManager.h"
 #include "ui/markdown/syntax/MarkdownSyntaxHighlighter.h"
 #include "ui/widget/MarkdownView.h"
+#include "ui/widget/message/MessageListView.h"
+#include "ui/widget/message/MessageCardWidget.h"
+#include "ui/widget/message/ProcessGroupWidget.h"
 
 #include <QImage>
 #include <QApplication>
 #include <QClipboard>
 #include <QElapsedTimer>
+#include <QSignalSpy>
 #include <QPainter>
 #include <QTemporaryDir>
 #include <memory>
@@ -34,10 +38,13 @@ private slots:
     void streamingFinishesWithCompleteDocumentLayout();
     void streamingKeepsStableBlocksOutOfTailRelayout();
     void markdownViewThemeAndSelectionApi();
+    void markdownViewFollowsFluentDarkTheme();
     void taskListsHaveStableHitTargetsAndOptionalInteraction();
     void virtualizesLargeDocumentPainting();
     void laysOutUnicodeAndHighDpiContent();
     void reportsManyViewConstructionCost();
+    void virtualizesMessageCards();
+    void virtualizesThousandsOfMessageRecords();
 };
 
 void MarkdownCoreTests::parsesCommonMarkAndGfm()
@@ -240,6 +247,21 @@ void MarkdownCoreTests::markdownViewThemeAndSelectionApi()
     QVERIFY(view.markdown().isEmpty());
 }
 
+void MarkdownCoreTests::markdownViewFollowsFluentDarkTheme()
+{
+    fluent::FluentElement::setTheme(fluent::FluentElement::Dark);
+    ui::widget::MarkdownView view;
+    view.onThemeUpdated();
+    QVERIFY(view.theme().text.lightness() > 160);
+    const auto document = MarkdownParser{}.parse(QStringLiteral("Plain dark body text"));
+    const auto layout = MarkdownLayoutEngine{}.layout(document, 420, view.theme());
+    QVERIFY(!layout.blocks.isEmpty());
+    const auto formats = layout.blocks.first().inlineLayout->layout.formats();
+    QVERIFY(!formats.isEmpty());
+    QCOMPARE(formats.first().format.foreground().color(), view.theme().text);
+    fluent::FluentElement::setTheme(fluent::FluentElement::Light);
+}
+
 void MarkdownCoreTests::taskListsHaveStableHitTargetsAndOptionalInteraction()
 {
     const QString markdown = QStringLiteral("- [ ] todo\n- [x] done");
@@ -310,6 +332,93 @@ void MarkdownCoreTests::reportsManyViewConstructionCost()
     const qint64 elapsedMs = timer.elapsed();
     qInfo().noquote() << QStringLiteral("MarkdownView benchmark: %1 views initialized in %2 ms.").arg(viewCount).arg(elapsedMs);
     QCOMPARE(static_cast<int>(views.size()), viewCount);
+}
+
+void MarkdownCoreTests::virtualizesMessageCards()
+{
+    QList<domain::conversation::Message> messages;
+    for (int index = 0; index < 500; ++index) {
+        domain::conversation::Message message;
+        message.id = QUuid::createUuid();
+        message.role = index % 2 ? domain::MessageRole::Assistant : domain::MessageRole::User;
+        message.createdAt = QDateTime::currentDateTimeUtc();
+        message.blocks.append(domain::conversation::MessageBlock{
+            domain::BlockType::Text, domain::conversation::TextBlock{QStringLiteral("Message %1 with **markdown** content.").arg(index)}});
+        if (index == 1) {
+            message.blocks.append(domain::conversation::MessageBlock{
+                domain::BlockType::Thought, domain::conversation::ThoughtBlock{QStringLiteral("Planning a response."), 120}});
+        }
+        messages.append(std::move(message));
+    }
+    ui::widget::message::MessageListView list;
+    list.resize(620, 480);
+    list.show();
+    list.syncMessages(messages);
+    QCoreApplication::processEvents();
+    const QString previewPath = qEnvironmentVariable("MESSAGE_LIST_PREVIEW");
+    if (!previewPath.isEmpty()) QVERIFY2(list.viewport()->grab().save(previewPath), qPrintable(previewPath));
+    list.setAvatarVisible(false);
+    list.setHeaderVisible(false);
+    QCoreApplication::processEvents();
+    QCOMPARE(list.messageCount(), 500);
+    QVERIFY(list.activeCardCount() > 0);
+    QVERIFY2(list.activeCardCount() < 80, "Only the viewport preload window may own card widgets.");
+    const auto cards = list.findChildren<ui::widget::message::MessageCardWidget*>();
+    QVERIFY(!cards.isEmpty());
+    for (const auto* card : cards) {
+        QVERIFY(!card->isAvatarVisible());
+        QVERIFY(!card->isHeaderVisible());
+    }
+    bool hasVisibleCard = false;
+    for (const auto* card : cards) {
+        if (card->isVisible() && card->geometry().width() > 0 && card->geometry().height() > 0) {
+            hasVisibleCard = true;
+            QVERIFY2(card->height() < 220, "A short message must not retain a narrow-width measurement height.");
+            break;
+        }
+    }
+    QVERIFY(hasVisibleCard);
+    QVERIFY(!list.findChildren<ui::widget::message::ProcessGroupWidget*>().isEmpty());
+
+    QSignalSpy topVisibleSpy(&list, &ui::widget::message::MessageListView::topVisibleMessageChanged);
+    list.scrollToMessage(messages.at(250).id);
+    QTest::qWait(40);
+    QVERIFY(list.verticalScrollBar()->value() > 0);
+    QVERIFY(!topVisibleSpy.isEmpty());
+
+    QScrollBar externalScrollBar;
+    list.setCustomScrollBar(&externalScrollBar);
+    QCOMPARE(externalScrollBar.maximum(), list.verticalScrollBar()->maximum());
+    list.verticalScrollBar()->setValue(list.verticalScrollBar()->maximum());
+    QCoreApplication::processEvents();
+    QVERIFY(list.activeCardCount() < 80);
+    QVERIFY2(list.activeCardCount() + list.pooledCardCount() < 100,
+             "Scrolling must recycle cards instead of allocating one widget per message.");
+}
+
+void MarkdownCoreTests::virtualizesThousandsOfMessageRecords()
+{
+    QList<domain::conversation::Message> messages;
+    messages.reserve(2000);
+    for (int index = 0; index < 2000; ++index) {
+        domain::conversation::Message message;
+        message.id = QUuid::createUuid();
+        message.role = index % 2 ? domain::MessageRole::Assistant : domain::MessageRole::User;
+        message.blocks.append(domain::conversation::MessageBlock{
+            domain::BlockType::Text, domain::conversation::TextBlock{QStringLiteral("Virtual record %1.").arg(index)}});
+        messages.append(std::move(message));
+    }
+    ui::widget::message::MessageListView list;
+    list.resize(640, 500);
+    list.show();
+    QElapsedTimer timer;
+    timer.start();
+    list.syncMessages(messages);
+    QCoreApplication::processEvents();
+    qInfo() << "MessageListView benchmark: 2000 records synchronized in" << timer.elapsed() << "ms; active cards:" << list.activeCardCount();
+    QCOMPARE(list.messageCount(), 2000);
+    QVERIFY(list.activeCardCount() > 0);
+    QVERIFY(list.activeCardCount() < 100);
 }
 
 int main(int argc, char** argv)
