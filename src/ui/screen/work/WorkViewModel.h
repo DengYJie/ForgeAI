@@ -29,6 +29,7 @@ namespace ui::screen::work {
         QList<domain::conversation::Message> messages;
         QList<ui::screen::chat::ChatSessionItemData> sessions;
         QList<domain::project::Project> projects;
+        QSet<QUuid> pinnedProjects;
         QString currentSessionId;
         QUuid currentProjectId;
         QString projectRoot;
@@ -69,6 +70,10 @@ namespace ui::screen::work {
         void setProjectRoot(const QString& rootPath);
         void selectProject(const QUuid& projectId);
         void addProject(const QString& rootPath, const QString& displayName = {});
+        void removeProject(const QUuid& projectId);
+        void renameProject(const QUuid& projectId, const QString& newName);
+        void toggleProjectPinned(const QUuid& projectId);
+        void archiveProjectSessions(const QUuid& projectId);
         void newSession();
         void loadSession(const QString& sessionId);
         void setSessionPinned(const QString& sessionId, bool pinned);

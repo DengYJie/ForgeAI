@@ -246,6 +246,80 @@ void WorkViewModel::addProject(const QString& rootPath, const QString& displayNa
     selectProject(project->id);
 }
 
+void WorkViewModel::removeProject(const QUuid& projectId) {
+    if (m_projectRepository) {
+        m_projectRepository->deleteProject(projectId);
+    }
+    updateState([this, projectId](WorkState& state) {
+        state.projects.removeIf([&](const auto& p) { return p.id == projectId; });
+        state.sessions.removeIf([&](const auto& s) { return s.projectId == projectId; });
+        state.pinnedProjects.remove(projectId);
+        if (state.currentProjectId == projectId) {
+            if (!state.projects.isEmpty()) {
+                selectProject(state.projects.first().id);
+            } else {
+                state.currentProjectId = {};
+                state.currentSessionId.clear();
+                state.messages.clear();
+            }
+        }
+    });
+}
+
+void WorkViewModel::renameProject(const QUuid& projectId, const QString& newName) {
+    if (newName.trimmed().isEmpty()) return;
+    if (m_projectRepository) {
+        auto projectOpt = m_projectRepository->getProject(projectId);
+        if (projectOpt) {
+            auto proj = *projectOpt;
+            proj.name = newName.trimmed();
+            m_projectRepository->saveProject(proj);
+        }
+    }
+    updateState([projectId, newName](WorkState& state) {
+        for (auto& p : state.projects) {
+            if (p.id == projectId) {
+                p.name = newName.trimmed();
+                break;
+            }
+        }
+        if (state.currentProjectId == projectId) {
+            state.projectName = newName.trimmed();
+        }
+    });
+}
+
+void WorkViewModel::toggleProjectPinned(const QUuid& projectId) {
+    updateState([projectId](WorkState& state) {
+        if (state.pinnedProjects.contains(projectId)) {
+            state.pinnedProjects.remove(projectId);
+        } else {
+            state.pinnedProjects.insert(projectId);
+        }
+    });
+}
+
+void WorkViewModel::archiveProjectSessions(const QUuid& projectId) {
+    updateState([this, projectId](WorkState& state) {
+        for (auto& s : state.sessions) {
+            if (s.projectId == projectId) {
+                s.isArchived = true;
+                if (m_conversationRepository) {
+                    auto conv = m_conversationRepository->getConversation(QUuid(s.id));
+                    if (conv) {
+                        auto updated = *conv;
+                        updated.isArchived = true;
+                        m_conversationRepository->saveConversation(updated);
+                    }
+                }
+            }
+        }
+        if (state.currentProjectId == projectId && !state.currentSessionId.isEmpty()) {
+            state.currentSessionId.clear();
+            state.messages.clear();
+        }
+    });
+}
 
 void WorkViewModel::newSession() {
     if (m_currentProjectId.isNull()) return;
