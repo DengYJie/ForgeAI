@@ -71,24 +71,32 @@ namespace domain::agent {
          * @details 裁决优先级: 精确工具规则 > 服务通配符规则 (server.*) > 全局通配符规则 (*) > 权限类型默认值
          */
         PermissionDecision evaluateTool(const QString& toolName, const ToolPermission& perm) const {
-            // 1. 精确工具名匹配
+            // 1. 精确工具名匹配 (如 "mcp::filesystem::read_file", "write_file")
             if (toolRules.contains(toolName)) {
                 return toolRules.value(toolName);
             }
 
-            // 2. 服务级通配符匹配 (如 "server_name.tool_func" -> "server_name.*")
-            const int dotIdx = toolName.indexOf(QLatin1Char('.'));
-            if (dotIdx > 0) {
-                const QString serverWildcard = toolName.left(dotIdx) + QStringLiteral(".*");
-                if (toolRules.contains(serverWildcard)) {
-                    return toolRules.value(serverWildcard);
+            // 2. 层级/服务级通配符从长到短逐级匹配
+            // 支持 "::" 与 "." 两种常见命名空间分隔符
+            // 例如 "mcp::filesystem::read_file" -> 依次匹配 "mcp::filesystem::*", "mcp::filesystem.*", "mcp::*", "mcp.*"
+            // 例如 "server.module.tool" -> 依次匹配 "server.module.*", "server.*"
+            QString current = toolName;
+            while (true) {
+                const int lastColon = current.lastIndexOf(QStringLiteral("::"));
+                const int lastDot = current.lastIndexOf(QLatin1Char('.'));
+                const int splitIdx = qMax(lastColon, lastDot);
+                if (splitIdx <= 0) {
+                    break;
                 }
-            }
-            const int colonIdx = toolName.indexOf(QStringLiteral("::"));
-            if (colonIdx > 0) {
-                const QString serverWildcard = toolName.left(colonIdx) + QStringLiteral("::*");
-                if (toolRules.contains(serverWildcard)) {
-                    return toolRules.value(serverWildcard);
+
+                current = current.left(splitIdx);
+                const QString candidateColon = current + QStringLiteral("::*");
+                if (toolRules.contains(candidateColon)) {
+                    return toolRules.value(candidateColon);
+                }
+                const QString candidateDot = current + QStringLiteral(".*");
+                if (toolRules.contains(candidateDot)) {
+                    return toolRules.value(candidateDot);
                 }
             }
 

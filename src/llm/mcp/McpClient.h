@@ -24,7 +24,7 @@ namespace llm::mcp {
         Q_OBJECT
     public:
         explicit McpClient(IMcpTransport* transport, QObject* parent = nullptr);
-        ~McpClient() override = default;
+        ~McpClient() override;
 
         /**
          * @brief 发起 MCP 初始化握手（包含 protocolVersion 兼容性校验）
@@ -135,8 +135,6 @@ namespace llm::mcp {
 
         IMcpTransport* m_transport = nullptr;
         std::atomic<int> m_nextRequestId{1};
-        QHash<int, QJsonObject> m_pendingResponses;
-        QHash<int, QEventLoop*> m_activeLoops;
         QHash<int, PendingAsyncRequest> m_pendingAsyncRequests;
         QString m_lastError;
     };

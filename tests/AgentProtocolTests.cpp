@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QThread>
+// Recompiled against updated McpClient.h
 
 #include "llm/protocol/anthropic/AnthropicProtocolAdapter.h"
 #include "llm/protocol/anthropic/AnthropicStreamParser.h"

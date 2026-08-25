@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QTimer>
+// Recompiled against updated McpClient.h and AgentRunState.h
 #include <QEventLoop>
 
 #include "ui/screen/work/WorkViewModel.h"
@@ -112,6 +113,7 @@ private slots:
     void testAgentRuntimeUncooperativeToolRuntimeDestructionSafety();
     void testAgentRuntimeImmediateToolCheckpointRecovery();
     void testAgentRuntimePermissionScopeRunApproval();
+    void testAgentRuntimePermissionScopeProjectAndGlobalApproval();
     void testAgentRuntimeToolOutputTruncation();
     void testAgentRuntimeParallelResultOrderPreservation();
 
@@ -1419,6 +1421,100 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeRunApproval() {
     QCOMPARE(permissionRequests, 1);
     QVERIFY(QFile::exists(QDir(m_tempDir.path()).filePath(QStringLiteral("run_mem_1.txt"))));
     QVERIFY(QFile::exists(QDir(m_tempDir.path()).filePath(QStringLiteral("run_mem_2.txt"))));
+}
+
+void WorkIntegrationTests::testAgentRuntimePermissionScopeProjectAndGlobalApproval() {
+    MockChatGateway mockGateway;
+
+    // Run 1 in Project A
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p1"), QStringLiteral("write_file")});
+    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p1"), QStringLiteral(R"({"path":"proj_a.txt","content":"proj A content"})")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p1")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    QList<domain::llm::ChatEvent> r2;
+    r2.append(domain::llm::EventStarted{});
+    r2.append(domain::llm::EventTextDelta{QStringLiteral("完成写入 A")});
+    r2.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r2);
+
+    // Run 2 in Project A (different session, same project)
+    QList<domain::llm::ChatEvent> r3;
+    r3.append(domain::llm::EventStarted{});
+    r3.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p2"), QStringLiteral("write_file")});
+    r3.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p2"), QStringLiteral(R"({"path":"proj_a2.txt","content":"proj A2 content"})")});
+    r3.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p2")});
+    r3.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r3);
+
+    QList<domain::llm::ChatEvent> r4;
+    r4.append(domain::llm::EventStarted{});
+    r4.append(domain::llm::EventTextDelta{QStringLiteral("完成写入 A2")});
+    r4.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r4);
+
+    auto workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    auto builtinProvider = std::make_shared<agent::tool::BuiltinToolProvider>(workspaceFs);
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(builtinProvider);
+
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, nullptr);
+
+    const QUuid projectAId = QUuid::createUuid();
+
+    agent::runtime::AgentRunContext ctx1;
+    ctx1.sessionId = QStringLiteral("sess_proj_1");
+    ctx1.projectId = projectAId;
+    ctx1.workspaceRoot = m_tempDir.path();
+    ctx1.policy.autoApproveWriteWorkspace = false; // 要求授权
+
+    int permissionRequests = 0;
+    connect(&runtime, &agent::runtime::AgentRuntime::permissionRequested, [&](const QString&, const domain::agent::ToolCall& call, const domain::agent::ToolPermission&) {
+        ++permissionRequests;
+        // 以 PermissionScope::Project 授权
+        QTimer::singleShot(10, [&runtime, call]() {
+            runtime.grantPermission(QStringLiteral("sess_proj_1"), call.id, true, domain::agent::PermissionScope::Project);
+        });
+    });
+
+    bool completed1 = false;
+    QEventLoop loop1;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        completed1 = true;
+        loop1.quit();
+    });
+
+    runtime.startRun(ctx1, QStringLiteral("项目 A 第 1 次运行"));
+    QTimer::singleShot(3000, &loop1, &QEventLoop::quit);
+    loop1.exec();
+
+    QVERIFY(completed1);
+    QCOMPARE(permissionRequests, 1);
+
+    // 在同一个项目 projectAId 发起新的 Session 运行
+    agent::runtime::AgentRunContext ctx2;
+    ctx2.sessionId = QStringLiteral("sess_proj_2");
+    ctx2.projectId = projectAId;
+    ctx2.workspaceRoot = m_tempDir.path();
+    ctx2.policy.autoApproveWriteWorkspace = false;
+
+    bool completed2 = false;
+    QEventLoop loop2;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        completed2 = true;
+        loop2.quit();
+    });
+
+    runtime.startRun(ctx2, QStringLiteral("项目 A 第 2 次运行（新会话）"));
+    QTimer::singleShot(3000, &loop2, &QEventLoop::quit);
+    loop2.exec();
+
+    QVERIFY(completed2);
+    // 关键验证：由于以 PermissionScope::Project 授权，同一个项目的新会话无需再次弹窗，请求总次数仍为 1！
+    QCOMPARE(permissionRequests, 1);
 }
 
 // 模拟返回超大文本的 Tool

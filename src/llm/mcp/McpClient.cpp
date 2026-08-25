@@ -15,19 +15,36 @@ namespace llm::mcp {
         : QObject(parent), m_transport(transport) {
         if (m_transport) {
             connect(m_transport, &IMcpTransport::messageReceived, this, &McpClient::onMessageReceived);
+            connect(m_transport, &IMcpTransport::closed, this, [this]() {
+                auto pendingMap = m_pendingAsyncRequests;
+                m_pendingAsyncRequests.clear();
+                for (auto req : pendingMap) {
+                    if (req.timeoutTimer) {
+                        req.timeoutTimer->stop();
+                        req.timeoutTimer->deleteLater();
+                    }
+                    if (req.callback) {
+                        req.callback({}, true, QStringLiteral("MCP 服务未连接或已断开连接"));
+                    }
+                }
+            });
         }
+    }
+
+    McpClient::~McpClient() {
+        for (auto& req : m_pendingAsyncRequests) {
+            if (req.timeoutTimer) {
+                req.timeoutTimer->stop();
+                delete req.timeoutTimer;
+                req.timeoutTimer = nullptr;
+            }
+        }
+        m_pendingAsyncRequests.clear();
     }
 
     void McpClient::onMessageReceived(const QJsonObject& message) {
         if (message.contains(QStringLiteral("id")) && !message.value(QStringLiteral("id")).isNull()) {
             const int id = message.value(QStringLiteral("id")).toInt();
-            if (m_activeLoops.contains(id)) {
-                m_pendingResponses[id] = message;
-                auto* loop = m_activeLoops.value(id);
-                if (loop && loop->isRunning()) {
-                    loop->quit();
-                }
-            }
             if (m_pendingAsyncRequests.contains(id)) {
                 auto req = m_pendingAsyncRequests.take(id);
                 if (req.timeoutTimer) {
@@ -67,82 +84,40 @@ namespace llm::mcp {
             }}};
         }
 
-        const int requestId = m_nextRequestId.fetch_add(1);
-        QJsonObject req{
-            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-            {QStringLiteral("id"), requestId},
-            {QStringLiteral("method"), method}
-        };
-        if (!params.isEmpty()) {
-            req.insert(QStringLiteral("params"), params);
-        }
-
-        core::logging::LoggingService::instance().debug(core::logging::Category::McpProtocol, QStringLiteral("发送 MCP 同步请求"), {
-            {QStringLiteral("method"), method},
-            {QStringLiteral("requestId"), QString::number(requestId)}
-        });
-
+        QJsonObject resultObj;
+        bool done = false;
         QEventLoop loop;
-        m_activeLoops.insert(requestId, &loop);
-
-        QTimer timer;
-        timer.setSingleShot(true);
-        connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-        timer.start(timeoutMs);
-
-        QTimer pollTimer;
-        connect(&pollTimer, &QTimer::timeout, [&loop, cancellationToken]() {
-            if (cancellationToken.isCanceled()) {
-                loop.quit();
+        const int requestId = sendRequestAsync(
+            method,
+            params,
+            timeoutMs,
+            [&resultObj, &loop, &done](const QJsonObject& response, bool isError, const QString& errorMessage) {
+                if (isError) {
+                    resultObj = QJsonObject{{QStringLiteral("error"), QJsonObject{
+                        {QStringLiteral("code"), -32000},
+                        {QStringLiteral("message"), errorMessage}
+                    }}};
+                } else {
+                    resultObj = response;
+                }
+                done = true;
+                if (loop.isRunning()) {
+                    loop.quit();
+                }
             }
-        });
-        pollTimer.start(20);
+        );
 
-        if (!m_transport->sendJson(req)) {
-            m_activeLoops.remove(requestId);
-            core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("向 MCP 写入请求数据失败"), {
-                {QStringLiteral("method"), method},
-                {QStringLiteral("requestId"), QString::number(requestId)}
-            });
+        if (requestId < 0) {
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
                 {QStringLiteral("message"), QStringLiteral("发送 MCP 请求失败")}
             }}};
         }
 
-        if (m_pendingResponses.contains(requestId)) {
-            m_activeLoops.remove(requestId);
-            return m_pendingResponses.take(requestId);
+        if (!done) {
+            loop.exec();
         }
-
-        loop.exec();
-        m_activeLoops.remove(requestId);
-
-        if (cancellationToken.isCanceled()) {
-            core::logging::LoggingService::instance().info(core::logging::Category::McpProtocol, QStringLiteral("MCP 请求已取消"), {
-                {QStringLiteral("method"), method},
-                {QStringLiteral("requestId"), QString::number(requestId)}
-            });
-            return QJsonObject{{QStringLiteral("error"), QJsonObject{
-                {QStringLiteral("code"), -32000},
-                {QStringLiteral("message"), QStringLiteral("MCP 请求已取消")}
-            }}};
-        }
-
-        if (m_pendingResponses.contains(requestId)) {
-            return m_pendingResponses.take(requestId);
-        }
-
-        core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 请求超时"), {
-            {QStringLiteral("method"), method},
-            {QStringLiteral("requestId"), QString::number(requestId)},
-            {QStringLiteral("timeoutMs"), QString::number(timeoutMs)}
-        });
-
-        return QJsonObject{{QStringLiteral("error"), QJsonObject{
-            {QStringLiteral("code"), -32000},
-            {QStringLiteral("message"), QStringLiteral("服务响应超时，请稍后重试。")}
-        }}};
+        return resultObj;
     }
 
     bool McpClient::sendNotification(const QString& method, const QJsonObject& params) {
@@ -472,11 +447,6 @@ namespace llm::mcp {
             core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 传输通道未就绪或已断开连接"), {
                 {QStringLiteral("method"), method}
             });
-            if (callback) {
-                QTimer::singleShot(0, this, [callback]() {
-                    callback({}, true, QStringLiteral("MCP 服务未连接或已断开连接"));
-                });
-            }
             return -1;
         }
 

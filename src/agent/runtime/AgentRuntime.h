@@ -76,6 +76,8 @@ namespace agent::runtime {
         QList<domain::agent::ToolResult> m_pendingToolResults;
         QMap<QString, std::pair<domain::agent::ToolCall, domain::agent::ToolPermission>> m_pendingPermissions;
         QSet<QString> m_runApprovedTools;
+        QMap<QUuid, QSet<QString>> m_projectApprovedTools;
+        QSet<QString> m_globalApprovedTools;
         QList<QList<domain::agent::ToolCall>> m_pendingBatches;
         std::vector<std::unique_ptr<application::ports::IToolOperation>> m_activeOperations;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;

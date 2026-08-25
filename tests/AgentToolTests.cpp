@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+// Recompiled against updated McpClient.h and AgentRunState.h
 #include <QJsonArray>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -1066,11 +1067,18 @@ void AgentToolTests::testAgentPolicyWildcardOverrides() {
     policy.toolRules.insert(QStringLiteral("write_file"), domain::agent::PermissionDecision::Allow);
     QCOMPARE(policy.evaluateTool(QStringLiteral("write_file"), writePerm), domain::agent::PermissionDecision::Allow);
 
-    // 3. 服务级通配符 (如 "db_server.*")
+    // 3. 服务级通配符 (如 "db_server.*" 以及 "mcp::filesystem::*")
     domain::agent::ToolPermission mcpPerm{domain::agent::ToolPermissionType::ExternalServiceWrite, QStringLiteral("MCP写")};
     policy.toolRules.insert(QStringLiteral("db_server.*"), domain::agent::PermissionDecision::Deny);
     QCOMPARE(policy.evaluateTool(QStringLiteral("db_server.insert_row"), mcpPerm), domain::agent::PermissionDecision::Deny);
     QCOMPARE(policy.evaluateTool(QStringLiteral("db_server.delete_table"), mcpPerm), domain::agent::PermissionDecision::Deny);
+
+    // 测试 mcp::<server>::<tool> 深度分层通配符
+    policy.toolRules.insert(QStringLiteral("mcp::filesystem::*"), domain::agent::PermissionDecision::Allow);
+    policy.toolRules.insert(QStringLiteral("mcp::database::*"), domain::agent::PermissionDecision::Deny);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("mcp::filesystem::read_file"), mcpPerm), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("mcp::filesystem::write_file"), mcpPerm), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("mcp::database::query_sql"), mcpPerm), domain::agent::PermissionDecision::Deny);
 
     // 4. 精确优先于通配符: 单独放行 "db_server.insert_row"
     policy.toolRules.insert(QStringLiteral("db_server.insert_row"), domain::agent::PermissionDecision::Allow);
@@ -1082,6 +1090,7 @@ void AgentToolTests::testAgentPolicyWildcardOverrides() {
     policy.toolRules.clear();
     policy.toolRules.insert(QStringLiteral("*"), domain::agent::PermissionDecision::Deny);
     QCOMPARE(policy.evaluateTool(QStringLiteral("read_file"), anyPerm), domain::agent::PermissionDecision::Deny);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("mcp::filesystem::read_file"), anyPerm), domain::agent::PermissionDecision::Deny);
 }
 
 void AgentToolTests::testListFilesTool() {

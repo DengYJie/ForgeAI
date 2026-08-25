@@ -403,6 +403,17 @@ namespace agent::runtime {
                 core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前会话内的工具授权"), {
                     {QStringLiteral("toolName"), call.name}
                 });
+            } else if (scope == domain::agent::PermissionScope::Project) {
+                m_projectApprovedTools[m_context.projectId].insert(call.name);
+                core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前项目内的工具授权"), {
+                    {QStringLiteral("toolName"), call.name},
+                    {QStringLiteral("projectId"), m_context.projectId.toString()}
+                });
+            } else if (scope == domain::agent::PermissionScope::Global) {
+                m_globalApprovedTools.insert(call.name);
+                core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住全局工具授权"), {
+                    {QStringLiteral("toolName"), call.name}
+                });
             }
 
             const int toolTimeout = m_context.policy.toolTimeoutMs > 0 ? m_context.policy.toolTimeoutMs : (m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000);
@@ -496,8 +507,10 @@ namespace agent::runtime {
             domain::agent::ToolPermission requiredPerm;
             domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
 
-            // 如果当前会话已授权该工具，直接允许
-            if (m_runApprovedTools.contains(call.name)) {
+            // 如果当前会话、当前项目或全局已授权该工具，直接允许
+            if (m_runApprovedTools.contains(call.name) ||
+                m_globalApprovedTools.contains(call.name) ||
+                m_projectApprovedTools.value(m_context.projectId).contains(call.name)) {
                 decision = domain::agent::PermissionDecision::Allow;
             } else if (m_toolRegistry) {
                 auto tool = m_toolRegistry->findTool(call.name);
@@ -678,6 +691,8 @@ namespace agent::runtime {
         }
         m_pendingToolResults = orderedResults;
         m_state.results = m_pendingToolResults;
+
+        setState(domain::agent::AgentRunStatus::PersistingToolResult);
 
         // 保存包含 ToolResult 的消息记录
         if (!m_pendingToolResults.isEmpty()) {
