@@ -25,20 +25,23 @@
 #include "data/sqlite/DatabaseManager.h"
 #include "application/ports/IChatModelGateway.h"
 #include "application/usecase/agent/RunAgentUseCase.h"
+#include "llm/mcp/McpManager.h"
 
 // 模拟 ChatOperation
 class MockChatOperation final : public application::ports::IChatOperation {
     Q_OBJECT
 public:
-    explicit MockChatOperation(QList<domain::llm::ChatEvent> events, QObject* parent = nullptr)
+    explicit MockChatOperation(QList<domain::llm::ChatEvent> events, int delayMs = 10, QObject* parent = nullptr)
         : application::ports::IChatOperation(parent), m_events(std::move(events)) {
-        QTimer::singleShot(10, this, [this]() {
-            if (m_cancelled) return;
-            for (const auto& ev : m_events) {
-                if (m_cancelled) break;
-                emit eventReceived(ev);
-            }
-        });
+        if (delayMs >= 0) {
+            QTimer::singleShot(delayMs, this, [this]() {
+                if (m_cancelled) return;
+                for (const auto& ev : m_events) {
+                    if (m_cancelled) break;
+                    emit eventReceived(ev);
+                }
+            });
+        }
     }
 
     void cancel() override {
@@ -53,8 +56,8 @@ private:
 // 模拟 ChatModelGateway
 class MockChatGateway final : public application::ports::IChatModelGateway {
 public:
-    void enqueueResponse(QList<domain::llm::ChatEvent> events) {
-        m_responseQueue.append(std::move(events));
+    void enqueueResponse(QList<domain::llm::ChatEvent> events, int delayMs = 10) {
+        m_responseQueue.append({std::move(events), delayMs});
     }
 
     application::ports::IChatOperation* sendRequest(
@@ -65,19 +68,22 @@ public:
         Q_UNUSED(request);
 
         QList<domain::llm::ChatEvent> events;
+        int delayMs = 10;
         if (!m_responseQueue.isEmpty()) {
-            events = m_responseQueue.takeFirst();
+            auto item = m_responseQueue.takeFirst();
+            events = item.first;
+            delayMs = item.second;
         } else {
             events.append(domain::llm::EventStarted{});
             events.append(domain::llm::EventTextDelta{QStringLiteral("默认模型回答")});
             events.append(domain::llm::EventFinished{});
         }
 
-        return new MockChatOperation(std::move(events));
+        return new MockChatOperation(std::move(events), delayMs);
     }
 
 private:
-    QList<QList<domain::llm::ChatEvent>> m_responseQueue;
+    QList<QPair<QList<domain::llm::ChatEvent>, int>> m_responseQueue;
 };
 
 class WorkIntegrationTests final : public QObject {
@@ -93,6 +99,10 @@ private slots:
     void testAgentRuntimeStateRealtimeSynchronization();
     void testAgentRuntimeCheckpointRecoveryWithPendingToolsAndPermissions();
     void testAgentRuntimeMaxToolRoundsStrictLimit();
+    void testAgentRuntimeEnforcesEnabledToolsFiltering();
+    void testAgentRuntimeParallelToolExecution();
+    void testAgentRuntimeTimeoutWatchdog();
+    void testWorkViewModelMcpProjectSwitchUnload();
 
 private:
     QTemporaryDir m_tempDir;
@@ -608,6 +618,213 @@ void WorkIntegrationTests::testAgentRuntimeMaxToolRoundsStrictLimit() {
     QVERIFY2(completed, "Max tool rounds test timed out");
     QCOMPARE(runtime.currentState().status, domain::agent::AgentRunStatus::Completed);
     QCOMPARE(runtime.currentState().round, 2);
+}
+
+void WorkIntegrationTests::testAgentRuntimeEnforcesEnabledToolsFiltering() {
+    MockChatGateway mockGateway;
+
+    // 模型尝试调用 write_file
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_write"), QStringLiteral("write_file")});
+    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_write"), QStringLiteral(R"({"path":"blocked.txt","content":"should not exist"})")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_write")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    // 收到拒绝后模型直接输出文本
+    QList<domain::llm::ChatEvent> r2;
+    r2.append(domain::llm::EventStarted{});
+    r2.append(domain::llm::EventTextDelta{QStringLiteral("工具被安全策略拦截。")});
+    r2.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r2);
+
+    auto workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    auto builtinProvider = std::make_shared<agent::tool::BuiltinToolProvider>(workspaceFs);
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(builtinProvider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_filter_tools");
+    context.workspaceRoot = m_tempDir.path();
+    // 仅允许 list_files，不启用 write_file
+    context.enabledTools = {QStringLiteral("list_files")};
+
+    bool toolResultError = false;
+    QString toolResultContent;
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        if (res.toolCallId == QStringLiteral("call_write")) {
+            toolResultError = res.isError;
+            toolResultContent = res.content;
+        }
+    });
+
+    bool completed = false;
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        completed = true;
+        loop.quit();
+    });
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("尝试调用未启用工具"));
+    loop.exec();
+
+    QVERIFY2(completed, "Enabled tools test timed out");
+    QVERIFY(toolResultError);
+    QVERIFY(toolResultContent.contains(QStringLiteral("未在当前智能体启用列表中")));
+
+    // 校验被拦截的写操作未写入磁盘
+    const QString blockedFile = QDir(m_tempDir.path()).filePath(QStringLiteral("blocked.txt"));
+    QVERIFY(!QFile::exists(blockedFile));
+}
+
+void WorkIntegrationTests::testAgentRuntimeParallelToolExecution() {
+    MockChatGateway mockGateway;
+
+    // 创建两个测试文件
+    const QString f1 = QDir(m_tempDir.path()).filePath(QStringLiteral("p1.txt"));
+    const QString f2 = QDir(m_tempDir.path()).filePath(QStringLiteral("p2.txt"));
+    {
+        QFile file1(f1);
+        QVERIFY(file1.open(QIODevice::WriteOnly | QIODevice::Text));
+        file1.write("parallel 1");
+    }
+    {
+        QFile file2(f2);
+        QVERIFY(file2.open(QIODevice::WriteOnly | QIODevice::Text));
+        file2.write("parallel 2");
+    }
+
+    // 第一轮：并发调用两个 read_file
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p1"), QStringLiteral("read_file")});
+    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p1"), QStringLiteral(R"({"path":"p1.txt"})")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p1")});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p2"), QStringLiteral("read_file")});
+    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p2"), QStringLiteral(R"({"path":"p2.txt"})")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p2")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    // 第二轮：汇总结果
+    QList<domain::llm::ChatEvent> r2;
+    r2.append(domain::llm::EventStarted{});
+    r2.append(domain::llm::EventTextDelta{QStringLiteral("并发读取完成")});
+    r2.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r2);
+
+    auto workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    auto builtinProvider = std::make_shared<agent::tool::BuiltinToolProvider>(workspaceFs);
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(builtinProvider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_parallel");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.allowParallelToolExecution = true;
+
+    QMap<QString, QString> resultsMap;
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        resultsMap.insert(res.toolCallId, res.content);
+    });
+
+    bool completed = false;
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        completed = true;
+        loop.quit();
+    });
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("并发读取文件"));
+    loop.exec();
+
+    QVERIFY2(completed, "Parallel execution test timed out");
+    QCOMPARE(resultsMap.size(), 2);
+    QCOMPARE(resultsMap.value(QStringLiteral("call_p1")), QStringLiteral("parallel 1"));
+    QCOMPARE(resultsMap.value(QStringLiteral("call_p2")), QStringLiteral("parallel 2"));
+}
+
+void WorkIntegrationTests::testAgentRuntimeTimeoutWatchdog() {
+    MockChatGateway mockGateway;
+
+    // 模拟网关延迟 500ms，而策略超时设定为 100ms
+    QList<domain::llm::ChatEvent> slowResponse;
+    slowResponse.append(domain::llm::EventStarted{});
+    slowResponse.append(domain::llm::EventTextDelta{QStringLiteral("迟到的回复")});
+    slowResponse.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(slowResponse, 500);
+
+    auto workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    auto builtinProvider = std::make_shared<agent::tool::BuiltinToolProvider>(workspaceFs);
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(builtinProvider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_timeout");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.timeoutMs = 100; // 超时看门狗 100ms
+
+    bool failed = false;
+    QString errorCode;
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runFailed, [&](const QString&, const domain::llm::ChatError& err) {
+        failed = true;
+        errorCode = err.code;
+        loop.quit();
+    });
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("超时任务"));
+    loop.exec();
+
+    QVERIFY2(failed, "Timeout watchdog should trigger runFailed");
+    QCOMPARE(errorCode, QStringLiteral("RequestTimeout"));
+    QCOMPARE(runtime.currentState().status, domain::agent::AgentRunStatus::Failed);
+}
+
+void WorkIntegrationTests::testWorkViewModelMcpProjectSwitchUnload() {
+    QTemporaryDir proj1Dir;
+    QTemporaryDir proj2Dir;
+    QVERIFY(proj1Dir.isValid() && proj2Dir.isValid());
+
+    // 在 Project 1 创建 .mcp.json
+    QFile mcpFile1(QDir(proj1Dir.path()).filePath(QStringLiteral(".mcp.json")));
+    QVERIFY(mcpFile1.open(QIODevice::WriteOnly | QIODevice::Text));
+    mcpFile1.write(R"({
+        "mcpServers": {
+            "proj1_server": {
+                "command": "cmd.exe",
+                "args": ["/c", "echo {}"]
+            }
+        }
+    })");
+    mcpFile1.close();
+
+    llm::mcp::McpManager mcpManager;
+    llm::mcp::McpServerConfig cfg;
+    cfg.name = QStringLiteral("proj1_server");
+    cfg.command = QStringLiteral("cmd.exe");
+    cfg.args = {QStringLiteral("/c"), QStringLiteral("echo {}")};
+    cfg.cwd = proj1Dir.path();
+
+    mcpManager.registerServer(cfg);
+    QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) != nullptr);
+
+    // 切换到 Project 2，验证 stopServersForProject 卸载了 Project 1 的 MCP 服务
+    mcpManager.stopServersForProject(proj1Dir.path());
+    QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) == nullptr);
 }
 
 QTEST_GUILESS_MAIN(WorkIntegrationTests)

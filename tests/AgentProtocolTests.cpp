@@ -17,6 +17,7 @@
 
 #include "llm/mcp/McpClient.h"
 #include "llm/mcp/IMcpTransport.h"
+#include "llm/mcp/StdioMcpTransport.h"
 
 class MockMcpTransport final : public llm::mcp::IMcpTransport {
     Q_OBJECT
@@ -66,6 +67,8 @@ private slots:
     void mcpClientListTools();
     void mcpClientCallToolSuccessAndError();
     void mcpClientTimeoutAndDisconnected();
+    void testStdioMcpTransportProcessLifecycleAndFraming();
+    void testStdioMcpTransportInvalidExecutableError();
 };
 
 void AgentProtocolTests::responsesUsesFunctionCallOutput() {
@@ -385,6 +388,59 @@ void AgentProtocolTests::mcpClientTimeoutAndDisconnected() {
     const auto timeoutRes = client.callTool(QStringLiteral("call_to"), QStringLiteral("slow_tool"), QStringLiteral("{}"), 50);
     QVERIFY(timeoutRes.isError);
     QVERIFY(timeoutRes.content.contains(QStringLiteral("超时")));
+}
+
+void AgentProtocolTests::testStdioMcpTransportProcessLifecycleAndFraming() {
+    llm::mcp::McpServerConfig config;
+#ifdef Q_OS_WIN
+    config.command = QStringLiteral("powershell.exe");
+    config.args = {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), QStringLiteral("Write-Output '{\"jsonrpc\":\"2.0\",\"id\":100,\"result\":{\"status\":\"alive\"}}'")};
+#else
+    config.command = QStringLiteral("sh");
+    config.args = {QStringLiteral("-c"), QStringLiteral("echo '{\"jsonrpc\":\"2.0\",\"id\":100,\"result\":{\"status\":\"alive\"}}'")};
+#endif
+
+    llm::mcp::StdioMcpTransport transport(config);
+
+    bool messageReceived = false;
+    QJsonObject receivedObj;
+    QEventLoop loop;
+
+    QObject::connect(&transport, &llm::mcp::IMcpTransport::messageReceived, [&](const QJsonObject& obj) {
+        messageReceived = true;
+        receivedObj = obj;
+        loop.quit();
+    });
+
+    QTimer::singleShot(4000, &loop, &QEventLoop::quit);
+
+    QVERIFY(transport.start());
+    loop.exec();
+
+    QVERIFY2(messageReceived, "StdioMcpTransport should parse newline-delimited JSON output from subprocess");
+    QCOMPARE(receivedObj.value(QStringLiteral("id")).toInt(), 100);
+    QCOMPARE(receivedObj.value(QStringLiteral("result")).toObject().value(QStringLiteral("status")).toString(), QStringLiteral("alive"));
+
+    transport.close();
+    QVERIFY(!transport.isConnected());
+}
+
+void AgentProtocolTests::testStdioMcpTransportInvalidExecutableError() {
+    llm::mcp::McpServerConfig config;
+    config.command = QStringLiteral("non_existent_executable_12345678");
+
+    llm::mcp::StdioMcpTransport transport(config);
+
+    bool errorOccurred = false;
+    QString errorMsg;
+    QObject::connect(&transport, &llm::mcp::IMcpTransport::errorOccurred, [&](const QString& err) {
+        errorOccurred = true;
+        errorMsg = err;
+    });
+
+    QVERIFY(!transport.start());
+    QVERIFY(errorOccurred);
+    QVERIFY(errorMsg.contains(QStringLiteral("non_existent_executable_12345678")) || errorMsg.contains(QStringLiteral("启动失败")));
 }
 
 QTEST_GUILESS_MAIN(AgentProtocolTests)

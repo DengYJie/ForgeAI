@@ -203,7 +203,14 @@ void AgentToolTests::loadsProjectContext() {
     QCOMPARE(context.skills.size(), 1);
     QCOMPARE(context.skills.first().name, QStringLiteral("demo_skill"));
     QCOMPARE(context.skills.first().description, QStringLiteral("A test skill"));
-    QCOMPARE(context.skills.first().instructions, QStringLiteral("Skill Instructions Content"));
+    // 默认延迟加载：此时 instructions 尚未读入内存
+    QVERIFY(context.skills.first().instructions.isEmpty());
+
+    // 按需延迟加载
+    auto skillCopy = context.skills.first();
+    QVERIFY(agent::skill::SkillLoader{}.loadInstructions(skillCopy));
+    QCOMPARE(skillCopy.instructions, QStringLiteral("Skill Instructions Content"));
+
     QVERIFY(!context.mcpConfigPath.isEmpty());
     QCOMPARE(context.mcpConfigContent, QStringLiteral("{\"mcpServers\":{\"demo\":{}}}"));
 }
