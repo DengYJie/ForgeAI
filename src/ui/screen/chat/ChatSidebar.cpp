@@ -1,6 +1,7 @@
 #include "ChatSidebar.h"
 #include "ChatSessionListModel.h"
 #include "ChatSessionDelegate.h"
+#include "ui/widget/basic/LeftAlignedButton.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -10,22 +11,7 @@
 #include <FluentQt/Collections.h>
 
 namespace {
-    class LeftAlignedButton : public fluent::basicinput::Button {
-    public:
-        using fluent::basicinput::Button::Button;
 
-    protected:
-        QRectF contentPaintRect(const QRectF &surfaceRect) const override {
-            constexpr int kLeftMargin = 8;
-            const auto &spacing = themeSpacing();
-            const int gap = spacing.gap.tight;
-            const int iconW = iconGlyph().isEmpty() ? 0 : iconPixelSize();
-            const int textW = text().isEmpty() ? 0 : fontMetrics().horizontalAdvance(text());
-            const int totalW = textW + iconW + ((!text().isEmpty() && !iconGlyph().isEmpty()) ? gap : 0);
-
-            return QRectF(surfaceRect.left() + kLeftMargin, surfaceRect.top(), totalW, surfaceRect.height());
-        }
-    };
 
     class TransparentListView : public fluent::collections::ListView {
     public:
@@ -56,7 +42,7 @@ namespace ui::screen::chat {
         headerLayout->setContentsMargins(0, 0, 0, 0);
         headerLayout->setSpacing(4);
 
-        m_newChatButton = new LeftAlignedButton(m_headerWidget);
+        m_newChatButton = new ui::widget::basic::LeftAlignedButton(m_headerWidget);
         m_newChatButton->setFluentStyle(fluent::basicinput::Button::Subtle);
         m_newChatButton->setFluentLayout(fluent::basicinput::Button::IconBefore);
         m_newChatButton->setFluentSize(fluent::basicinput::Button::Small);

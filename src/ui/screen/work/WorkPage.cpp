@@ -21,7 +21,7 @@
 #include "ui/widget/chat/ChatHeader.h"
 #include "ui/widget/message/MessageListView.h"
 
-#include "LeftAlignedButton.h"
+#include "ui/widget/basic/LeftAlignedButton.h"
 #include "ProjectHeader.h"
 #include "CreateProjectDialog.h"
 
@@ -98,6 +98,8 @@ inline QIcon makeFluentIcon(const QString& glyph, int pixelSize = 16, const flue
 } // namespace
 
 namespace ui::screen::work {
+
+using widget::basic::LeftAlignedButton;
     WorkPage::WorkPage(
         WorkViewModel *viewModel,
         QWidget *parent

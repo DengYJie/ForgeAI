@@ -198,6 +198,8 @@ set(CORE_SOURCES
         src/ui/widget/chat/ChatAnchorBar.cpp
         src/ui/widget/chat/ChatInputBox.h
         src/ui/widget/chat/ChatInputBox.cpp
+        src/ui/widget/chat/ConversationRowActions.h
+        src/ui/widget/chat/ConversationRowActions.cpp
 
         src/ui/widget/message/MessageCardWidget.h
         src/ui/widget/message/MessageCardWidget.cpp
@@ -285,8 +287,8 @@ set(CORE_SOURCES
         src/ui/screen/work/WorkViewModel.cpp
         src/ui/screen/work/WorkPage.h
         src/ui/screen/work/WorkPage.cpp
-        src/ui/screen/work/LeftAlignedButton.h
-        src/ui/screen/work/LeftAlignedButton.cpp
+        src/ui/widget/basic/LeftAlignedButton.h
+        src/ui/widget/basic/LeftAlignedButton.cpp
         src/ui/screen/work/ProjectHeader.h
         src/ui/screen/work/ProjectHeader.cpp
         src/ui/screen/work/CreateProjectDialog.h

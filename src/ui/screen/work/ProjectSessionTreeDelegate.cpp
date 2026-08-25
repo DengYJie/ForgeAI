@@ -3,6 +3,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QDateTime>
+#include "ui/widget/chat/ConversationRowActions.h"
 
 namespace ui::screen::work {
 namespace {
@@ -116,34 +117,10 @@ void ProjectSessionTreeDelegate::paint(QPainter* painter, const QStyleOptionView
         painter->setPen(colors.textSecondary);
         Typography::Icons::paintGlyph(*painter, moreRect, Typography::Icons::More, 13, Qt::AlignCenter);
         Typography::Icons::paintGlyph(*painter, editRect, Typography::Icons::Edit, 13, Qt::AlignCenter);
-    } else if (showActions) {
-        const QRect archiveRect = archiveButtonRect(option.rect);
-        const QRect pinRect = pinButtonRect(option.rect);
-        if (archiveRect.contains(m_hoveredPos) || pinRect.contains(m_hoveredPos)) {
-            const QRect hit = archiveRect.contains(m_hoveredPos) ? archiveRect : pinRect;
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(colors.subtleSecondary);
-            painter->drawRoundedRect(hit, 3, 3);
-        }
-        painter->setPen(pinned ? colors.accentDefault : colors.textSecondary);
-        painter->setFont(QFont(Typography::FontFamily::FluentIcons, 10));
-        painter->drawText(pinRect, Qt::AlignCenter, pinned ? Typography::Icons::PinFill : Typography::Icons::Pin);
-        painter->setPen(colors.textSecondary);
-        painter->drawText(archiveRect, Qt::AlignCenter, QString(QChar(0xE7B8)));
+    } else {
+        widget::chat::ConversationRowActions::paint(painter, option, m_hoveredPos, showActions, showActions, pinned);
     }
     painter->restore();
-}
-
-QRect ProjectSessionTreeDelegate::pinButtonRect(const QRect& itemRect) const {
-    const int y = itemRect.top() + (itemRect.height() - kActionSize) / 2;
-    const int x = itemRect.right() - kActionSize - kActionMargin;
-    return QRect(x, y, kActionSize, kActionSize);
-}
-
-QRect ProjectSessionTreeDelegate::archiveButtonRect(const QRect& itemRect) const {
-    const int y = itemRect.top() + (itemRect.height() - kActionSize) / 2;
-    const int x = itemRect.right() - (kActionSize * 2) - (kActionMargin * 2);
-    return QRect(x, y, kActionSize, kActionSize);
 }
 
 QRect ProjectSessionTreeDelegate::projectMoreButtonRect(const QRect& itemRect) const {
@@ -184,11 +161,12 @@ bool ProjectSessionTreeDelegate::editorEvent(QEvent* event, QAbstractItemModel* 
                 return QStyledItemDelegate::editorEvent(event, model, option, index);
             }
             const QString id = index.data(Qt::UserRole + 1).toString();
-            if (pinButtonRect(option.rect).contains(mouseEvent->pos())) {
+            const auto hit = widget::chat::ConversationRowActions::hitTest(option.rect, mouseEvent->pos());
+            if (hit == widget::chat::ConversationRowActions::HitTarget::Pin) {
                 emit pinClicked(id, !index.data(kPinnedRole).toBool());
                 return true;
             }
-            if (archiveButtonRect(option.rect).contains(mouseEvent->pos())) {
+            if (hit == widget::chat::ConversationRowActions::HitTarget::Archive) {
                 emit archiveClicked(id);
                 return true;
             }
@@ -197,3 +175,4 @@ bool ProjectSessionTreeDelegate::editorEvent(QEvent* event, QAbstractItemModel* 
     return QStyledItemDelegate::editorEvent(event, model, option, index);
 }
 }
+

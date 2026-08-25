@@ -27,8 +27,6 @@ Q_SIGNALS:
     void archiveClicked(const QString& id);
 
 private:
-    QRect pinButtonRect(const QRect& itemRect) const;
-    QRect archiveButtonRect(const QRect& itemRect) const;
     QRect projectMoreButtonRect(const QRect& itemRect) const;
     QRect projectEditButtonRect(const QRect& itemRect) const;
     QPoint m_hoveredPos = QPoint(-1, -1);

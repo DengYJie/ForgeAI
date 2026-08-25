@@ -1,5 +1,6 @@
 #include "ChatSessionDelegate.h"
 #include "ChatSessionListModel.h"
+#include "ui/widget/chat/ConversationRowActions.h"
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -8,24 +9,10 @@
 namespace ui::screen::chat {
     namespace {
         constexpr int kItemHeight = 32;
-        constexpr int kButtonSize = 20;
-        constexpr int kButtonMargin = 4;
     } // namespace
 
     ChatSessionDelegate::ChatSessionDelegate(QObject *parent)
         : QStyledItemDelegate(parent) {
-    }
-
-    QRect ChatSessionDelegate::pinButtonRect(const QRect &itemRect) const {
-        const int y = itemRect.top() + (itemRect.height() - kButtonSize) / 2;
-        const int x = itemRect.right() - kButtonSize - kButtonMargin;
-        return QRect(x, y, kButtonSize, kButtonSize);
-    }
-
-    QRect ChatSessionDelegate::archiveButtonRect(const QRect &itemRect) const {
-        const int y = itemRect.top() + (itemRect.height() - kButtonSize) / 2;
-        const int x = itemRect.right() - (kButtonSize * 2) - (kButtonMargin * 2);
-        return QRect(x, y, kButtonSize, kButtonSize);
     }
 
     QSize ChatSessionDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const {
@@ -75,33 +62,8 @@ namespace ui::screen::chat {
         painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, elidedTitle);
 
         // 3. 绘制右侧操作按钮（精致小图标）
-        const QRect pinRect = pinButtonRect(option.rect);
-        const QRect archiveRect = archiveButtonRect(option.rect);
-
-        if (!isEmptyDraft && (showButtons || isPinned)) {
-            // Pin 按钮
-            if (pinRect.contains(m_hoveredPos)) {
-                painter->setBrush(colors.subtleSecondary);
-                painter->setPen(Qt::NoPen);
-                painter->drawRoundedRect(pinRect, 3, 3);
-            }
-
-            painter->setFont(QFont(Typography::FontFamily::FluentIcons, 10));
-            painter->setPen(isPinned ? colors.accentDefault : colors.textSecondary);
-            painter->drawText(pinRect, Qt::AlignCenter, isPinned ? Typography::Icons::PinFill : Typography::Icons::Pin);
-        }
-
-        if (showButtons) {
-            if (archiveRect.contains(m_hoveredPos)) {
-                painter->setBrush(colors.subtleSecondary);
-                painter->setPen(Qt::NoPen);
-                painter->drawRoundedRect(archiveRect, 3, 3);
-            }
-            painter->setPen(colors.textSecondary);
-            painter->setFont(QFont(Typography::FontFamily::FluentIcons, 10));
-            // Fluent UI System Icons archive glyph (Segoe Fluent Icons compatible).
-            painter->drawText(archiveRect, Qt::AlignCenter, QString(QChar(0xE7B8)));
-
+        if (!isEmptyDraft) {
+            widget::chat::ConversationRowActions::paint(painter, option, m_hoveredPos, isHovered, isSelected, isPinned);
         }
 
         painter->restore();
@@ -129,15 +91,13 @@ namespace ui::screen::chat {
             auto *me = static_cast<QMouseEvent *>(event);
             if (me->button() == Qt::LeftButton) {
                 if (isEmptyDraft) return QStyledItemDelegate::editorEvent(event, model, option, index);
-                const QRect pinRect = pinButtonRect(option.rect);
-                const QRect archiveRect = archiveButtonRect(option.rect);
-
-                if (pinRect.contains(me->pos())) {
+                
+                const auto hit = widget::chat::ConversationRowActions::hitTest(option.rect, me->pos());
+                if (hit == widget::chat::ConversationRowActions::HitTarget::Pin) {
                     emit pinClicked(id, !isPinned);
                     return true;
                 }
-
-                if (archiveRect.contains(me->pos())) {
+                if (hit == widget::chat::ConversationRowActions::HitTarget::Archive) {
                     emit archiveClicked(id);
                     return true;
                 }
