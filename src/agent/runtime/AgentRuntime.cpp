@@ -393,7 +393,8 @@ namespace agent::runtime {
             m_context.workspaceRoot,
             m_context.sessionId,
             m_context.projectId,
-            m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000
+            m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000,
+            m_runCancellationToken
         };
 
         bool hasPendingPermission = false;
@@ -490,6 +491,7 @@ namespace agent::runtime {
             for (const auto& call : parallelCalls) {
                 ParallelTask task;
                 task.call = call;
+                task.token.linkParent(execContext.cancellationToken); // 使单次任务令牌可被全局取消
                 application::ports::ToolExecutionContext taskContext = execContext;
                 taskContext.cancellationToken = task.token; // 为此任务分配独立的取消令牌
 

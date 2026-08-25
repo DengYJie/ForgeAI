@@ -19,7 +19,13 @@ namespace application::ports {
         CancellationToken() : m_canceled(std::make_shared<std::atomic<bool>>(false)) {}
 
         bool isCanceled() const {
-            return m_canceled && m_canceled->load(std::memory_order_relaxed);
+            if (m_canceled && m_canceled->load(std::memory_order_relaxed)) {
+                return true;
+            }
+            if (m_parent && m_parent->isCanceled()) {
+                return true;
+            }
+            return false;
         }
 
         void cancel() {
@@ -28,8 +34,13 @@ namespace application::ports {
             }
         }
 
+        void linkParent(const CancellationToken& parent) {
+            m_parent = std::make_shared<CancellationToken>(parent);
+        }
+
     private:
         std::shared_ptr<std::atomic<bool>> m_canceled;
+        std::shared_ptr<CancellationToken> m_parent;
     };
 
     /**
