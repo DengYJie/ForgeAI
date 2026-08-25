@@ -4,7 +4,7 @@
 #include "domain/service/IConversationService.h"
 #include "domain/repository/IConversationRepository.h"
 #include "domain/repository/IProjectRepository.h"
-#include "llm/mcp/McpManager.h"
+#include "application/usecase/work/SwitchProjectUseCase.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -234,13 +234,15 @@ void WorkViewModel::cancelTask() {
 }
 
 void WorkViewModel::setProjectRoot(const QString& rootPath) {
-    const QString canonical = QDir(rootPath).canonicalPath();
-    if (!m_state.projectRoot.isEmpty() && m_state.projectRoot != canonical && m_useCases.mcpManager) {
-        m_useCases.mcpManager->stopServersForProject(m_state.projectRoot);
+    domain::project::ProjectContext context;
+    if (m_useCases.switchProject) {
+        context = m_useCases.switchProject->execute(m_state.projectRoot, rootPath);
+    } else if (m_projectContext) {
+        context = m_projectContext->load(rootPath);
+    } else {
+        return;
     }
 
-    if (!m_projectContext) return;
-    const auto context = m_projectContext->load(rootPath);
     updateState([&](WorkState& state) {
         state.projectRoot = context.rootPath;
         state.projectName = QFileInfo(context.rootPath).fileName();
@@ -288,8 +290,8 @@ void WorkViewModel::removeProject(const QUuid& projectId) {
             break;
         }
     }
-    if (m_useCases.mcpManager && !targetRoot.isEmpty()) {
-        m_useCases.mcpManager->stopServersForProject(targetRoot);
+    if (m_useCases.switchProject && !targetRoot.isEmpty()) {
+        m_useCases.switchProject->stopProjectRuntime(targetRoot);
     }
 
     if (m_projectRepository) {

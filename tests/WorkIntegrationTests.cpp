@@ -25,6 +25,7 @@
 #include "data/sqlite/DatabaseManager.h"
 #include "application/ports/IChatModelGateway.h"
 #include "application/usecase/agent/RunAgentUseCase.h"
+#include "application/usecase/work/SwitchProjectUseCase.h"
 #include "llm/mcp/McpManager.h"
 
 // 模拟 ChatOperation
@@ -827,7 +828,21 @@ void WorkIntegrationTests::testWorkViewModelMcpProjectSwitchUnload() {
     mcpManager.registerServer(cfg);
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) != nullptr);
 
-    mcpManager.stopServersForProject(proj1Dir.path());
+    // 通过 SwitchProjectUseCase 和 WorkViewModel 触发项目切换
+    services::project::ProjectContextService projectCtxService;
+    application::usecase::work::SwitchProjectUseCase switchUseCase(&mcpManager, &projectCtxService);
+
+    application::usecase::work::WorkUseCases useCases;
+    useCases.switchProject = &switchUseCase;
+
+    ui::screen::work::WorkViewModel vm(useCases);
+    vm.setProjectRoot(proj1Dir.path());
+    QCOMPARE(vm.state().projectRoot, QDir(proj1Dir.path()).canonicalPath());
+    QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) != nullptr);
+
+    // 切换到 Project 2，验证 Project 1 的 MCP 服务被 SwitchProjectUseCase 自动卸载
+    vm.setProjectRoot(proj2Dir.path());
+    QCOMPARE(vm.state().projectRoot, QDir(proj2Dir.path()).canonicalPath());
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) == nullptr);
 }
 

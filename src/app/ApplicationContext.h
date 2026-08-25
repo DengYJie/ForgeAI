@@ -33,6 +33,7 @@
 #include "application/usecase/agent/CancelAgentRunUseCase.h"
 #include "application/usecase/agent/ResumeAgentRunUseCase.h"
 #include "application/usecase/work/WorkUseCases.h"
+#include "application/usecase/work/SwitchProjectUseCase.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
 #include "application/usecase/settings/SettingsUseCases.h"
 #include "application/usecase/settings/GetSettingsProvidersUseCase.h"
@@ -139,6 +140,7 @@ namespace app {
         std::unique_ptr<application::usecase::agent::RunAgentUseCase> m_runAgentUseCase;
         std::unique_ptr<application::usecase::agent::CancelAgentRunUseCase> m_cancelAgentRunUseCase;
         std::unique_ptr<application::usecase::agent::ResumeAgentRunUseCase> m_resumeAgentRunUseCase;
+        std::unique_ptr<application::usecase::work::SwitchProjectUseCase> m_switchProjectUseCase;
 
         // 对话业务用例
         std::unique_ptr<application::usecase::chat::SendMessageUseCase> m_sendMessageUseCase;

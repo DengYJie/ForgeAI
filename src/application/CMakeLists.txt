@@ -31,6 +31,8 @@ target_sources(ForgeAICore PRIVATE
     usecase/conversation/SetSessionTitleUseCase.h
     usecase/conversation/SetSessionTitleUseCase.cpp
     usecase/work/WorkUseCases.h
+    usecase/work/SwitchProjectUseCase.h
+    usecase/work/SwitchProjectUseCase.cpp
     usecase/knowledge/KnowledgeUseCases.h
     usecase/knowledge/SearchDocumentsUseCase.h
     usecase/knowledge/SearchDocumentsUseCase.cpp

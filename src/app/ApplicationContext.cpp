@@ -115,6 +115,10 @@ namespace app {
         m_resumeAgentRunUseCase = std::make_unique<application::usecase::agent::ResumeAgentRunUseCase>(
             m_agentRuntime.get()
         );
+        m_switchProjectUseCase = std::make_unique<application::usecase::work::SwitchProjectUseCase>(
+            m_mcpManager.get(),
+            m_projectContextService.get()
+        );
 
         // 3. 对话业务用例初始化
         m_sendMessageUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
@@ -298,7 +302,7 @@ namespace app {
         w.conversationService = m_conversationService.get();
         w.conversationRepository = m_conversationRepo.get();
         w.projectRepository = m_projectRepo.get();
-        w.mcpManager = m_mcpManager.get();
+        w.switchProject = m_switchProjectUseCase.get();
         return w;
     }
 
