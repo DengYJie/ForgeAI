@@ -34,12 +34,20 @@ namespace network {
         if (m_isCancelled) return;
         QByteArray data = m_reply->readAll();
         if (!data.isEmpty()) {
+            core::logging::LoggingService::instance().debug(core::logging::Category::NetworkHttp, QStringLiteral("HTTP chunk received"), QMap<QString, QString>{
+                {QStringLiteral("bytes"), QString::number(data.size())}
+            });
             emit dataReceived(data);
         }
     }
 
     void QtHttpOperation::onFinished() {
         if (m_isCancelled) return;
+        int httpStatusCode = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        core::logging::LoggingService::instance().debug(core::logging::Category::NetworkHttp, QStringLiteral("HTTP finished"), QMap<QString, QString>{
+            {QStringLiteral("httpStatus"), QString::number(httpStatusCode)},
+            {QStringLiteral("error"), QString::number(static_cast<int>(m_reply->error()))}
+        });
         if (m_reply->error() == QNetworkReply::NoError) {
             emit finished();
         }
@@ -54,6 +62,12 @@ namespace network {
         int httpStatusCode = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         QString errorMsg = m_reply->errorString();
         QByteArray responseBody = m_reply->readAll();
+        core::logging::LoggingService::instance().warning(core::logging::Category::NetworkHttp, QStringLiteral("HTTP error occurred"), QMap<QString, QString>{
+            {QStringLiteral("httpStatus"), QString::number(httpStatusCode)},
+            {QStringLiteral("code"), QString::number(static_cast<int>(code))},
+            {QStringLiteral("error"), errorMsg},
+            {QStringLiteral("body"), QString::fromUtf8(responseBody.left(512))}
+        });
         emit failed(errorMsg, httpStatusCode, responseBody, static_cast<int>(code));
     }
 

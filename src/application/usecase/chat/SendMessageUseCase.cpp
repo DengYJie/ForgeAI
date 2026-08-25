@@ -218,7 +218,9 @@ namespace application::usecase::chat {
             using T = std::decay_t<decltype(arg)>;
             
             if constexpr (std::is_same_v<T, domain::llm::EventStarted>) {
-                // Ignore
+                core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("SendMessageUseCase EventStarted"), QMap<QString, QString>{
+                    {QStringLiteral("session"), m_currentSessionId}
+                });
             } else if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                 m_replyBuffer += arg.text;
                 emit tokenReceived(m_currentSessionId, arg.text);
@@ -226,11 +228,21 @@ namespace application::usecase::chat {
                 m_thoughtBuffer += arg.thought;
                 emit thoughtReceived(m_currentSessionId, arg.thought);
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
+                core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("SendMessageUseCase EventFinished"), QMap<QString, QString>{
+                    {QStringLiteral("session"), m_currentSessionId},
+                    {QStringLiteral("replyLen"), QString::number(m_replyBuffer.length())},
+                    {QStringLiteral("thoughtLen"), QString::number(m_thoughtBuffer.length())}
+                });
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_currentSessionId, assistantMsg);
                 completeGeneration();
             } else if constexpr (std::is_same_v<T, domain::llm::EventError>) {
+                core::logging::LoggingService::instance().warning(core::logging::Category::LlmRequest, QStringLiteral("SendMessageUseCase EventError"), QMap<QString, QString>{
+                    {QStringLiteral("session"), m_currentSessionId},
+                    {QStringLiteral("error"), arg.error.message},
+                    {QStringLiteral("userMsg"), arg.error.userMessage}
+                });
                 bool isCancelled = (arg.error.category == domain::llm::ChatErrorCategory::Cancelled);
                 
                 if (!m_replyBuffer.isEmpty() || !m_thoughtBuffer.isEmpty()) {

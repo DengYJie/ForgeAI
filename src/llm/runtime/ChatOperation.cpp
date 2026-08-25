@@ -171,17 +171,14 @@ namespace llm::runtime {
         for (const auto &evt : events) {
             std::visit([this](const auto &arg) {
                 using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, domain::llm::EventTextDelta> ||
-                              std::is_same_v<T, domain::llm::EventThinkingDelta> ||
-                              std::is_same_v<T, domain::llm::EventToolCallStarted> ||
-                              std::is_same_v<T, domain::llm::EventToolCallDelta>) {
+                if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                     if (!m_hasEmittedVisibleTokens) {
                         m_hasEmittedVisibleTokens = true;
                         m_firstTokenTimer->stop();
                         m_metrics.firstTokenAt = QDateTime::currentMSecsSinceEpoch();
                         setState(RequestState::Streaming);
 
-                        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("First token received"), {
+                        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("First token received"), QMap<QString, QString>{
                             {QStringLiteral("req"), m_metrics.requestId},
                             {QStringLiteral("ttft"), QStringLiteral("%1ms").arg(m_metrics.ttftMs())}
                         });
@@ -190,6 +187,40 @@ namespace llm::runtime {
                     if (m_state == RequestState::Streaming && m_timeoutPolicy.idleTimeoutMs > 0) {
                         m_idleTimer->start(m_timeoutPolicy.idleTimeoutMs);
                     }
+                    core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("Text delta"), QMap<QString, QString>{
+                        {QStringLiteral("req"), m_metrics.requestId},
+                        {QStringLiteral("len"), QString::number(arg.text.length())}
+                    });
+                } else if constexpr (std::is_same_v<T, domain::llm::EventThinkingDelta>) {
+                    if (!m_hasEmittedVisibleTokens) {
+                        m_hasEmittedVisibleTokens = true;
+                        m_firstTokenTimer->stop();
+                        m_metrics.firstTokenAt = QDateTime::currentMSecsSinceEpoch();
+                        setState(RequestState::Streaming);
+
+                        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("First token received (thinking)"), QMap<QString, QString>{
+                            {QStringLiteral("req"), m_metrics.requestId},
+                            {QStringLiteral("ttft"), QStringLiteral("%1ms").arg(m_metrics.ttftMs())}
+                        });
+                    }
+
+                    if (m_state == RequestState::Streaming && m_timeoutPolicy.idleTimeoutMs > 0) {
+                        m_idleTimer->start(m_timeoutPolicy.idleTimeoutMs);
+                    }
+                    core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("Thinking delta"), QMap<QString, QString>{
+                        {QStringLiteral("req"), m_metrics.requestId},
+                        {QStringLiteral("len"), QString::number(arg.thought.length())}
+                    });
+                } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
+                    core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("Finish reason received"), QMap<QString, QString>{
+                        {QStringLiteral("req"), m_metrics.requestId},
+                        {QStringLiteral("reason"), arg.finishReason}
+                    });
+                } else if constexpr (std::is_same_v<T, domain::llm::EventError>) {
+                    core::logging::LoggingService::instance().warning(core::logging::Category::LlmRequest, QStringLiteral("Stream error event"), QMap<QString, QString>{
+                        {QStringLiteral("req"), m_metrics.requestId},
+                        {QStringLiteral("error"), arg.error.message}
+                    });
                 }
             }, evt);
 
@@ -198,6 +229,10 @@ namespace llm::runtime {
     }
 
     void ChatOperation::onFinished() {
+        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("ChatOperation onFinished"), QMap<QString, QString>{
+            {QStringLiteral("req"), m_metrics.requestId},
+            {QStringLiteral("state"), QString::number(static_cast<int>(m_state))}
+        });
         if (m_state == RequestState::Cancelling || m_state == RequestState::Cancelled) {
             return;
         }
@@ -217,6 +252,14 @@ namespace llm::runtime {
         int httpStatusCode,
         const QByteArray &responseBody,
         int networkErrorCode) {
+        
+        core::logging::LoggingService::instance().warning(core::logging::Category::LlmRequest, QStringLiteral("ChatOperation onFailed"), QMap<QString, QString>{
+            {QStringLiteral("req"), m_metrics.requestId},
+            {QStringLiteral("error"), errorMessage},
+            {QStringLiteral("httpStatus"), QString::number(httpStatusCode)},
+            {QStringLiteral("netCode"), QString::number(networkErrorCode)},
+            {QStringLiteral("body"), QString::fromUtf8(responseBody.left(512))}
+        });
         
         if (m_state == RequestState::Cancelling || m_state == RequestState::Cancelled) {
             return;

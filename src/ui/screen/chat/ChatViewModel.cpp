@@ -1,4 +1,6 @@
 #include "ChatViewModel.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 #include <QDateTime>
 #include <QTimer>
 #include <QJsonDocument>
@@ -114,6 +116,10 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::tokenReceived,
                 this, [this](const QString& sessionId, const QString& token) {
+            core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel tokenReceived"), QMap<QString, QString>{
+                {QStringLiteral("session"), sessionId},
+                {QStringLiteral("len"), QString::number(token.length())}
+            });
             updateState([sessionId, token](ChatState& s) {
                 if (s.currentSessionId != sessionId || token.isEmpty()) return;
                 auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
@@ -134,6 +140,10 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::thoughtReceived,
                 this, [this](const QString& sessionId, const QString& thought) {
+            core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel thoughtReceived"), QMap<QString, QString>{
+                {QStringLiteral("session"), sessionId},
+                {QStringLiteral("len"), QString::number(thought.length())}
+            });
             updateState([sessionId, thought](ChatState& s) {
                 if (s.currentSessionId != sessionId || thought.isEmpty()) return;
                 auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
@@ -154,6 +164,10 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::replyGenerated,
                 this, [this](const QString &sessionId, const domain::conversation::Message &msg) {
+            core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel replyGenerated"), QMap<QString, QString>{
+                {QStringLiteral("session"), sessionId},
+                {QStringLiteral("blocks"), QString::number(msg.blocks.size())}
+            });
             updateState([sessionId, msg](ChatState &s) {
                 if (s.currentSessionId != sessionId) return;
                 const auto streaming = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
@@ -166,6 +180,9 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::generationFinished,
                 this, [this](const QString &sessionId) {
+            core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel generationFinished"), QMap<QString, QString>{
+                {QStringLiteral("session"), sessionId}
+            });
             updateState([sessionId](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;
@@ -178,6 +195,10 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::generationFailed,
                 this, [this](const QString &sessionId, const domain::llm::ChatError &error) {
+            core::logging::LoggingService::instance().warning(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel generationFailed"), QMap<QString, QString>{
+                {QStringLiteral("session"), sessionId},
+                {QStringLiteral("error"), error.message}
+            });
             updateState([sessionId, error](ChatState &s) {
                 if (s.currentSessionId == sessionId) {
                     s.isGenerating = false;

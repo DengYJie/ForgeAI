@@ -1,4 +1,6 @@
 #include "MarkdownView.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QClipboard>
 #include <QContextMenuEvent>
@@ -71,6 +73,7 @@ QString MarkdownView::html() const
 
 void MarkdownView::beginStream()
 {
+    core::logging::LoggingService::instance().debug(core::logging::Category::UiChat, QStringLiteral("MarkdownView beginStream"));
     m_streaming = true;
     m_markdown.clear();
     m_streamTail.clear();
@@ -104,6 +107,12 @@ void MarkdownView::appendMarkdown(const QString &chunk)
     m_metrics.lastParseMs = tailParseTimer.elapsed();
     ++m_metrics.tailParseCount;
     relayout();
+    core::logging::LoggingService::instance().debug(core::logging::Category::UiChat, QStringLiteral("MarkdownView appendMarkdown"), QMap<QString, QString>{
+        {QStringLiteral("chunkLen"), QString::number(chunk.length())},
+        {QStringLiteral("totalLen"), QString::number(m_markdown.length())},
+        {QStringLiteral("blocks"), QString::number(m_documentLayout.blocks.size())},
+        {QStringLiteral("height"), QString::number(m_documentLayout.size.height())}
+    });
 }
 
 void MarkdownView::appendStreamingText(const QString& chunk)
@@ -118,6 +127,9 @@ void MarkdownView::appendHtml(const QString &htmlFragment)
 
 void MarkdownView::finishStream()
 {
+    core::logging::LoggingService::instance().debug(core::logging::Category::UiChat, QStringLiteral("MarkdownView finishStream"), QMap<QString, QString>{
+        {QStringLiteral("totalLen"), QString::number(m_markdown.length())}
+    });
     m_streaming = false;
     emit streamingChanged(false);
     emit streamingFinished();
