@@ -4,14 +4,14 @@
 #include "application/usecase/work/WorkUseCases.h"
 #include <QString>
 #include <QList>
+#include <QSet>
 #include "domain/conversation/Message.h"
 #include "ui/screen/chat/ChatSessionListModel.h"
-#include <QHash>
 #include "domain/project/Project.h"
+
 namespace domain::service { class IProjectContextService; }
 namespace domain::service { class IConversationService; }
 namespace domain::repository { class IConversationRepository; class IProjectRepository; }
-namespace services::agent { class AgentToolService; }
 
 namespace ui::screen::work {
     struct WorkState {
@@ -87,12 +87,10 @@ namespace ui::screen::work {
 
     private:
         void setupUseCaseConnections();
-        QString projectAgentPrompt() const;
         static QString taskTitle(const QString& task);
 
         application::usecase::work::WorkUseCases m_useCases;
         domain::service::IProjectContextService* m_projectContext = nullptr;
-        domain::service::IAgentToolService* m_agentTools = nullptr;
         QString m_agentSessionId;
         domain::service::IConversationService* m_conversationService = nullptr;
         domain::repository::IConversationRepository* m_conversationRepository = nullptr;

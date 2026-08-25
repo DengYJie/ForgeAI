@@ -10,15 +10,14 @@
 namespace domain::service {
     class IConversationService;
     class IModelService;
-    class IAgentToolService;
 }
 
 namespace application::usecase::chat {
 
     /**
-     * @brief 发送消息并触发大模型回复生成的业务用例
-     * @details 负责编排用户消息实体构建、历史数据存储、调用 IChatModelGateway 发起真实请求，
-     *          并将 llm::ChatEvent 流转化为上层需要的业务事件。
+     * @brief 发送消息并触发大模型回复生成的业务用例（纯文本/思考流 Chat）
+     * @details 负责编排用户消息实体构建、历史数据存储、调用 IChatModelGateway 发起请求，
+     *          并将 llm::ChatEvent 流转化为业务事件。
      */
     class SendMessageUseCase : public QObject {
         Q_OBJECT
@@ -28,7 +27,6 @@ namespace application::usecase::chat {
             ports::IChatModelGateway *chatGateway,
             domain::service::IConversationService *conversationService,
             domain::service::IModelService *modelService,
-            domain::service::IAgentToolService *agentTools = nullptr,
             QObject *parent = nullptr
         );
 
@@ -56,8 +54,6 @@ namespace application::usecase::chat {
         void userMessageCreated(const QString &sessionId, const domain::conversation::Message &message);
         void tokenReceived(const QString &sessionId, const QString &token);
         void thoughtReceived(const QString &sessionId, const QString &thought);
-        void toolCallReceived(const QString &sessionId, const domain::agent::ToolCall &toolCall);
-        void toolResultReceived(const QString &sessionId, const domain::agent::ToolResult &toolResult);
         void replyGenerated(const QString &sessionId, const domain::conversation::Message &message);
         void generationFinished(const QString &sessionId);
         void generationFailed(const QString &sessionId, const domain::llm::ChatError &error);
@@ -72,10 +68,9 @@ namespace application::usecase::chat {
         void saveMessage(const domain::conversation::Message& message);
         void completeGeneration();
 
-        ports::IChatModelGateway *m_chatGateway;
-        domain::service::IConversationService *m_conversationService;
-        domain::service::IModelService *m_modelService;
-        domain::service::IAgentToolService *m_agentTools = nullptr;
+        ports::IChatModelGateway *m_chatGateway = nullptr;
+        domain::service::IConversationService *m_conversationService = nullptr;
+        domain::service::IModelService *m_modelService = nullptr;
         
         ports::IChatOperation *m_currentOp = nullptr;
         QString m_currentSessionId;
@@ -83,14 +78,10 @@ namespace application::usecase::chat {
         
         QString m_replyBuffer;
         QString m_thoughtBuffer;
-        QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
-        QList<domain::agent::ToolResult> m_pendingToolResults;
         domain::model::ModelProvider m_currentProvider;
         domain::llm::ChatRequest m_requestTemplate;
         QString m_systemPrompt;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
-        int m_toolRound = 0;
-        static constexpr int MaxToolRounds = 8;
     };
 
 } // namespace application::usecase::chat

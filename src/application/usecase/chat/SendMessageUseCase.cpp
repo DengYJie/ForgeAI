@@ -1,7 +1,6 @@
 #include "SendMessageUseCase.h"
 #include "domain/service/IConversationService.h"
 #include "domain/service/IModelService.h"
-#include "domain/service/IAgentToolService.h"
 #include "domain/llm/ChatRequest.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
@@ -15,13 +14,11 @@ namespace application::usecase::chat {
         ports::IChatModelGateway *chatGateway,
         domain::service::IConversationService *conversationService,
         domain::service::IModelService *modelService,
-        domain::service::IAgentToolService *agentTools,
         QObject *parent
     ) : QObject(parent),
         m_chatGateway(chatGateway),
         m_conversationService(conversationService),
-        m_modelService(modelService),
-        m_agentTools(agentTools) {
+        m_modelService(modelService) {
     }
 
     SendMessageUseCase::~SendMessageUseCase() {
@@ -105,29 +102,21 @@ namespace application::usecase::chat {
 
         emit userMessageCreated(sessionId, userMsg);
         
-        // 3. Freeze the request options.  Tool continuations reuse this exact
-        // provider/model/options instead of silently falling back to a later
-        // selection in the settings UI.
+        // 3. 冻结请求参数
         m_requestTemplate = {};
         m_requestTemplate.model = selected->requestModelId();
         m_requestTemplate.stream = true;
         m_requestTemplate.useWebSearch = useWebSearch;
         m_requestTemplate.useDeepThinking = useDeepThinking;
         m_requestTemplate.reasoningEffort = reasoningEffort;
-        if (m_agentTools) {
-            m_requestTemplate.tools = m_agentTools->definitions();
-        }
         m_systemPrompt = systemPrompt;
         m_currentProvider = selected->provider;
 
-        // 4. 清理旧任务并启动新任务.
+        // 4. 清理旧任务并启动新任务
         cancelCurrent();
         m_currentSessionId = sessionId;
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
-        m_activeToolCalls.clear();
-        m_pendingToolResults.clear();
-        m_toolRound = 0;
         startRequest(provider, requestForHistory(history));
     }
 
@@ -160,30 +149,13 @@ namespace application::usecase::chat {
             if (msg.status != domain::MessageStatus::Sent) continue;
             domain::llm::ChatMessage llmMsg;
             llmMsg.role = msg.role;
-            QList<domain::agent::ToolResult> results;
-            QHash<QString, QString> toolNames;
             for (const auto& block : msg.blocks) {
                 if (block.isText()) {
                     if (!llmMsg.content.isEmpty()) llmMsg.content += QLatin1Char('\n');
                     llmMsg.content += std::get<domain::conversation::TextBlock>(block.payload).text;
-                } else if (block.isToolCall()) {
-                    llmMsg.toolCalls = std::get<domain::conversation::ToolCallBlock>(block.payload).calls;
-                    for (const auto& call : llmMsg.toolCalls.value()) toolNames.insert(call.id, call.name);
-                } else if (block.isToolResult()) {
-                    results.append(std::get<domain::conversation::ToolResultBlock>(block.payload).results);
                 }
             }
-            if (!llmMsg.content.isEmpty() || llmMsg.toolCalls.has_value()) request.messages.append(llmMsg);
-            // Protocols require each tool result to immediately follow the
-            // assistant tool-call message, never precede it.
-            for (const auto& result : results) {
-                domain::llm::ChatMessage toolMessage;
-                toolMessage.role = domain::MessageRole::Tool;
-                toolMessage.toolCallId = result.toolCallId;
-                toolMessage.name = toolNames.value(result.toolCallId);
-                toolMessage.content = result.content;
-                request.messages.append(toolMessage);
-            }
+            if (!llmMsg.content.isEmpty()) request.messages.append(llmMsg);
         }
         return request;
     }
@@ -194,15 +166,11 @@ namespace application::usecase::chat {
         message.role = domain::MessageRole::Assistant;
         message.status = domain::MessageStatus::Sent;
         message.createdAt = QDateTime::currentDateTime();
-        if (!m_thoughtBuffer.isEmpty()) message.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{m_thoughtBuffer, 0}});
-        if (!m_replyBuffer.isEmpty()) message.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{m_replyBuffer}});
-        if (!m_activeToolCalls.isEmpty()) {
-            domain::conversation::ToolCallBlock calls; calls.calls = m_activeToolCalls.values();
-            message.blocks.append({domain::BlockType::ToolCall, calls});
+        if (!m_thoughtBuffer.isEmpty()) {
+            message.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{m_thoughtBuffer, 0}});
         }
-        if (!m_pendingToolResults.isEmpty()) {
-            domain::conversation::ToolResultBlock results; results.results = m_pendingToolResults;
-            message.blocks.append({domain::BlockType::ToolResult, results});
+        if (!m_replyBuffer.isEmpty()) {
+            message.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{m_replyBuffer}});
         }
         return message;
     }
@@ -233,7 +201,6 @@ namespace application::usecase::chat {
         }
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
-        m_activeToolCalls.clear();
         if (!m_currentSessionId.isEmpty()) {
             emit generationFinished(m_currentSessionId);
             m_currentSessionId.clear();
@@ -251,55 +218,22 @@ namespace application::usecase::chat {
             using T = std::decay_t<decltype(arg)>;
             
             if constexpr (std::is_same_v<T, domain::llm::EventStarted>) {
-                // Ignore or handle
+                // Ignore
             } else if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                 m_replyBuffer += arg.text;
                 emit tokenReceived(m_currentSessionId, arg.text);
             } else if constexpr (std::is_same_v<T, domain::llm::EventThinkingDelta>) {
                 m_thoughtBuffer += arg.thought;
                 emit thoughtReceived(m_currentSessionId, arg.thought);
-            } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallStarted>) {
-                m_activeToolCalls[arg.id] = domain::agent::ToolCall{arg.id, arg.functionName, ""};
-            } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallDelta>) {
-                if (m_activeToolCalls.contains(arg.id)) {
-                    m_activeToolCalls[arg.id].arguments += arg.argumentsDelta;
-                }
-            } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallFinished>) {
-                if (m_activeToolCalls.contains(arg.id)) {
-                    const auto call = m_activeToolCalls[arg.id];
-                    emit toolCallReceived(m_currentSessionId, call);
-                    if (m_agentTools) {
-                        const auto result = m_agentTools->execute(call);
-                        m_pendingToolResults.append(result);
-                        emit toolResultReceived(m_currentSessionId, result);
-                    }
-                }
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_currentSessionId, assistantMsg);
-
-                const bool shouldContinueWithTools = !m_activeToolCalls.isEmpty()
-                    && !m_pendingToolResults.isEmpty() && m_toolRound < MaxToolRounds;
-                if (shouldContinueWithTools) {
-                    if (m_currentOp) { m_currentOp->deleteLater(); m_currentOp = nullptr; }
-                    ++m_toolRound;
-                    m_replyBuffer.clear();
-                    m_thoughtBuffer.clear();
-                    m_activeToolCalls.clear();
-                    m_pendingToolResults.clear();
-                    const auto history = m_conversationService
-                        ? m_conversationService->loadMessages(m_currentSessionId)
-                        : m_transientHistories.value(m_currentSessionId);
-                    startRequest(m_currentProvider, requestForHistory(history));
-                } else {
-                    completeGeneration();
-                }
+                completeGeneration();
             } else if constexpr (std::is_same_v<T, domain::llm::EventError>) {
                 bool isCancelled = (arg.error.category == domain::llm::ChatErrorCategory::Cancelled);
                 
-                // 如果在被取消或报错前已经接收到部分生成内容，保存并保留给用户
-                if (!m_replyBuffer.isEmpty() || !m_thoughtBuffer.isEmpty() || !m_activeToolCalls.isEmpty()) {
+                if (!m_replyBuffer.isEmpty() || !m_thoughtBuffer.isEmpty()) {
                     domain::conversation::Message partialMsg;
                     partialMsg.id = QUuid::createUuid();
                     partialMsg.role = domain::MessageRole::Assistant;
@@ -319,15 +253,6 @@ namespace application::usecase::chat {
                             domain::conversation::TextBlock{m_replyBuffer}
                         ));
                     }
-                    if (!m_activeToolCalls.isEmpty()) {
-                        domain::conversation::ToolCallBlock tcBlock;
-                        tcBlock.calls = m_activeToolCalls.values();
-                        partialMsg.blocks.append(domain::conversation::MessageBlock(
-                            domain::BlockType::ToolCall,
-                            tcBlock
-                        ));
-                    }
-
                     saveMessage(partialMsg);
                     emit replyGenerated(m_currentSessionId, partialMsg);
                 }

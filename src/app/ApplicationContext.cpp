@@ -36,6 +36,8 @@ namespace app {
             QDir::homePath() + QStringLiteral("/.forgeai/sessions"));
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
         m_projectRepo = std::make_unique<data::repository::SqliteProjectRepository>();
+        m_agentRepo = std::make_unique<data::repository::SqliteAgentRepository>();
+        m_agentCheckpointRepo = std::make_unique<data::repository::SqliteAgentCheckpointRepository>();
         m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
 
         // 1.5 设置系统持久化与 Providers 初始化
@@ -77,31 +79,47 @@ namespace app {
         m_chatGateway = std::make_unique<llm::ModelProviderService>(m_httpClient, m_protocolRegistry);
         m_discoveryGateway = std::make_unique<llm::ModelDiscoveryService>(m_httpClient, m_protocolRegistry);
 
-        // 2. 领域服务层初始化
+        // 2. 领域服务与工具体系初始化
+        m_workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+        m_builtinToolProvider = std::make_shared<agent::tool::BuiltinToolProvider>(m_workspaceFs);
+        m_mcpManager = std::make_unique<llm::mcp::McpManager>();
+        m_toolRegistry = std::make_unique<agent::tool::ToolRegistry>();
+        m_toolRegistry->registerProvider(m_builtinToolProvider);
+        m_toolRegistry->registerProvider(m_mcpManager->toolProvider());
+
         m_conversationService = std::make_unique<services::conversation::ConversationService>(
             m_conversationRepo.get(), m_messageTranscriptRepo.get());
         m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
         m_settingsService = std::make_unique<services::settings::SettingsService>(m_settingsRegistry.get());
-        m_workAgentToolService = std::make_unique<services::agent::AgentToolService>(QDir::currentPath());
         m_projectContextService = std::make_unique<services::project::ProjectContextService>();
+
+        // 2.5 Agent 运行时与 UseCases 初始化
+        m_agentRuntime = std::make_unique<agent::runtime::AgentRuntime>(
+            m_chatGateway.get(),
+            m_conversationService.get(),
+            m_toolRegistry.get(),
+            m_agentCheckpointRepo.get()
+        );
+        m_runAgentUseCase = std::make_unique<application::usecase::agent::RunAgentUseCase>(
+            m_agentRuntime.get(),
+            m_modelService.get(),
+            m_projectContextService.get()
+        );
+        m_cancelAgentRunUseCase = std::make_unique<application::usecase::agent::CancelAgentRunUseCase>(
+            m_agentRuntime.get()
+        );
+        m_resumeAgentRunUseCase = std::make_unique<application::usecase::agent::ResumeAgentRunUseCase>(
+            m_agentRuntime.get()
+        );
 
         // 3. 对话业务用例初始化
         m_sendMessageUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
             m_chatGateway.get(),
             m_conversationService.get(),
-            m_modelService.get(),
-            nullptr
+            m_modelService.get()
         );
         m_stopGenerationUseCase = std::make_unique<application::usecase::chat::StopGenerationUseCase>(
             m_sendMessageUseCase.get()
-        );
-        m_workAgentUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
-            m_chatGateway.get(),
-            // Work conversations are ordinary persisted Conversation entities;
-            // project binding is metadata, not a second transient store.
-            m_conversationService.get(),
-            m_modelService.get(),
-            m_workAgentToolService.get()
         );
         m_loadSessionsUseCase = std::make_unique<application::usecase::conversation::LoadSessionsUseCase>(
             m_conversationService.get()
@@ -241,6 +259,14 @@ namespace app {
         return m_settingsService.get();
     }
 
+    agent::tool::ToolRegistry *ApplicationContext::toolRegistry() const {
+        return m_toolRegistry.get();
+    }
+
+    application::ports::IAgentRuntime *ApplicationContext::agentRuntime() const {
+        return m_agentRuntime.get();
+    }
+
     application::usecase::chat::ChatUseCases ApplicationContext::chatUseCases() const {
         application::usecase::chat::ChatUseCases c;
         c.sendMessage = m_sendMessageUseCase.get();
@@ -259,8 +285,8 @@ namespace app {
 
     application::usecase::work::WorkUseCases ApplicationContext::workUseCases() const {
         application::usecase::work::WorkUseCases w;
-        w.agentConversation = m_workAgentUseCase.get();
-        w.agentTools = m_workAgentToolService.get();
+        w.runAgent = m_runAgentUseCase.get();
+        w.cancelAgentRun = m_cancelAgentRunUseCase.get();
         w.conversationService = m_conversationService.get();
         w.conversationRepository = m_conversationRepo.get();
         w.projectRepository = m_projectRepo.get();

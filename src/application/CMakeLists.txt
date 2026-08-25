@@ -1,11 +1,19 @@
 target_sources(ForgeAICore PRIVATE
     ports/IChatModelGateway.h
     ports/IModelDiscoveryGateway.h
+    ports/ITool.h
+    ports/IToolProvider.h
+    ports/IAgentRuntime.h
     usecase/chat/ChatUseCases.h
     usecase/chat/SendMessageUseCase.h
     usecase/chat/SendMessageUseCase.cpp
     usecase/chat/StopGenerationUseCase.h
     usecase/chat/StopGenerationUseCase.cpp
+    usecase/agent/AgentUseCases.h
+    usecase/agent/RunAgentUseCase.h
+    usecase/agent/RunAgentUseCase.cpp
+    usecase/agent/CancelAgentRunUseCase.h
+    usecase/agent/ResumeAgentRunUseCase.h
     usecase/conversation/LoadSessionsUseCase.h
     usecase/conversation/LoadSessionsUseCase.cpp
     usecase/conversation/LoadSessionDetailUseCase.h

@@ -152,42 +152,6 @@ namespace ui::screen::chat {
             });
         });
 
-        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::toolCallReceived,
-                this, [this](const QString& sessionId, const domain::agent::ToolCall& call) {
-            updateState([sessionId, call](ChatState& s) {
-                if (s.currentSessionId != sessionId) return;
-                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
-                if (it == s.messages.end()) {
-                    domain::conversation::Message streaming;
-                    streaming.id = QUuid::createUuid(); streaming.role = domain::MessageRole::Assistant;
-                    streaming.status = domain::MessageStatus::Sending; streaming.createdAt = QDateTime::currentDateTime();
-                    s.streamingMessageId = streaming.id;
-                    s.messages.append(std::move(streaming));
-                    it = std::prev(s.messages.end());
-                }
-                domain::conversation::ToolCallBlock calls; calls.calls.append(call);
-                it->blocks.append({domain::BlockType::ToolCall, calls});
-            });
-        });
-
-        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::toolResultReceived,
-                this, [this](const QString& sessionId, const domain::agent::ToolResult& result) {
-            updateState([sessionId, result](ChatState& s) {
-                if (s.currentSessionId != sessionId) return;
-                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
-                if (it == s.messages.end()) {
-                    domain::conversation::Message streaming;
-                    streaming.id = QUuid::createUuid(); streaming.role = domain::MessageRole::Assistant;
-                    streaming.status = domain::MessageStatus::Sending; streaming.createdAt = QDateTime::currentDateTime();
-                    s.streamingMessageId = streaming.id;
-                    s.messages.append(std::move(streaming));
-                    it = std::prev(s.messages.end());
-                }
-                domain::conversation::ToolResultBlock results; results.results.append(result);
-                it->blocks.append({domain::BlockType::ToolResult, results});
-            });
-        });
-
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::replyGenerated,
                 this, [this](const QString &sessionId, const domain::conversation::Message &msg) {
             updateState([sessionId, msg](ChatState &s) {

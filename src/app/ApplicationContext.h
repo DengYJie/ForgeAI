@@ -7,6 +7,9 @@
 #include "data/repository/JsonlMessageRepository.h"
 #include "data/repository/SqliteModelRepository.h"
 #include "data/repository/SqliteProjectRepository.h"
+#include "data/repository/SqliteAgentRepository.h"
+#include "data/repository/SqliteAgentCheckpointRepository.h"
+#include "llm/mcp/McpManager.h"
 #include "core/model/ModelRegistry.h"
 #include "core/settings/SettingsRegistry.h"
 #include "core/settings/providers/AppearanceSettingsProvider.h"
@@ -19,9 +22,15 @@
 #include "services/conversation/ConversationService.h"
 #include "services/model/ModelService.h"
 #include "services/settings/SettingsService.h"
-#include "services/agent/AgentToolService.h"
 #include "services/project/ProjectContextService.h"
+#include "llm/workspace/WorkspaceFileSystem.h"
+#include "agent/tool/ToolRegistry.h"
+#include "agent/tool/BuiltinToolProvider.h"
+#include "agent/runtime/AgentRuntime.h"
 #include "application/usecase/chat/ChatUseCases.h"
+#include "application/usecase/agent/RunAgentUseCase.h"
+#include "application/usecase/agent/CancelAgentRunUseCase.h"
+#include "application/usecase/agent/ResumeAgentRunUseCase.h"
 #include "application/usecase/work/WorkUseCases.h"
 #include "application/usecase/knowledge/KnowledgeUseCases.h"
 #include "application/usecase/settings/SettingsUseCases.h"
@@ -67,6 +76,8 @@ namespace app {
         domain::service::IModelService *modelService() const;
         domain::service::ISettingsService *settingsService() const;
         application::ports::IChatModelGateway *chatModelGateway() const;
+        agent::tool::ToolRegistry *toolRegistry() const;
+        application::ports::IAgentRuntime *agentRuntime() const;
 
         // 5. UseCase 聚合包
         application::usecase::chat::ChatUseCases chatUseCases() const;
@@ -92,6 +103,8 @@ namespace app {
         std::unique_ptr<data::repository::JsonlMessageRepository> m_messageTranscriptRepo;
         std::shared_ptr<data::repository::SqliteModelRepository> m_modelRepo;
         std::unique_ptr<data::repository::SqliteProjectRepository> m_projectRepo;
+        std::unique_ptr<data::repository::SqliteAgentRepository> m_agentRepo;
+        std::unique_ptr<data::repository::SqliteAgentCheckpointRepository> m_agentCheckpointRepo;
         std::shared_ptr<core::model::ModelRegistry> m_modelRegistry;
 
         // 设置持久化与提供者
@@ -106,17 +119,27 @@ namespace app {
         std::unique_ptr<llm::ModelProviderService> m_chatGateway;
         std::unique_ptr<llm::ModelDiscoveryService> m_discoveryGateway;
 
+        // 工具、沙箱与 MCP
+        std::shared_ptr<llm::workspace::WorkspaceFileSystem> m_workspaceFs;
+        std::shared_ptr<agent::tool::BuiltinToolProvider> m_builtinToolProvider;
+        std::unique_ptr<llm::mcp::McpManager> m_mcpManager;
+        std::unique_ptr<agent::tool::ToolRegistry> m_toolRegistry;
+
         // 领域服务
         std::unique_ptr<services::conversation::ConversationService> m_conversationService;
         std::unique_ptr<services::model::ModelService> m_modelService;
         std::unique_ptr<services::settings::SettingsService> m_settingsService;
-        std::unique_ptr<services::agent::AgentToolService> m_workAgentToolService;
         std::unique_ptr<services::project::ProjectContextService> m_projectContextService;
+
+        // Agent 运行时与 UseCases
+        std::unique_ptr<agent::runtime::AgentRuntime> m_agentRuntime;
+        std::unique_ptr<application::usecase::agent::RunAgentUseCase> m_runAgentUseCase;
+        std::unique_ptr<application::usecase::agent::CancelAgentRunUseCase> m_cancelAgentRunUseCase;
+        std::unique_ptr<application::usecase::agent::ResumeAgentRunUseCase> m_resumeAgentRunUseCase;
 
         // 对话业务用例
         std::unique_ptr<application::usecase::chat::SendMessageUseCase> m_sendMessageUseCase;
         std::unique_ptr<application::usecase::chat::StopGenerationUseCase> m_stopGenerationUseCase;
-        std::unique_ptr<application::usecase::chat::SendMessageUseCase> m_workAgentUseCase;
         std::unique_ptr<application::usecase::conversation::LoadSessionsUseCase> m_loadSessionsUseCase;
         std::unique_ptr<application::usecase::conversation::LoadSessionDetailUseCase> m_loadSessionDetailUseCase;
         std::unique_ptr<application::usecase::conversation::CreateSessionUseCase> m_createSessionUseCase;

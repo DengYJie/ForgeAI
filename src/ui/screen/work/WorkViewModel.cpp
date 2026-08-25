@@ -1,8 +1,6 @@
 #include "WorkViewModel.h"
 
-#include "application/usecase/chat/SendMessageUseCase.h"
 #include "domain/service/IProjectContextService.h"
-#include "services/agent/AgentToolService.h"
 #include "domain/service/IConversationService.h"
 #include "domain/repository/IConversationRepository.h"
 #include "domain/repository/IProjectRepository.h"
@@ -34,13 +32,12 @@ domain::conversation::Message& ensureStreamingMessage(WorkState& state) {
 WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& useCases,
                              domain::service::IProjectContextService* projectContext, QObject* parent)
     : BaseViewModel<WorkViewModel, WorkState>(parent), m_useCases(useCases), m_projectContext(projectContext),
-      m_agentTools(useCases.agentTools), m_conversationService(useCases.conversationService),
+      m_conversationService(useCases.conversationService),
       m_conversationRepository(useCases.conversationRepository), m_projectRepository(useCases.projectRepository) {
     setupUseCaseConnections();
     setProjectRoot(QDir::currentPath());
     if (m_projectRepository) {
         auto projects = m_projectRepository->getAllProjects();
-        // Removed auto-creation of QDir::currentPath() as project
         QList<ui::screen::chat::ChatSessionItemData> sessions;
         if (m_conversationRepository) for (const auto& conversation : m_conversationRepository->getAllConversations()) {
             if (!conversation.projectId.has_value()) continue;
@@ -55,15 +52,14 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
             }
         });
     }
-    // A project must be explicitly selected before creating a Work chat.
 }
 
 WorkViewModel::~WorkViewModel() = default;
 
 void WorkViewModel::setupUseCaseConnections() {
-    auto* agent = m_useCases.agentConversation;
+    auto* agent = m_useCases.runAgent;
     if (agent) {
-        connect(agent, &application::usecase::chat::SendMessageUseCase::userMessageCreated, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::userMessageCreated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
             updateState([this, message](WorkState& state) {
@@ -74,7 +70,12 @@ void WorkViewModel::setupUseCaseConnections() {
                     item.title = title;
                     if (m_conversationRepository) {
                         const auto conversation = m_conversationRepository->getConversation(QUuid(m_agentSessionId));
-                        if (conversation) { auto updated = *conversation; updated.title = title; updated.updatedAt = QDateTime::currentDateTime(); m_conversationRepository->saveConversation(updated); }
+                        if (conversation) {
+                            auto updated = *conversation;
+                            updated.title = title;
+                            updated.updatedAt = QDateTime::currentDateTime();
+                            m_conversationRepository->saveConversation(updated);
+                        }
                     }
                     break;
                 }
@@ -82,7 +83,7 @@ void WorkViewModel::setupUseCaseConnections() {
                 state.statusMessage = QStringLiteral("项目 Agent 正在处理…");
             });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::tokenReceived, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::tokenReceived, this,
                 [this](const QString& sessionId, const QString& token) {
             if (sessionId != m_agentSessionId || token.isEmpty()) return;
             updateState([this, token](WorkState& state) {
@@ -93,7 +94,7 @@ void WorkViewModel::setupUseCaseConnections() {
                 message.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
             });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::thoughtReceived, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::thoughtReceived, this,
                 [this](const QString& sessionId, const QString& thought) {
             if (sessionId != m_agentSessionId || thought.isEmpty()) return;
             updateState([this, thought](WorkState& state) {
@@ -104,25 +105,40 @@ void WorkViewModel::setupUseCaseConnections() {
                 message.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
             });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::toolCallReceived, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::toolCallFinished, this,
                 [this](const QString& sessionId, const domain::agent::ToolCall& call) {
             if (sessionId != m_agentSessionId) return;
             updateState([this, call](WorkState& state) {
                 auto& message = ensureStreamingMessage(state);
                 domain::conversation::ToolCallBlock calls; calls.calls.append(call);
                 message.blocks.append({domain::BlockType::ToolCall, calls});
+
+                state.toolEvents.append(WorkState::ToolEvent{
+                    call.name,
+                    call.arguments,
+                    {},
+                    false
+                });
             });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::toolResultReceived, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::toolResultReady, this,
                 [this](const QString& sessionId, const domain::agent::ToolResult& result) {
             if (sessionId != m_agentSessionId) return;
             updateState([this, result](WorkState& state) {
                 auto& message = ensureStreamingMessage(state);
                 domain::conversation::ToolResultBlock results; results.results.append(result);
                 message.blocks.append({domain::BlockType::ToolResult, results});
+
+                for (auto it = state.toolEvents.rbegin(); it != state.toolEvents.rend(); ++it) {
+                    if (it->result.isEmpty()) {
+                        it->result = result.content;
+                        it->isError = result.isError;
+                        break;
+                    }
+                }
             });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::replyGenerated, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::replyGenerated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
             updateState([this, message](WorkState& state) {
@@ -131,12 +147,12 @@ void WorkViewModel::setupUseCaseConnections() {
                 else state.messages.append(message);
             });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::generationFinished, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::runCompleted, this,
                 [this](const QString& sessionId) {
             if (sessionId != m_agentSessionId) return;
             updateState([](WorkState& state) { state.isProcessing = false; state.statusMessage.clear(); });
         });
-        connect(agent, &application::usecase::chat::SendMessageUseCase::generationFailed, this,
+        connect(agent, &application::usecase::agent::RunAgentUseCase::runFailed, this,
                 [this](const QString& sessionId, const domain::llm::ChatError& error) {
             if (sessionId != m_agentSessionId) return;
             updateState([error](WorkState& state) {
@@ -152,36 +168,30 @@ QString WorkViewModel::taskTitle(const QString& task) {
     return trimmed.left(36) + (trimmed.size() > 36 ? QStringLiteral("…") : QString());
 }
 
-QString WorkViewModel::projectAgentPrompt() const {
-    QString prompt = QStringLiteral("你是 ForgeAI 的项目 Agent。仅在项目工作区内工作，并在需要事实时优先使用提供的工具。"
-                                    "不要臆造文件内容；执行工具后，基于工具结果继续回答。\n\n项目根目录：%1").arg(m_state.projectRoot);
-    if (!m_state.agentInstructions.trimmed().isEmpty()) {
-        prompt += QStringLiteral("\n\n以下是项目 AGENTS.md 和 Skills 指令，必须遵守：\n%1").arg(m_state.agentInstructions);
-    }
-    if (!m_state.mcpConfigContent.trimmed().isEmpty()) {
-        prompt += QStringLiteral("\n\n以下是项目 MCP 配置上下文。可据此说明可用的集成；不要把未接入的 MCP 服务器当成已可调用工具：\n%1")
-            .arg(m_state.mcpConfigContent.left(64 * 1024));
-    }
-    return prompt;
-}
-
 void WorkViewModel::startTask(const QString& task) {
     const QString trimmed = task.trimmed();
     if (trimmed.isEmpty() || m_currentProjectId.isNull() || m_agentSessionId.isEmpty()) return;
     updateState([trimmed](WorkState& state) { state.currentTask = taskTitle(trimmed); state.statusMessage.clear(); });
-    if (m_useCases.agentConversation)
-        m_useCases.agentConversation->execute(m_agentSessionId, trimmed, {}, {}, false, false, {}, projectAgentPrompt());
+    if (m_useCases.runAgent) {
+        m_useCases.runAgent->execute(
+            m_agentSessionId,
+            trimmed,
+            m_currentProjectId,
+            m_state.projectRoot
+        );
+    }
 }
 
 void WorkViewModel::cancelTask() {
-    if (m_useCases.agentConversation) m_useCases.agentConversation->cancelCurrent();
+    if (m_useCases.cancelAgentRun) {
+        m_useCases.cancelAgentRun->execute();
+    }
     updateState([](WorkState& state) { state.isProcessing = false; state.statusMessage.clear(); });
 }
 
 void WorkViewModel::setProjectRoot(const QString& rootPath) {
     if (!m_projectContext) return;
     const auto context = m_projectContext->load(rootPath);
-    if (auto* tools = dynamic_cast<services::agent::AgentToolService*>(m_agentTools)) tools->setWorkspaceRoot(context.rootPath);
     updateState([&](WorkState& state) {
         state.projectRoot = context.rootPath;
         state.projectName = QFileInfo(context.rootPath).fileName();
@@ -227,7 +237,7 @@ void WorkViewModel::removeProject(const QUuid& projectId) {
     }
     
     updateState([this, projectId](WorkState& state) {
-        // Cascade delete all conversations associated with this project to prevent DB orphan records and JSONL file leaks
+        // Cascade delete all conversations associated with this project
         QList<QString> sessionsToDelete;
         for (const auto& s : state.sessions) {
             if (s.projectId == projectId) {
@@ -300,7 +310,6 @@ void WorkViewModel::toggleProjectPinned(const QUuid& projectId) {
             }
         }
         
-        // Also update the loaded project list
         for (auto& p : state.projects) {
             if (p.id == projectId) {
                 p.isPinned = state.pinnedProjects.contains(projectId);
