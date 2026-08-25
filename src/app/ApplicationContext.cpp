@@ -91,7 +91,7 @@ namespace app {
             m_chatGateway.get(),
             m_conversationService.get(),
             m_modelService.get(),
-            m_workAgentToolService.get()
+            m_agentToolService.get()
         );
         m_stopGenerationUseCase = std::make_unique<application::usecase::chat::StopGenerationUseCase>(
             m_sendMessageUseCase.get()
@@ -102,7 +102,7 @@ namespace app {
             // project binding is metadata, not a second transient store.
             m_conversationService.get(),
             m_modelService.get(),
-            m_agentToolService.get()
+            m_workAgentToolService.get()
         );
         m_loadSessionsUseCase = std::make_unique<application::usecase::conversation::LoadSessionsUseCase>(
             m_conversationService.get()

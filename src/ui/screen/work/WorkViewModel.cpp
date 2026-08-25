@@ -40,12 +40,7 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
     setProjectRoot(QDir::currentPath());
     if (m_projectRepository) {
         auto projects = m_projectRepository->getAllProjects();
-        if (projects.isEmpty()) {
-            domain::project::Project project;
-            project.id = QUuid::createUuid(); project.rootPath = m_state.projectRoot;
-            project.name = m_state.projectName; project.createdAt = QDateTime::currentDateTime(); project.lastOpenedAt = project.createdAt;
-            m_projectRepository->saveProject(project); projects.append(project);
-        }
+        // Removed auto-creation of QDir::currentPath() as project
         QList<ui::screen::chat::ChatSessionItemData> sessions;
         if (m_conversationRepository) for (const auto& conversation : m_conversationRepository->getAllConversations()) {
             if (!conversation.projectId.has_value()) continue;
@@ -277,6 +272,8 @@ void WorkViewModel::removeProject(const QUuid& projectId) {
         state.pinnedProjects.remove(projectId);
         
         if (state.currentProjectId == projectId) {
+            cancelTask();
+            m_agentSessionId.clear();
             if (!state.projects.isEmpty()) {
                 selectProject(state.projects.first().id);
             } else {
@@ -355,6 +352,8 @@ void WorkViewModel::archiveProjectSessions(const QUuid& projectId) {
             }
         }
         if (state.currentProjectId == projectId && !state.currentSessionId.isEmpty()) {
+            cancelTask();
+            m_agentSessionId.clear();
             state.currentSessionId.clear();
             state.messages.clear();
         }
@@ -404,12 +403,18 @@ void WorkViewModel::loadSession(const QString& sessionId) {
 }
 
 void WorkViewModel::setSessionPinned(const QString& sessionId, bool pinned) {
-    updateState([sessionId, pinned](WorkState& state) { for (auto& item : state.sessions) if (item.id == sessionId) item.isPinned = pinned; });
+    updateState([this, sessionId, pinned](WorkState& state) {
+        if (m_conversationService) {
+            m_conversationService->setSessionPinned(state.sessions, sessionId, pinned);
+        }
+    });
 }
 
 void WorkViewModel::setSessionArchived(const QString& sessionId, bool archived) {
     updateState([this, sessionId, archived](WorkState& state) {
-        for (auto& item : state.sessions) if (item.id == sessionId) item.isArchived = archived;
+        if (m_conversationService) {
+            m_conversationService->setSessionArchived(state.sessions, sessionId, archived);
+        }
         if (archived && state.currentSessionId == sessionId) {
             const auto it = std::find_if(state.sessions.cbegin(), state.sessions.cend(), [](const auto& item) { return !item.isArchived; });
             if (it != state.sessions.cend()) { const QString next = it->id; QTimer::singleShot(0, this, [this, next] { loadSession(next); }); }

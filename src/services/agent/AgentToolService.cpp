@@ -46,6 +46,13 @@ QString AgentToolService::resolveWritableWorkspacePath(const QString& relativePa
     if (parent.compare(m_workspaceRoot, sensitivity) != 0 && !parent.startsWith(prefix, sensitivity)) {
         if (error) *error = QStringLiteral("路径必须位于工作区内"); return {};
     }
+    QFileInfo candidateInfo(candidate);
+    if (candidateInfo.exists()) {
+        const QString candidateCanonical = candidateInfo.canonicalFilePath();
+        if (candidateCanonical.compare(m_workspaceRoot, sensitivity) != 0 && !candidateCanonical.startsWith(prefix, sensitivity)) {
+            if (error) *error = QStringLiteral("已存在的文件是符号链接且指向工作区外"); return {};
+        }
+    }
     return candidate;
 }
 
