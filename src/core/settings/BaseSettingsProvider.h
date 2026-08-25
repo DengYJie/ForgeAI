@@ -91,11 +91,12 @@ namespace core::settings {
                 newPrefs.insert(it.key(), it.value().toVariant());
             }
 
-            if (m_preferences != newPrefs) {
-                m_preferences = newPrefs;
+            const bool changed = (m_preferences != newPrefs);
+            m_preferences = newPrefs;
+            if (changed) {
                 emit dataChanged();
-                onSettingsLoaded();
             }
+            onSettingsLoaded();
         }
 
         /**

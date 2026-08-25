@@ -55,7 +55,7 @@ namespace core::logging {
         void workerLoop();
 
         std::vector<std::shared_ptr<ILogSink>> m_sinks;
-        std::atomic<LogLevel> m_minLevel{LogLevel::Debug};
+        std::atomic<LogLevel> m_minLevel{LogLevel::Info};
         std::atomic<size_t> m_maxQueueSize{8192};
 
         std::atomic<uint64_t> m_droppedDebugCount{0};
