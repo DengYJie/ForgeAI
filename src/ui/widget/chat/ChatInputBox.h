@@ -50,6 +50,8 @@ namespace ui::widget::chat {
 
         void clearText() const;
 
+        QSize sizeHint() const override;
+
         void onThemeUpdated() override;
 
     Q_SIGNALS:

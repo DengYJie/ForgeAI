@@ -8,7 +8,7 @@
 namespace ui::widget::message {
 namespace {
 constexpr int kHorizontalMargin = 16;
-constexpr int kMessageContentMaxWidth = 1400;
+constexpr int kMessageContentMaxWidth = 1000;
 constexpr int kTopMargin = 16;
 constexpr int kBottomMargin = 256;
 constexpr int kItemSpacing = 16;

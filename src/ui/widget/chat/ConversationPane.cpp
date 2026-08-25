@@ -13,6 +13,12 @@
 
 namespace ui::widget::chat {
 
+namespace {
+constexpr int kHorizontalMargin = 16;
+constexpr int kMinBoxWidth = 400;
+constexpr int kMaxBoxWidth = 1000;
+} // namespace
+
 ConversationPane::ConversationPane(QWidget* parent) : QWidget(parent) {
     setupUi();
 }
@@ -26,19 +32,25 @@ void ConversationPane::setupUi() {
     m_header = new ChatHeader(this);
     mainLayout->addWidget(m_header);
 
-    // 2. Middle Area
-    auto* middleRow = new QWidget(this);
-    auto* middleLayout = new QHBoxLayout(middleRow);
-    middleLayout->setContentsMargins(4, 6, 8, 6);
-    middleLayout->setSpacing(8);
+    // 2. Main Row: AnchorBar (left) + Conversation Column (center)
+    auto* contentRow = new QWidget(this);
+    m_contentRowLayout = new QHBoxLayout(contentRow);
+    m_contentRowLayout->setContentsMargins(8, 6, 8, 0);
+    m_contentRowLayout->setSpacing(8);
 
-    m_anchorBar = new ChatAnchorBar(middleRow);
+    m_anchorBar = new ChatAnchorBar(contentRow);
     m_anchorBar->hide(); // Hidden by default, enabled by ChatPage
-    middleLayout->addWidget(m_anchorBar, 0);
+    m_contentRowLayout->addWidget(m_anchorBar, 0);
 
-    auto* messageSurface = new QWidget(middleRow);
+    auto* conversationColumn = new QWidget(contentRow);
+    auto* conversationLayout = new QVBoxLayout(conversationColumn);
+    conversationLayout->setContentsMargins(0, 0, 0, 0);
+    conversationLayout->setSpacing(6);
+
+    // 2.1 Message Surface
+    auto* messageSurface = new QWidget(conversationColumn);
     auto* messageStack = new QStackedLayout(messageSurface);
-    messageStack->setContentsMargins(20, 0, 16, 0);
+    messageStack->setContentsMargins(0, 0, 0, 0);
     messageStack->setStackingMode(QStackedLayout::StackAll);
 
     m_messageList = new message::MessageListView(messageSurface);
@@ -54,13 +66,12 @@ void ConversationPane::setupUi() {
     m_emptyStateLabel->hide();
     messageStack->addWidget(m_emptyStateLabel);
 
-    middleLayout->addWidget(messageSurface, 1);
-    mainLayout->addWidget(middleRow, 1);
+    conversationLayout->addWidget(messageSurface, 1);
 
-    // 3. Bottom Input Area
-    auto* inputContainer = new QWidget(this);
+    // 2.2 Bottom Input Area inside the same conversation column
+    auto* inputContainer = new QWidget(conversationColumn);
     auto* inputLayout = new QVBoxLayout(inputContainer);
-    inputLayout->setContentsMargins(20, 0, 20, 0);
+    inputLayout->setContentsMargins(0, 0, 0, 0);
     inputLayout->setSpacing(4);
 
     m_inputBox = new ChatInputBox(inputContainer);
@@ -73,11 +84,19 @@ void ConversationPane::setupUi() {
     m_statusLabel->hide();
     inputLayout->addWidget(m_statusLabel);
 
-    mainLayout->addWidget(inputContainer);
+    conversationLayout->addWidget(inputContainer, 0);
+
+    m_contentRowLayout->addWidget(conversationColumn, 1);
+    mainLayout->addWidget(contentRow, 1);
 }
 
 void ConversationPane::setAnchorBarVisible(bool visible) {
     m_anchorBar->setVisible(visible);
+    if (m_contentRowLayout) {
+        // When AnchorBar (32px + 8px spacing) is visible on the left, add 40px right margin to balance symmetrically
+        m_contentRowLayout->setContentsMargins(visible ? 4 : 8, 6, visible ? 44 : 8, 0);
+    }
+    updateInputBoxWidth();
 }
 
 void ConversationPane::setEmptyStateVisible(bool visible) {
@@ -86,6 +105,23 @@ void ConversationPane::setEmptyStateVisible(bool visible) {
 
 void ConversationPane::setStatusLabelVisible(bool visible) {
     m_statusLabel->setVisible(visible);
+}
+
+void ConversationPane::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    updateInputBoxWidth();
+}
+
+void ConversationPane::updateInputBoxWidth() {
+    if (!m_inputBox) return;
+    const bool anchorVisible = (m_anchorBar && m_anchorBar->isVisible());
+    const int sideWidths = anchorVisible ? (2 * (8 + 32 + 8)) : (2 * 8);
+    const int columnWidth = qMax(1, width() - sideWidths);
+    const int cardWidth = qMax(1, columnWidth - 2 * kHorizontalMargin);
+    const int targetWidth = qBound(kMinBoxWidth, cardWidth, kMaxBoxWidth);
+    if (targetWidth > 0 && m_inputBox->width() != targetWidth) {
+        m_inputBox->setFixedWidth(targetWidth);
+    }
 }
 
 } // namespace ui::widget::chat

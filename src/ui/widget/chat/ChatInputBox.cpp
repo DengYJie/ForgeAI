@@ -12,7 +12,7 @@ namespace ui::widget::chat {
         constexpr int kMinInputHeight = 48;
         constexpr int kMaxInputHeight = 140;
         constexpr int kMinBoxWidth = 400;
-        constexpr int kMaxBoxWidth = 1400;
+        constexpr int kMaxBoxWidth = 1000;
         constexpr int kShadowMargin = 8;
         constexpr int kShadowLayers = 8;
         constexpr qreal kShadowIntensity = 0.18;
@@ -27,6 +27,10 @@ namespace ui::widget::chat {
         setMaximumWidth(kMaxBoxWidth);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         setupUi();
+    }
+
+    QSize ChatInputBox::sizeHint() const {
+        return QSize(kMaxBoxWidth, kMinInputHeight + 48 + 2 * kShadowMargin);
     }
 
     void ChatInputBox::setupUi() {

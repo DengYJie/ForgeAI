@@ -3,6 +3,7 @@
 #include <QWidget>
 
 class QVBoxLayout;
+class QHBoxLayout;
 
 namespace fluent::textfields {
     class Label;
@@ -35,10 +36,15 @@ public:
     void setEmptyStateVisible(bool visible);
     void setStatusLabelVisible(bool visible);
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
     void setupUi();
+    void updateInputBoxWidth();
 
     ChatHeader* m_header = nullptr;
+    QHBoxLayout* m_contentRowLayout = nullptr;
     ChatAnchorBar* m_anchorBar = nullptr;
     message::MessageListView* m_messageList = nullptr;
     ChatInputBox* m_inputBox = nullptr;
