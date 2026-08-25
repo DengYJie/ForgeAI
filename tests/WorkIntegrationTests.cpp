@@ -828,7 +828,7 @@ void WorkIntegrationTests::testWorkViewModelMcpProjectSwitchUnload() {
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) == nullptr);
 }
 
-// 模拟测试用的慢速工具
+// 模拟测试用的慢速工具（支持合作式感知 CancellationToken）
 class SlowTestTool final : public application::ports::ITool {
 public:
     domain::agent::ToolDefinition definition() const override {
@@ -843,10 +843,17 @@ public:
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) override {
-        Q_UNUSED(context);
-        QThread::msleep(400);
+        for (int i = 0; i < 40; ++i) {
+            if (context.cancellationToken.isCanceled()) {
+                wasCanceled = true;
+                return domain::agent::ToolResult{call.id, QStringLiteral("操作已合作式取消"), true};
+            }
+            QThread::msleep(10);
+        }
         return domain::agent::ToolResult{call.id, QStringLiteral("slow finish"), false};
     }
+
+    std::atomic<bool> wasCanceled{false};
 };
 
 // 模拟非线程安全 MCP 工具
@@ -982,14 +989,22 @@ void WorkIntegrationTests::testAgentRuntimeToolExecutionTimeoutProtection() {
         loop.quit();
     });
 
+    QElapsedTimer elapsed;
+    elapsed.start();
+
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("超时工具调用"));
     loop.exec();
+
+    const qint64 totalElapsedMs = elapsed.elapsed();
 
     QVERIFY2(completed, "Tool execution timeout test timed out");
     QCOMPARE(resultsMap.size(), 2);
     QVERIFY(resultsMap.value(QStringLiteral("call_slow1")).isError);
     QVERIFY(resultsMap.value(QStringLiteral("call_slow1")).content.contains(QStringLiteral("超时")));
+
+    // 关键断言：总耗时紧贴 100ms 超时限制，证明未被 400ms 后台阻塞
+    QVERIFY2(totalElapsedMs < 300, QStringLiteral("工具超时应立即返回，实际耗时 %1 ms").arg(totalElapsedMs).toUtf8().constData());
 }
 
 QTEST_GUILESS_MAIN(WorkIntegrationTests)
