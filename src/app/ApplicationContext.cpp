@@ -82,7 +82,6 @@ namespace app {
             m_conversationRepo.get(), m_messageTranscriptRepo.get());
         m_modelService = std::make_unique<services::model::ModelService>(m_modelRegistry);
         m_settingsService = std::make_unique<services::settings::SettingsService>(m_settingsRegistry.get());
-        m_agentToolService = std::make_unique<services::agent::AgentToolService>(QDir::currentPath());
         m_workAgentToolService = std::make_unique<services::agent::AgentToolService>(QDir::currentPath());
         m_projectContextService = std::make_unique<services::project::ProjectContextService>();
 
@@ -91,7 +90,7 @@ namespace app {
             m_chatGateway.get(),
             m_conversationService.get(),
             m_modelService.get(),
-            m_agentToolService.get()
+            nullptr
         );
         m_stopGenerationUseCase = std::make_unique<application::usecase::chat::StopGenerationUseCase>(
             m_sendMessageUseCase.get()
@@ -129,15 +128,11 @@ namespace app {
             m_conversationService.get()
         );
 
-        // 4. 工作流业务用例初始化
-        m_startTaskUseCase = std::make_unique<application::usecase::work::StartTaskUseCase>(m_agentToolService.get());
-        m_cancelTaskUseCase = std::make_unique<application::usecase::work::CancelTaskUseCase>();
-
-        // 5. 知识库业务用例初始化
+        // 4. 知识库业务用例初始化
         m_searchDocumentsUseCase = std::make_unique<application::usecase::knowledge::SearchDocumentsUseCase>();
         m_addDocumentUseCase = std::make_unique<application::usecase::knowledge::AddDocumentUseCase>();
 
-        // 6. 设置业务用例初始化
+        // 5. 设置业务用例初始化
         m_loadSettingsUseCase = std::make_unique<application::usecase::settings::LoadSettingsUseCase>(m_settingsService.get());
         m_saveSettingUseCase = std::make_unique<application::usecase::settings::SaveSettingUseCase>(m_settingsService.get());
         m_getSettingsProvidersUseCase = std::make_unique<application::usecase::settings::GetSettingsProvidersUseCase>(m_settingsService.get());
@@ -264,8 +259,6 @@ namespace app {
 
     application::usecase::work::WorkUseCases ApplicationContext::workUseCases() const {
         application::usecase::work::WorkUseCases w;
-        w.startTask = m_startTaskUseCase.get();
-        w.cancelTask = m_cancelTaskUseCase.get();
         w.agentConversation = m_workAgentUseCase.get();
         w.agentTools = m_workAgentToolService.get();
         w.conversationService = m_conversationService.get();

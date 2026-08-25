@@ -144,28 +144,6 @@ void WorkViewModel::setupUseCaseConnections() {
                 state.statusMessage = error.userMessage.isEmpty() ? error.message : error.userMessage;
             });
         });
-        return;
-    }
-
-    // Dependency fallback for test/minimal composition roots.
-    if (m_useCases.startTask) {
-        connect(m_useCases.startTask, &application::usecase::work::StartTaskUseCase::taskStarted, this,
-                [this](const QString& task) { updateState([task](WorkState& state) { state.currentTask = taskTitle(task); state.isProcessing = true; }); });
-        connect(m_useCases.startTask, &application::usecase::work::StartTaskUseCase::toolFinished, this,
-                [this](const domain::agent::ToolCall& call, const domain::agent::ToolResult& result) {
-            updateState([&](WorkState& state) {
-                domain::conversation::Message message;
-                message.id = QUuid::createUuid(); message.role = domain::MessageRole::Assistant;
-                message.createdAt = QDateTime::currentDateTime();
-                domain::conversation::ToolCallBlock calls; calls.calls.append(call);
-                domain::conversation::ToolResultBlock results; results.results.append(result);
-                message.blocks.append({domain::BlockType::ToolCall, calls});
-                message.blocks.append({domain::BlockType::ToolResult, results});
-                state.messages.append(std::move(message));
-            });
-        });
-        connect(m_useCases.startTask, &application::usecase::work::StartTaskUseCase::taskCompleted, this,
-                [this](const QString&) { updateState([](WorkState& state) { state.isProcessing = false; }); });
     }
 }
 
@@ -191,16 +169,12 @@ void WorkViewModel::startTask(const QString& task) {
     const QString trimmed = task.trimmed();
     if (trimmed.isEmpty() || m_currentProjectId.isNull() || m_agentSessionId.isEmpty()) return;
     updateState([trimmed](WorkState& state) { state.currentTask = taskTitle(trimmed); state.statusMessage.clear(); });
-    if (m_useCases.agentConversation) {
+    if (m_useCases.agentConversation)
         m_useCases.agentConversation->execute(m_agentSessionId, trimmed, {}, {}, false, false, {}, projectAgentPrompt());
-    } else if (m_useCases.startTask) {
-        m_useCases.startTask->execute(trimmed);
-    }
 }
 
 void WorkViewModel::cancelTask() {
     if (m_useCases.agentConversation) m_useCases.agentConversation->cancelCurrent();
-    else if (m_useCases.cancelTask) m_useCases.cancelTask->execute();
     updateState([](WorkState& state) { state.isProcessing = false; state.statusMessage.clear(); });
 }
 

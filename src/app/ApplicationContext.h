@@ -110,7 +110,6 @@ namespace app {
         std::unique_ptr<services::conversation::ConversationService> m_conversationService;
         std::unique_ptr<services::model::ModelService> m_modelService;
         std::unique_ptr<services::settings::SettingsService> m_settingsService;
-        std::unique_ptr<services::agent::AgentToolService> m_agentToolService;
         std::unique_ptr<services::agent::AgentToolService> m_workAgentToolService;
         std::unique_ptr<services::project::ProjectContextService> m_projectContextService;
 
@@ -126,10 +125,6 @@ namespace app {
         std::unique_ptr<application::usecase::conversation::SetSessionPinnedUseCase> m_setSessionPinnedUseCase;
         std::unique_ptr<application::usecase::conversation::SetSessionArchivedUseCase> m_setSessionArchivedUseCase;
         std::unique_ptr<application::usecase::conversation::SetSessionTitleUseCase> m_setSessionTitleUseCase;
-
-        // 工作流业务用例
-        std::unique_ptr<application::usecase::work::StartTaskUseCase> m_startTaskUseCase;
-        std::unique_ptr<application::usecase::work::CancelTaskUseCase> m_cancelTaskUseCase;
 
         // 知识库业务用例
         std::unique_ptr<application::usecase::knowledge::SearchDocumentsUseCase> m_searchDocumentsUseCase;

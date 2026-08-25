@@ -23,10 +23,6 @@ target_sources(ForgeAICore PRIVATE
     usecase/conversation/SetSessionTitleUseCase.h
     usecase/conversation/SetSessionTitleUseCase.cpp
     usecase/work/WorkUseCases.h
-    usecase/work/StartTaskUseCase.h
-    usecase/work/StartTaskUseCase.cpp
-    usecase/work/CancelTaskUseCase.h
-    usecase/work/CancelTaskUseCase.cpp
     usecase/knowledge/KnowledgeUseCases.h
     usecase/knowledge/SearchDocumentsUseCase.h
     usecase/knowledge/SearchDocumentsUseCase.cpp
