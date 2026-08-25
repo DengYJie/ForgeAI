@@ -38,17 +38,31 @@ target_sources(ForgeAICore PRIVATE
     workspace/WorkspaceFileSystem.h
     workspace/WorkspaceFileSystem.cpp
     mcp/McpServerConfig.h
+    mcp/McpConfigLoader.h
+    mcp/McpConfigLoader.cpp
+    mcp/McpServerRegistry.h
+    mcp/McpServerRegistry.cpp
     mcp/IMcpTransport.h
     mcp/StdioMcpTransport.h
     mcp/StdioMcpTransport.cpp
+    mcp/StreamableHttpMcpTransport.h
+    mcp/StreamableHttpMcpTransport.cpp
+    mcp/McpTransportFactory.h
+    mcp/McpTransportFactory.cpp
     mcp/McpClient.h
     mcp/McpClient.cpp
     mcp/McpSession.h
     mcp/McpSession.cpp
+    mcp/McpRuntime.h
+    mcp/McpRuntime.cpp
     mcp/McpTool.h
     mcp/McpTool.cpp
     mcp/McpToolProvider.h
     mcp/McpToolProvider.cpp
+    mcp/McpResourceProvider.h
+    mcp/McpResourceProvider.cpp
+    mcp/McpPromptProvider.h
+    mcp/McpPromptProvider.cpp
     mcp/McpManager.h
     mcp/McpManager.cpp
 )

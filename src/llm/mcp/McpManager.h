@@ -3,37 +3,49 @@
 #include <QObject>
 #include <QString>
 #include <QList>
-#include <QMap>
 #include <memory>
 #include "McpServerConfig.h"
+#include "McpConfigLoader.h"
+#include "McpServerRegistry.h"
+#include "McpRuntime.h"
 #include "McpSession.h"
 #include "McpToolProvider.h"
 
 namespace llm::mcp {
 
     /**
-     * @brief 全局/项目级 MCP 服务管理器（负责配置解析、会话调度与工具提供者集成）
+     * @brief MCP 外观门面类（协调 McpConfigLoader、McpServerRegistry 与 McpRuntime）
      */
     class McpManager : public QObject {
         Q_OBJECT
     public:
         explicit McpManager(QObject* parent = nullptr);
-        ~McpManager() override;
+        ~McpManager() override = default;
+
+        /**
+         * @brief 获取配置注册表
+         */
+        McpServerRegistry* registry() const;
+
+        /**
+         * @brief 获取运行时管理器
+         */
+        McpRuntime* runtime() const;
 
         /**
          * @brief 解析 .mcp.json 或 mcp.json 配置文件
          */
-        static QList<McpServerConfig> parseConfigFile(const QString& filePath);
+        static QList<domain::mcp::McpServerConfig> parseConfigFile(const QString& filePath);
 
         /**
          * @brief 解析 MCP 配置 JSON 字符串
          */
-        static QList<McpServerConfig> parseConfigContent(const QString& jsonContent);
+        static QList<domain::mcp::McpServerConfig> parseConfigContent(const QString& jsonContent);
 
         /**
          * @brief 注册 MCP 服务配置
          */
-        void registerServer(const McpServerConfig& config);
+        void registerServer(const domain::mcp::McpServerConfig& config);
 
         /**
          * @brief 移除指定 MCP 服务
@@ -51,7 +63,7 @@ namespace llm::mcp {
         void stopServer(const QString& name);
 
         /**
-         * @brief 启动所有已注册且未禁用的 MCP 服务
+         * @brief 启动所有已注册且启用的 MCP 服务
          */
         void startAll();
 
@@ -86,8 +98,8 @@ namespace llm::mcp {
         void serverError(const QString& name, const QString& error);
 
     private:
-        std::shared_ptr<McpToolProvider> m_toolProvider;
-        QMap<QString, std::shared_ptr<McpSession>> m_sessions;
+        std::unique_ptr<McpServerRegistry> m_registry;
+        std::unique_ptr<McpRuntime> m_runtime;
     };
 
 } // namespace llm::mcp

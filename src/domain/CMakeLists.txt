@@ -35,4 +35,11 @@ target_sources(ForgeAICore PRIVATE
     service/IProjectContextService.h
     service/IModelService.h
     service/ISettingsService.h
+    mcp/McpTransportType.h
+    mcp/McpConnectionState.h
+    mcp/McpServerConfig.h
+    mcp/McpResource.h
+    mcp/McpPrompt.h
+    mcp/McpError.h
+    mcp/McpServerTrust.h
 )

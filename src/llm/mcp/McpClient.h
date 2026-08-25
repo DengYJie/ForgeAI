@@ -7,15 +7,18 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <atomic>
+#include <optional>
 #include "IMcpTransport.h"
 #include "domain/agent/ToolDefinition.h"
 #include "domain/agent/ToolExecution.h"
+#include "domain/mcp/McpResource.h"
+#include "domain/mcp/McpPrompt.h"
 #include "application/ports/ITool.h"
 
 namespace llm::mcp {
 
     /**
-     * @brief JSON-RPC 2.0 协议层客户端
+     * @brief JSON-RPC 2.0 协议层客户端（管理请求 ID、握手版本校验、Tool/Resource/Prompt 协议交互）
      */
     class McpClient : public QObject {
         Q_OBJECT
@@ -24,7 +27,7 @@ namespace llm::mcp {
         ~McpClient() override = default;
 
         /**
-         * @brief 发起 MCP 初始化握手
+         * @brief 发起 MCP 初始化握手（包含 protocolVersion 兼容性校验）
          */
         bool initialize(int timeoutMs = 5000);
 
@@ -32,6 +35,30 @@ namespace llm::mcp {
          * @brief 获取 MCP 服务暴露的工具声明列表
          */
         QList<domain::agent::ToolDefinition> listTools(int timeoutMs = 5000);
+
+        /**
+         * @brief 获取 MCP 服务暴露的资源声明列表
+         */
+        QList<domain::mcp::McpResource> listResources(int timeoutMs = 5000);
+
+        /**
+         * @brief 读取指定 URI 的资源内容
+         */
+        std::optional<domain::mcp::McpResourceContent> readResource(const QString& uri, int timeoutMs = 5000);
+
+        /**
+         * @brief 获取 MCP 服务暴露的 Prompt 列表
+         */
+        QList<domain::mcp::McpPrompt> listPrompts(int timeoutMs = 5000);
+
+        /**
+         * @brief 渲染并获取指定 Prompt 消息
+         */
+        QList<domain::mcp::McpPromptMessage> getPrompt(
+            const QString& name,
+            const QJsonObject& arguments = {},
+            int timeoutMs = 5000
+        );
 
         /**
          * @brief 调用指定 MCP 工具并获取执行结果（在主线程事件循环中非阻塞限时与取消）
@@ -59,14 +86,22 @@ namespace llm::mcp {
          */
         bool sendNotification(const QString& method, const QJsonObject& params);
 
+        /**
+         * @brief 获取最后一次握手或请求错误详情
+         */
+        QString lastError() const { return m_lastError; }
+
     private Q_SLOTS:
         void onMessageReceived(const QJsonObject& message);
 
     private:
+        bool isProtocolVersionSupported(const QString& version) const;
+
         IMcpTransport* m_transport = nullptr;
         std::atomic<int> m_nextRequestId{1};
         QHash<int, QJsonObject> m_pendingResponses;
         QHash<int, QEventLoop*> m_activeLoops;
+        QString m_lastError;
     };
 
 } // namespace llm::mcp

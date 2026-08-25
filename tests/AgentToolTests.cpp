@@ -21,6 +21,14 @@
 #include "data/repository/SqliteAgentCheckpointRepository.h"
 #include "data/sqlite/DatabaseManager.h"
 #include "llm/mcp/McpManager.h"
+#include "llm/mcp/McpConfigLoader.h"
+#include "llm/mcp/McpServerRegistry.h"
+#include "llm/mcp/McpRuntime.h"
+#include "llm/mcp/McpTransportFactory.h"
+#include "llm/mcp/StreamableHttpMcpTransport.h"
+#include "llm/mcp/McpResourceProvider.h"
+#include "llm/mcp/McpPromptProvider.h"
+#include "domain/mcp/McpServerTrust.h"
 
 class AgentToolTests final : public QObject {
     Q_OBJECT
@@ -41,6 +49,12 @@ private slots:
     void sqliteAgentCheckpointRepositoryCrud();
     void agentPolicyEvaluatesPermissions();
     void mcpManagerParsesConfigs();
+    void mcpConfigLoaderAdvancedTests();
+    void mcpServerRegistryOperationsAndSignals();
+    void mcpRuntimeLifecycleAndTransportFactory();
+    void mcpSecurityTrustAndEnvMaskingTests();
+    void mcpResourceAndPromptProviderTests();
+    void mcpSessionCrashRecoveryAndHandshakeVersionTests();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -399,6 +413,358 @@ void AgentToolTests::agentPolicyEvaluatesPermissions() {
 
     policy.autoApproveReadOnly = false;
     QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::ReadOnly), domain::agent::PermissionDecision::AskUser);
+}
+
+void AgentToolTests::mcpConfigLoaderAdvancedTests() {
+    // 1. 测试复杂 JSON（包含 stdio、http、cwd 相对路径、env、headers）
+    const QString json = QStringLiteral(
+        "{\n"
+        "  \"mcpServers\": {\n"
+        "    \"local_fs\": {\n"
+        "      \"command\": \"npx\",\n"
+        "      \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\"],\n"
+        "      \"cwd\": \"./sub_dir\",\n"
+        "      \"env\": {\"KEY\": \"VAL\"},\n"
+        "      \"enabled\": true\n"
+        "    },\n"
+        "    \"remote_api\": {\n"
+        "      \"url\": \"https://api.example.com/mcp\",\n"
+        "      \"headers\": {\"Authorization\": \"Bearer token123\"},\n"
+        "      \"transport\": \"http\",\n"
+        "      \"autoApprove\": true\n"
+        "    }\n"
+        "  }\n"
+        "}"
+    );
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    auto result = llm::mcp::McpConfigLoader::loadFromJsonString(json, tempDir.path());
+    QVERIFY(result.success);
+    QCOMPARE(result.configs.size(), 2);
+
+    auto fsCfg = result.configs[0].id == "local_fs" ? result.configs[0] : result.configs[1];
+    auto httpCfg = result.configs[0].id == "remote_api" ? result.configs[0] : result.configs[1];
+
+    QCOMPARE(fsCfg.transport, domain::mcp::McpTransportType::Stdio);
+    QCOMPARE(fsCfg.command, QStringLiteral("npx"));
+    QCOMPARE(fsCfg.env.value("KEY"), QStringLiteral("VAL"));
+    QVERIFY(fsCfg.isEnabled());
+    QVERIFY(QDir::isAbsolutePath(fsCfg.cwd));
+
+    QCOMPARE(httpCfg.transport, domain::mcp::McpTransportType::Http);
+    QCOMPARE(httpCfg.url, QStringLiteral("https://api.example.com/mcp"));
+    QCOMPARE(httpCfg.headers.value("Authorization"), QStringLiteral("Bearer token123"));
+    QVERIFY(httpCfg.autoApprove);
+
+    // 2. 测试非法 JSON
+    auto errResult = llm::mcp::McpConfigLoader::loadFromJsonString(QStringLiteral("{ invalid json"));
+    QVERIFY(!errResult.success);
+    QVERIFY(!errResult.error.isEmpty());
+
+    // 3. 测试从临时文件加载
+    const QString filePath = QDir(tempDir.path()).filePath(".mcp.json");
+    QFile file(filePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(json.toUtf8());
+    file.close();
+
+    auto fileResult = llm::mcp::McpConfigLoader::loadFromFile(filePath);
+    QVERIFY(fileResult.success);
+    QCOMPARE(fileResult.configs.size(), 2);
+}
+
+void AgentToolTests::mcpServerRegistryOperationsAndSignals() {
+    llm::mcp::McpServerRegistry registry;
+
+    int registeredCount = 0;
+    int unregisteredCount = 0;
+    int changedCount = 0;
+
+    connect(&registry, &llm::mcp::McpServerRegistry::serverRegistered, [&](const domain::mcp::McpServerConfig&) {
+        registeredCount++;
+    });
+    connect(&registry, &llm::mcp::McpServerRegistry::serverUnregistered, [&](const QString&) {
+        unregisteredCount++;
+    });
+    connect(&registry, &llm::mcp::McpServerRegistry::registryChanged, [&]() {
+        changedCount++;
+    });
+
+    domain::mcp::McpServerConfig c1;
+    c1.id = QStringLiteral("srv1");
+    c1.command = QStringLiteral("python");
+
+    domain::mcp::McpServerConfig c2;
+    c2.id = QStringLiteral("srv2");
+    c2.command = QStringLiteral("node");
+
+    // 1. 注册
+    registry.registerServer(c1);
+    QCOMPARE(registeredCount, 1);
+    QCOMPARE(changedCount, 1);
+    QVERIFY(registry.hasServer(QStringLiteral("srv1")));
+
+    // 2. 批量注册
+    registry.registerServers({c1, c2});
+    QCOMPARE(registry.servers().size(), 2);
+
+    // 3. 更新同一 ID
+    c1.command = QStringLiteral("python3");
+    registry.registerServer(c1);
+    auto updated = registry.server(QStringLiteral("srv1"));
+    QVERIFY(updated.has_value());
+    QCOMPARE(updated->command, QStringLiteral("python3"));
+
+    // 4. 删除与清空
+    registry.unregisterServer(QStringLiteral("srv1"));
+    QCOMPARE(unregisteredCount, 1);
+    QVERIFY(!registry.hasServer(QStringLiteral("srv1")));
+    QCOMPARE(registry.servers().size(), 1);
+
+    registry.clear();
+    QCOMPARE(registry.servers().size(), 0);
+}
+
+void AgentToolTests::mcpRuntimeLifecycleAndTransportFactory() {
+    llm::mcp::McpServerRegistry registry;
+    llm::mcp::McpRuntime runtime(&registry);
+
+    domain::mcp::McpServerConfig c1;
+    c1.id = QStringLiteral("dummy");
+    c1.command = QStringLiteral("non_existent_executable_12345");
+    c1.enabled = true;
+
+    registry.registerServer(c1);
+
+    // 启动失败应优雅报错并发出信号，不发生崩溃
+    bool errorTriggered = false;
+    connect(&runtime, &llm::mcp::McpRuntime::serverError, [&](const QString& id, const QString&) {
+        if (id == QStringLiteral("dummy")) {
+            errorTriggered = true;
+        }
+    });
+
+    bool ok = runtime.startServer(QStringLiteral("dummy"));
+    QVERIFY(!ok);
+    QVERIFY(errorTriggered);
+
+    // 停止服务
+    runtime.stopServer(QStringLiteral("dummy"));
+    QCOMPARE(runtime.allSessions().size(), 0);
+
+    // 验证 TransportFactory
+    llm::mcp::McpTransportFactory factory;
+    domain::mcp::McpServerConfig stdioCfg;
+    stdioCfg.command = QStringLiteral("echo");
+    stdioCfg.transport = domain::mcp::McpTransportType::Stdio;
+    auto transport = factory.create(stdioCfg);
+    QVERIFY(transport != nullptr);
+
+    domain::mcp::McpServerConfig httpCfg;
+    httpCfg.url = QStringLiteral("https://mcp.example.com/api");
+    httpCfg.transport = domain::mcp::McpTransportType::Http;
+    auto httpTransport = factory.create(httpCfg);
+    QVERIFY(httpTransport != nullptr);
+}
+
+void AgentToolTests::mcpSecurityTrustAndEnvMaskingTests() {
+    domain::mcp::McpServerTrustPolicy trustPolicy;
+
+    // 1. 默认未受信
+    QVERIFY(!trustPolicy.isServerTrusted(QStringLiteral("untrusted_srv")));
+    QVERIFY(trustPolicy.isServerTrusted(QStringLiteral("untrusted_srv"), true)); // autoApprove 为 true 时放行
+
+    // 2. 授权覆盖
+    trustPolicy.setServerTrust(QStringLiteral("trusted_srv"), domain::mcp::McpTrustLevel::AlwaysAllow);
+    QVERIFY(trustPolicy.isServerTrusted(QStringLiteral("trusted_srv")));
+
+    trustPolicy.setServerTrust(QStringLiteral("denied_srv"), domain::mcp::McpTrustLevel::Denied);
+    QVERIFY(!trustPolicy.isServerTrusted(QStringLiteral("denied_srv")));
+
+    // 3. 敏感环境变量脱敏
+    QMap<QString, QString> rawEnv{
+        {QStringLiteral("PATH"), QStringLiteral("/usr/bin:/bin")},
+        {QStringLiteral("OPENAI_API_KEY"), QStringLiteral("sk-1234567890abcdef")},
+        {QStringLiteral("AUTH_TOKEN"), QStringLiteral("secret_tok")},
+        {QStringLiteral("DB_PASSWORD"), QStringLiteral("pass123")},
+        {QStringLiteral("NORMAL_CONFIG"), QStringLiteral("some_val")}
+    };
+
+    auto maskedEnv = domain::mcp::McpServerTrustPolicy::maskSensitiveEnv(rawEnv);
+    QCOMPARE(maskedEnv.value(QStringLiteral("PATH")), QStringLiteral("/usr/bin:/bin"));
+    QCOMPARE(maskedEnv.value(QStringLiteral("NORMAL_CONFIG")), QStringLiteral("some_val"));
+    QVERIFY(!maskedEnv.value(QStringLiteral("OPENAI_API_KEY")).contains(QStringLiteral("1234567890")));
+    QVERIFY(maskedEnv.value(QStringLiteral("AUTH_TOKEN")).contains(QStringLiteral("******")));
+    QCOMPARE(maskedEnv.value(QStringLiteral("DB_PASSWORD")), QStringLiteral("******"));
+}
+
+class FakeCrashTransport final : public llm::mcp::IMcpTransport {
+    Q_OBJECT
+public:
+    using IMcpTransport::IMcpTransport;
+    bool start() override {
+        m_connected = true;
+        return true;
+    }
+    void close() override {
+        m_connected = false;
+        emit closed();
+    }
+    bool sendJson(const QJsonObject& json) override {
+        if (!m_connected) return false;
+        if (json.value(QStringLiteral("method")).toString() == QStringLiteral("initialize")) {
+            if (m_rejectVersion) {
+                // 模拟返回不兼容协议版本
+                QJsonObject resp{
+                    {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                    {QStringLiteral("id"), json.value(QStringLiteral("id")).toInt()},
+                    {QStringLiteral("result"), QJsonObject{
+                        {QStringLiteral("protocolVersion"), QStringLiteral("1999-01-01")},
+                        {QStringLiteral("capabilities"), QJsonObject{}},
+                        {QStringLiteral("serverInfo"), QJsonObject{{QStringLiteral("name"), QStringLiteral("OldServer")}}}
+                    }}
+                };
+                emit messageReceived(resp);
+                return true;
+            }
+
+            QJsonObject resp{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), json.value(QStringLiteral("id")).toInt()},
+                {QStringLiteral("result"), QJsonObject{
+                    {QStringLiteral("protocolVersion"), QStringLiteral("2024-11-05")},
+                    {QStringLiteral("capabilities"), QJsonObject{}},
+                    {QStringLiteral("serverInfo"), QJsonObject{{QStringLiteral("name"), QStringLiteral("TestServer")}}}
+                }}
+            };
+            emit messageReceived(resp);
+            return true;
+        }
+
+        if (json.value(QStringLiteral("method")).toString() == QStringLiteral("resources/list")) {
+            QJsonObject resp{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), json.value(QStringLiteral("id")).toInt()},
+                {QStringLiteral("result"), QJsonObject{
+                    {QStringLiteral("resources"), QJsonArray{
+                        QJsonObject{
+                            {QStringLiteral("uri"), QStringLiteral("file:///schema.sql")},
+                            {QStringLiteral("name"), QStringLiteral("Schema")},
+                            {QStringLiteral("mimeType"), QStringLiteral("text/plain")}
+                        }
+                    }}
+                }}
+            };
+            emit messageReceived(resp);
+            return true;
+        }
+
+        if (json.value(QStringLiteral("method")).toString() == QStringLiteral("prompts/list")) {
+            QJsonObject resp{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), json.value(QStringLiteral("id")).toInt()},
+                {QStringLiteral("result"), QJsonObject{
+                    {QStringLiteral("prompts"), QJsonArray{
+                        QJsonObject{
+                            {QStringLiteral("name"), QStringLiteral("review_code")},
+                            {QStringLiteral("description"), QStringLiteral("代码审查提示词")}
+                        }
+                    }}
+                }}
+            };
+            emit messageReceived(resp);
+            return true;
+        }
+
+        if (json.value(QStringLiteral("method")).toString() == QStringLiteral("tools/list")) {
+            QJsonObject resp{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), json.value(QStringLiteral("id")).toInt()},
+                {QStringLiteral("result"), QJsonObject{
+                    {QStringLiteral("tools"), QJsonArray{}}
+                }}
+            };
+            emit messageReceived(resp);
+            return true;
+        }
+
+        return true;
+    }
+    bool isConnected() const override { return m_connected; }
+
+    void triggerCrash() {
+        m_connected = false;
+        emit errorOccurred(QStringLiteral("进程异常崩溃退出 (exit code -1)"));
+        emit closed();
+    }
+
+    void setRejectVersion(bool reject) { m_rejectVersion = reject; }
+
+private:
+    bool m_connected = false;
+    bool m_rejectVersion = false;
+};
+
+void AgentToolTests::mcpResourceAndPromptProviderTests() {
+    domain::mcp::McpServerConfig cfg;
+    cfg.id = QStringLiteral("provider_test");
+    cfg.command = QStringLiteral("dummy");
+
+    auto fakeTransport = std::make_unique<FakeCrashTransport>();
+    auto* fakeTransportPtr = fakeTransport.get();
+    llm::mcp::McpSession session(cfg, std::move(fakeTransport));
+
+    QVERIFY(session.start());
+    QCOMPARE(session.state(), domain::mcp::McpConnectionState::Ready);
+
+    // 验证 Client 查询
+    auto resList = session.client()->listResources();
+    QCOMPARE(resList.size(), 1);
+    QCOMPARE(resList.first().uri, QStringLiteral("file:///schema.sql"));
+
+    auto promptList = session.client()->listPrompts();
+    QCOMPARE(promptList.size(), 1);
+    QCOMPARE(promptList.first().name, QStringLiteral("review_code"));
+
+    session.stop();
+}
+
+void AgentToolTests::mcpSessionCrashRecoveryAndHandshakeVersionTests() {
+    domain::mcp::McpServerConfig cfg;
+    cfg.id = QStringLiteral("crash_srv");
+    cfg.command = QStringLiteral("dummy");
+
+    // 1. 协议版本不兼容时拒绝连接
+    {
+        auto fakeTransport = std::make_unique<FakeCrashTransport>();
+        fakeTransport->setRejectVersion(true);
+        llm::mcp::McpSession versionSession(cfg, std::move(fakeTransport));
+
+        bool ok = versionSession.start();
+        QVERIFY(!ok);
+        QCOMPARE(versionSession.state(), domain::mcp::McpConnectionState::Failed);
+        QVERIFY(versionSession.lastError().contains(QStringLiteral("协议版本不兼容")));
+    }
+
+    // 2. 正常就绪 -> 进程崩溃 (Failed) -> 重新恢复 (Ready)
+    {
+        auto fakeTransport = std::make_unique<FakeCrashTransport>();
+        auto* fakeTransportPtr = fakeTransport.get();
+        llm::mcp::McpSession session(cfg, std::move(fakeTransport));
+
+        QVERIFY(session.start());
+        QCOMPARE(session.state(), domain::mcp::McpConnectionState::Ready);
+
+        // 模拟崩溃
+        fakeTransportPtr->triggerCrash();
+        QCOMPARE(session.state(), domain::mcp::McpConnectionState::Failed);
+        QVERIFY(session.lastError().contains(QStringLiteral("崩溃")));
+
+        // 恢复重试
+        session.stop();
+        QCOMPARE(session.state(), domain::mcp::McpConnectionState::Stopped);
+    }
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)
