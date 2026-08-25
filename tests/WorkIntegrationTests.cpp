@@ -105,6 +105,8 @@ private slots:
     void testWorkViewModelMcpProjectSwitchUnload();
     void testAgentRuntimeConcurrentMcpToolCallsSafety();
     void testAgentRuntimeToolExecutionTimeoutProtection();
+    void testAgentRuntimeSingleSlowToolTimeoutProtection();
+    void testAgentRuntimeUncooperativeToolRuntimeDestructionSafety();
 
 private:
     QTemporaryDir m_tempDir;
@@ -1005,6 +1007,121 @@ void WorkIntegrationTests::testAgentRuntimeToolExecutionTimeoutProtection() {
 
     // 关键断言：总耗时紧贴 100ms 超时限制，证明未被 400ms 后台阻塞
     QVERIFY2(totalElapsedMs < 300, QStringLiteral("工具超时应立即返回，实际耗时 %1 ms").arg(totalElapsedMs).toUtf8().constData());
+}
+
+void WorkIntegrationTests::testAgentRuntimeSingleSlowToolTimeoutProtection() {
+    MockChatGateway mockGateway;
+
+    // 模型下发单个慢速工具调用
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow_single"), QStringLiteral("slow_tool")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow_single")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    auto slowTool = std::make_shared<SlowTestTool>();
+    auto provider = std::make_shared<SimpleMockProvider>(QList<std::shared_ptr<application::ports::ITool>>{slowTool});
+
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(provider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_single_slow_tool");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.timeoutMs = 100; // 设定超时 100ms
+    context.policy.allowParallelToolExecution = true; // 这是默认开启的
+
+    QMap<QString, domain::agent::ToolResult> resultsMap;
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        resultsMap.insert(res.toolCallId, res);
+    });
+
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&loop]() {
+        loop.quit();
+    });
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("单次超时工具"));
+    loop.exec();
+
+    const qint64 totalElapsedMs = elapsed.elapsed();
+
+    QCOMPARE(resultsMap.size(), 1);
+    QVERIFY(resultsMap.value(QStringLiteral("call_slow_single")).isError);
+    QVERIFY(resultsMap.value(QStringLiteral("call_slow_single")).content.contains(QStringLiteral("超时")));
+
+    // 关键断言：即使只有 1 个工具，也应该受到超时与异步控制的保护
+    QVERIFY2(totalElapsedMs < 300, QStringLiteral("单工具超时也应立即返回，实际耗时 %1 ms").arg(totalElapsedMs).toUtf8().constData());
+}
+
+class UncooperativeSlowTool final : public application::ports::ITool {
+public:
+    domain::agent::ToolDefinition definition() const override {
+        domain::agent::ToolDefinition def;
+        def.name = QStringLiteral("uncooperative_tool");
+        return def;
+    }
+    bool isThreadSafe() const override { return true; }
+    domain::agent::ToolResult execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
+        Q_UNUSED(context);
+        // 完全不理会取消令牌，强行阻塞（模拟不合作或陷入死循环的工具）
+        QThread::msleep(800);
+        return domain::agent::ToolResult{call.id, QStringLiteral("不合作执行完毕"), false};
+    }
+};
+
+void WorkIntegrationTests::testAgentRuntimeUncooperativeToolRuntimeDestructionSafety() {
+    MockChatGateway mockGateway;
+
+    // 下发不合作工具
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_uncoop"), QStringLiteral("uncooperative_tool")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_uncoop")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    auto uncoopTool = std::make_shared<UncooperativeSlowTool>();
+    auto provider = std::make_shared<SimpleMockProvider>(QList<std::shared_ptr<application::ports::ITool>>{uncoopTool});
+
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(provider);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_uncoop_test");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.timeoutMs = 100;
+    context.policy.allowParallelToolExecution = true;
+
+    // 使用堆分配，以便于随时 delete
+    auto* runtime = new agent::runtime::AgentRuntime(&mockGateway, nullptr, &toolRegistry, nullptr);
+
+    QEventLoop loop;
+    connect(runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult&) {
+        // 一旦超时结果就绪，立刻销毁 runtime！
+        runtime->deleteLater();
+        loop.quit();
+    });
+
+    runtime->startRun(context, QStringLiteral("执行不合作工具"));
+    
+    QTimer::singleShot(2000, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    // 此时 runtime 已被销毁，主线程继续，但后台那个不合作线程仍在 msleep(800)
+    // 我们等它结束，验证是否发生 UAF 崩溃
+    QTest::qWait(1000); // 强行让主线程在事件循环里等 1 秒，如果后台悬挂 this->m_toolRegistry，此时就会 SegmentFault
+
+    // 如果运行到这里没有崩溃，说明后台线程捕获的是 std::shared_ptr<ITool>，与 Runtime 解耦了，安全过关
+    QVERIFY(true);
 }
 
 QTEST_GUILESS_MAIN(WorkIntegrationTests)

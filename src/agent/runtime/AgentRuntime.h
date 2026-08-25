@@ -67,6 +67,8 @@ namespace agent::runtime {
         QList<domain::agent::ToolResult> m_pendingToolResults;
         QMap<QString, std::pair<domain::agent::ToolCall, domain::agent::ToolPermission>> m_pendingPermissions;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
+
+        application::ports::CancellationToken m_runCancellationToken;
     };
 
 } // namespace agent::runtime

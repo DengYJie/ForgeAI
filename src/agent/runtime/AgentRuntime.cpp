@@ -27,6 +27,7 @@ namespace agent::runtime {
     }
 
     AgentRuntime::~AgentRuntime() {
+        m_runCancellationToken.cancel();
         if (m_currentOp) {
             m_currentOp->cancel();
             cleanupCurrentOp();
@@ -98,6 +99,7 @@ namespace agent::runtime {
         if (trimmed.isEmpty() || context.sessionId.isEmpty()) return;
 
         cancelRun();
+        m_runCancellationToken = application::ports::CancellationToken();
 
         m_context = context;
         m_state.runId = context.runId.isNull() ? QUuid::createUuid() : context.runId;
@@ -292,6 +294,7 @@ namespace agent::runtime {
     }
 
     void AgentRuntime::cancelRun() {
+        m_runCancellationToken.cancel();
         if (m_currentOp) {
             m_currentOp->cancel();
             cleanupCurrentOp();
@@ -465,8 +468,8 @@ namespace agent::runtime {
             }
         }
 
-        // 2. 并发执行线程安全的工具（如纯文件 IO/计算）
-        if (parallelCalls.size() > 1) {
+        // 2. 统一受控并发执行所有线程安全的工具（涵盖 size >= 1 的所有情况）
+        if (!parallelCalls.isEmpty()) {
             const int timeoutMs = execContext.timeoutMs;
 
             struct ParallelTask {
@@ -488,17 +491,20 @@ namespace agent::runtime {
                 ParallelTask task;
                 task.call = call;
                 application::ports::ToolExecutionContext taskContext = execContext;
-                taskContext.cancellationToken = task.token;
+                taskContext.cancellationToken = task.token; // 为此任务分配独立的取消令牌
 
                 auto doneFlag = task.done;
                 auto resultHolder = task.result;
 
-                std::thread([this, call, taskContext, doneFlag, resultHolder, completedCount, cv, cvMutex]() {
+                // 在主线程解析工具，剥离 this，防止超时后 AgentRuntime 析构导致的 UAF
+                auto tool = m_toolRegistry ? m_toolRegistry->findTool(call.name) : nullptr;
+
+                std::thread([tool, call, taskContext, doneFlag, resultHolder, completedCount, cv, cvMutex]() {
                     domain::agent::ToolResult res;
-                    if (m_toolRegistry) {
-                        res = m_toolRegistry->execute(call, taskContext);
+                    if (tool) {
+                        res = tool->execute(call, taskContext);
                     } else {
-                        res = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                        res = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪或未知工具"), true};
                     }
                     *resultHolder = std::move(res);
                     doneFlag->store(true, std::memory_order_release);
@@ -539,8 +545,6 @@ namespace agent::runtime {
                     emit toolResultReady(m_context.sessionId, timeoutResult);
                 }
             }
-        } else if (parallelCalls.size() == 1) {
-            serialCalls.append(parallelCalls.first());
         }
 
         // 3. 在主线程顺序执行需保证 QObject 亲和性的工具（如 MCP / UI 交互）
