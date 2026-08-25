@@ -3,7 +3,9 @@
 #include <QDateTime>
 #include <QUuid>
 #include <QTimer>
-#include <future>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
 #include "domain/conversation/MessageBlock.h"
 
 namespace agent::runtime {
@@ -466,30 +468,75 @@ namespace agent::runtime {
         // 2. 并发执行线程安全的工具（如纯文件 IO/计算）
         if (parallelCalls.size() > 1) {
             const int timeoutMs = execContext.timeoutMs;
-            std::vector<std::pair<domain::agent::ToolCall, std::future<domain::agent::ToolResult>>> futures;
+
+            struct ParallelTask {
+                domain::agent::ToolCall call;
+                application::ports::CancellationToken token;
+                std::shared_ptr<std::atomic<bool>> done = std::make_shared<std::atomic<bool>>(false);
+                std::shared_ptr<domain::agent::ToolResult> result = std::make_shared<domain::agent::ToolResult>();
+            };
+
+            std::vector<ParallelTask> tasks;
+            tasks.reserve(parallelCalls.size());
+
+            auto cvMutex = std::make_shared<std::mutex>();
+            auto cv = std::make_shared<std::condition_variable>();
+            auto completedCount = std::make_shared<std::atomic<int>>(0);
+            const int totalTasks = static_cast<int>(parallelCalls.size());
+
             for (const auto& call : parallelCalls) {
-                futures.emplace_back(call, std::async(std::launch::async, [this, call, execContext]() {
+                ParallelTask task;
+                task.call = call;
+                application::ports::ToolExecutionContext taskContext = execContext;
+                taskContext.cancellationToken = task.token;
+
+                auto doneFlag = task.done;
+                auto resultHolder = task.result;
+
+                std::thread([this, call, taskContext, doneFlag, resultHolder, completedCount, cv, cvMutex]() {
+                    domain::agent::ToolResult res;
                     if (m_toolRegistry) {
-                        return m_toolRegistry->execute(call, execContext);
+                        res = m_toolRegistry->execute(call, taskContext);
+                    } else {
+                        res = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
                     }
-                    return domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
-                }));
+                    *resultHolder = std::move(res);
+                    doneFlag->store(true, std::memory_order_release);
+                    completedCount->fetch_add(1, std::memory_order_relaxed);
+                    {
+                        std::lock_guard<std::mutex> lock(*cvMutex);
+                    }
+                    cv->notify_one();
+                }).detach();
+
+                tasks.push_back(std::move(task));
             }
-            for (auto& [call, fut] : futures) {
-                if (fut.wait_for(std::chrono::milliseconds(timeoutMs)) == std::future_status::ready) {
-                    auto result = fut.get();
-                    m_pendingToolResults.append(result);
+
+            // 限时等待任务完成（超时后立刻唤醒，不阻塞在工作线程析构上）
+            {
+                std::unique_lock<std::mutex> lock(*cvMutex);
+                cv->wait_for(lock, std::chrono::milliseconds(timeoutMs), [&]() {
+                    return completedCount->load(std::memory_order_relaxed) >= totalTasks;
+                });
+            }
+
+            // 收集结果并对未完成的任务发出取消信号
+            for (auto& task : tasks) {
+                if (task.done->load(std::memory_order_acquire)) {
+                    m_pendingToolResults.append(*task.result);
                     m_state.results = m_pendingToolResults;
-                    emit toolResultReady(m_context.sessionId, result);
+                    emit toolResultReady(m_context.sessionId, *task.result);
                 } else {
-                    domain::agent::ToolResult result{
-                        call.id,
+                    // 超时：发出合作式取消信号，立即生成超时结果并不阻塞流转
+                    task.token.cancel();
+                    domain::agent::ToolResult timeoutResult{
+                        task.call.id,
                         QStringLiteral("工具执行超时（%1 ms）").arg(timeoutMs),
                         true
                     };
-                    m_pendingToolResults.append(result);
+                    m_pendingToolResults.append(timeoutResult);
                     m_state.results = m_pendingToolResults;
-                    emit toolResultReady(m_context.sessionId, result);
+                    emit toolResultReady(m_context.sessionId, timeoutResult);
                 }
             }
         } else if (parallelCalls.size() == 1) {
