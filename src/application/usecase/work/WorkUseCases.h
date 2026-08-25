@@ -2,8 +2,9 @@
 
 #include "application/usecase/agent/RunAgentUseCase.h"
 #include "application/usecase/agent/CancelAgentRunUseCase.h"
+#include "application/usecase/settings/GetModelsUseCase.h"
 
-namespace domain::service { class IConversationService; }
+namespace domain::service { class IConversationService; class IModelService; }
 namespace domain::repository { class IConversationRepository; class IProjectRepository; }
 
 namespace application::usecase::work {
@@ -18,6 +19,8 @@ namespace application::usecase::work {
         domain::service::IConversationService *conversationService = nullptr;
         domain::repository::IConversationRepository *conversationRepository = nullptr;
         domain::repository::IProjectRepository *projectRepository = nullptr;
+        domain::service::IModelService *modelService = nullptr;
+        application::usecase::settings::GetModelsUseCase *getModels = nullptr;
         SwitchProjectUseCase *switchProject = nullptr;
     };
 } // namespace application::usecase::work

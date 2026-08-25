@@ -9,6 +9,7 @@
 #include "domain/agent/AgentRunState.h"
 #include "domain/agent/ToolPermission.h"
 #include "ui/screen/chat/ChatSessionListModel.h"
+#include "ui/screen/chat/ChatViewModel.h"
 #include "domain/project/Project.h"
 
 namespace domain::service { class IProjectContextService; }
@@ -61,6 +62,15 @@ namespace ui::screen::work {
         QString agentInstructions;
         QString mcpConfigContent;
 
+        // 模型与控制
+        QString currentModelName = QStringLiteral("选择模型");
+        QString currentModelProviderId;
+        QString currentModelId;
+        QList<ui::screen::chat::ChatModelOption> availableModels;
+        bool useWebSearch = false;
+        bool useDeepThinking = false;
+        QString reasoningEffort;
+
         bool operator==(const WorkState &other) const = default;
     };
 
@@ -105,6 +115,12 @@ namespace ui::screen::work {
         void loadSession(const QString& sessionId);
         void setSessionPinned(const QString& sessionId, bool pinned);
         void setSessionArchived(const QString& sessionId, bool archived);
+
+        void setModel(const QString &providerId, const QString &modelId);
+        void setReasoningEffort(const QString &effort);
+        void setWebSearchEnabled(bool enabled);
+        void setDeepThinkingEnabled(bool enabled);
+        void refreshAvailableModels(WorkState &state);
 
     Q_SIGNALS:
         void stateChanged(const ui::screen::work::WorkState &state);

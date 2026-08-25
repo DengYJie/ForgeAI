@@ -2,6 +2,7 @@
 
 #include "domain/service/IProjectContextService.h"
 #include "domain/service/IConversationService.h"
+#include "domain/service/IModelService.h"
 #include "domain/repository/IConversationRepository.h"
 #include "domain/repository/IProjectRepository.h"
 #include "application/usecase/work/SwitchProjectUseCase.h"
@@ -11,10 +12,36 @@
 #include <QFileInfo>
 #include <QUuid>
 #include <QTimer>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QFile>
 #include <algorithm>
 
 namespace ui::screen::work {
 namespace {
+QStringList canonicalReasoningEfforts(const QString& canonicalId) {
+    static QHash<QString, QStringList> cache;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        QFile file(QStringLiteral(":/config/models.json"));
+        if (file.open(QIODevice::ReadOnly)) {
+            const QJsonObject models = QJsonDocument::fromJson(file.readAll()).object();
+            for (auto it = models.begin(); it != models.end(); ++it) {
+                QStringList values;
+                for (const auto& option : it.value().toObject().value(QStringLiteral("reasoning_options")).toArray()) {
+                    const QJsonObject object = option.toObject();
+                    if (object.value(QStringLiteral("type")).toString() != QStringLiteral("effort")) continue;
+                    for (const auto& value : object.value(QStringLiteral("values")).toArray()) values.append(value.toString());
+                }
+                cache.insert(it.key(), values);
+            }
+        }
+    }
+    return cache.value(canonicalId);
+}
+
 domain::conversation::Message& ensureStreamingMessage(WorkState& state) {
     if (!state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant
         && state.messages.last().status == domain::MessageStatus::Sending) {
@@ -36,7 +63,6 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
       m_conversationService(useCases.conversationService),
       m_conversationRepository(useCases.conversationRepository), m_projectRepository(useCases.projectRepository) {
     setupUseCaseConnections();
-    setProjectRoot(QDir::currentPath());
     if (m_projectRepository) {
         auto projects = m_projectRepository->getAllProjects();
         QList<ui::screen::chat::ChatSessionItemData> sessions;
@@ -45,12 +71,23 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
             sessions.append({conversation.id.toString(), conversation.title, conversation.isPinned, conversation.isArchived,
                              conversation.updatedAt.toMSecsSinceEpoch(), conversation.projectId});
         }
-        updateState([projects, sessions](WorkState& state) { 
+        updateState([this, projects, sessions](WorkState& state) { 
             state.projects = projects; 
             state.sessions = sessions; 
             for (const auto& p : projects) {
                 if (p.isPinned) state.pinnedProjects.insert(p.id);
             }
+            refreshAvailableModels(state);
+        });
+        if (!projects.isEmpty()) {
+            selectProject(projects.first().id);
+        } else {
+            setProjectRoot(QDir::currentPath());
+        }
+    } else {
+        setProjectRoot(QDir::currentPath());
+        updateState([this](WorkState& state) {
+            refreshAvailableModels(state);
         });
     }
 }
@@ -58,6 +95,12 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
 WorkViewModel::~WorkViewModel() = default;
 
 void WorkViewModel::setupUseCaseConnections() {
+    if (m_useCases.getModels) {
+        connect(m_useCases.getModels, &application::usecase::settings::GetModelsUseCase::modelsChanged, this, [this] {
+            updateState([this](WorkState& state) { refreshAvailableModels(state); });
+        });
+    }
+
     auto* agent = m_useCases.runAgent;
     if (agent) {
         connect(agent, &application::usecase::agent::RunAgentUseCase::userMessageCreated, this,
@@ -221,7 +264,12 @@ void WorkViewModel::startTask(const QString& task) {
             m_agentSessionId,
             trimmed,
             m_currentProjectId,
-            m_state.projectRoot
+            m_state.projectRoot,
+            m_state.currentModelProviderId,
+            m_state.currentModelId,
+            m_state.useWebSearch,
+            m_state.useDeepThinking,
+            m_state.reasoningEffort
         );
     }
 }
@@ -473,6 +521,79 @@ void WorkViewModel::setSessionArchived(const QString& sessionId, bool archived) 
             }
         }
     });
+}
+
+void WorkViewModel::setWebSearchEnabled(bool enabled) {
+    updateState([enabled](WorkState& state) { state.useWebSearch = enabled; });
+}
+
+void WorkViewModel::setDeepThinkingEnabled(bool enabled) {
+    updateState([enabled](WorkState& state) { state.useDeepThinking = enabled; });
+}
+
+void WorkViewModel::setReasoningEffort(const QString& effort) {
+    updateState([effort](WorkState& state) {
+        state.reasoningEffort = effort;
+        state.useDeepThinking = !effort.isEmpty() && effort != QStringLiteral("none");
+    });
+}
+
+void WorkViewModel::setModel(const QString &providerId, const QString &modelId) {
+    updateState([providerId, modelId](WorkState &s) {
+        const auto it = std::find_if(s.availableModels.cbegin(), s.availableModels.cend(), [&](const ui::screen::chat::ChatModelOption& option) {
+            return option.providerId == providerId && option.modelId == modelId;
+        });
+        if (it == s.availableModels.cend()) return;
+        s.currentModelProviderId = it->providerId;
+        s.currentModelId = it->modelId;
+        s.currentModelName = it->displayName;
+        s.reasoningEffort = it->reasoningEfforts.contains(QStringLiteral("medium"))
+            ? QStringLiteral("medium") : (it->reasoningEfforts.isEmpty() ? QString() : it->reasoningEfforts.first());
+    });
+}
+
+void WorkViewModel::refreshAvailableModels(WorkState &s) {
+    s.availableModels.clear();
+    if (!m_useCases.getModels) return;
+    const auto models = m_useCases.getModels->getEnabledResolvedModels();
+    for (const auto& model : models) {
+        const auto capabilities = model.effectiveCapabilities();
+        QStringList efforts;
+        const QJsonArray options = QJsonDocument::fromJson(model.binding.reasoningOptionsJson.toUtf8()).array();
+        for (const auto& option : options) {
+            const QJsonObject object = option.toObject();
+            if (object.value(QStringLiteral("type")).toString() != QStringLiteral("effort")) continue;
+            for (const auto& value : object.value(QStringLiteral("values")).toArray()) efforts.append(value.toString());
+        }
+        if (efforts.isEmpty() && model.binding.canonicalModelId.has_value())
+            efforts = canonicalReasoningEfforts(*model.binding.canonicalModelId);
+        s.availableModels.append({
+            model.provider.id, model.requestModelId(), model.displayName(), model.provider.name,
+            capabilities.testFlag(domain::model::ModelCapability::Vision)
+                || capabilities.testFlag(domain::model::ModelCapability::Pdf)
+                || capabilities.testFlag(domain::model::ModelCapability::Audio)
+                || capabilities.testFlag(domain::model::ModelCapability::Video),
+            model.provider.type == domain::model::ProviderType::OpenAIResponses,
+            capabilities.testFlag(domain::model::ModelCapability::Thinking), efforts
+        });
+    }
+    if (s.availableModels.isEmpty()) {
+        s.currentModelProviderId.clear();
+        s.currentModelId.clear();
+        s.currentModelName = QStringLiteral("选择模型");
+        return;
+    }
+    const auto current = std::find_if(s.availableModels.cbegin(), s.availableModels.cend(), [&](const ui::screen::chat::ChatModelOption& option) {
+        return option.providerId == s.currentModelProviderId && option.modelId == s.currentModelId;
+    });
+    if (current == s.availableModels.cend()) {
+        const auto& fallback = s.availableModels.first();
+        s.currentModelProviderId = fallback.providerId;
+        s.currentModelId = fallback.modelId;
+        s.currentModelName = fallback.displayName;
+        s.reasoningEffort = fallback.reasoningEfforts.contains(QStringLiteral("medium"))
+            ? QStringLiteral("medium") : (fallback.reasoningEfforts.isEmpty() ? QString() : fallback.reasoningEfforts.first());
+    }
 }
 
 void WorkViewModel::emitStateChanged() { Q_EMIT stateChanged(m_state); }

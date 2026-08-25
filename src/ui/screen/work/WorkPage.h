@@ -42,6 +42,17 @@ namespace ui::screen::work {
 
         void render(const WorkState &state);
         void showProjectContextMenu(const QUuid &projectId, const QPoint &globalPos);
+        void updateModelChoices(const WorkState& state);
+        void showModelPicker();
+        void showFullModelPicker(const QPoint& globalOrigin = {});
+        void rebuildModelPicker(const QString& query);
+
+        struct ModelChoice {
+            QString providerId;
+            QString modelId;
+            QString displayName;
+            QString providerName;
+        };
 
         WorkViewModel *m_viewModel = nullptr;
         QVBoxLayout *m_rootLayout = nullptr;
@@ -56,5 +67,12 @@ namespace ui::screen::work {
         QStyledItemDelegate *m_sessionTreeDelegate = nullptr;
         QWidget *m_workAreaWidget = nullptr;
         ui::widget::chat::ConversationPane *m_pane = nullptr;
+
+        QVector<ModelChoice> m_modelChoices;
+        QString m_currentModelProviderId;
+        QString m_currentModelId;
+        QWidget* m_modelPickerPopup = nullptr;
+        QWidget* m_modelPickerRows = nullptr;
+        QPoint m_modelPickerOrigin;
     };
 } // namespace ui::screen::work

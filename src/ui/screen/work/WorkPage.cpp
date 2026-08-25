@@ -8,6 +8,9 @@
 #include <QUrl>
 #include <QIconEngine>
 #include <QStandardItemModel>
+#include <QScrollArea>
+#include <QLineEdit>
+#include <QFrame>
 #include <FluentQt/TextFields.h>
 #include <FluentQt/Collections.h>
 #include <FluentQt/BasicInput.h>
@@ -27,6 +30,30 @@
 #include "CreateProjectDialog.h"
 
 namespace {
+class ModelChoiceButton final : public fluent::basicinput::Button {
+public:
+    using fluent::basicinput::Button::Button;
+protected:
+    QRectF contentPaintRect(const QRectF& surfaceRect) const override {
+        constexpr int leftInset = 12;
+        const int textWidth = fontMetrics().horizontalAdvance(text());
+        return QRectF(surfaceRect.left() + leftInset, surfaceRect.top(), textWidth, surfaceRect.height());
+    }
+};
+
+class ModelPickerPopup final : public QFrame, public fluent::FluentElement {
+public:
+    explicit ModelPickerPopup(QWidget* parent = nullptr)
+        : QFrame(parent) {
+        setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+        setAttribute(Qt::WA_TranslucentBackground);
+        setAttribute(Qt::WA_DeleteOnClose);
+    }
+    void onThemeUpdated() override { update(); }
+protected:
+    void paintEvent(QPaintEvent*) override {}
+};
+
 class EditProjectDialog final : public ::fluent::dialogs_flyouts::ContentDialog {
 public:
     explicit EditProjectDialog(const QString& currentName, QWidget* parent = nullptr)
@@ -220,16 +247,19 @@ using widget::basic::LeftAlignedButton;
         m_pane->setAnchorBarVisible(false);
         m_pane->messageList()->setHeaderVisible(true);
         m_pane->messageList()->setAvatarVisible(true);
-        m_pane->inputBox()->setModelPresentation(tr("项目 Agent"), QString());
+        m_pane->inputBox()->setModelPresentation(tr("选择模型"), QString());
         workAreaLayout->addWidget(m_pane);
 
         connect(m_pane->header(), &ui::widget::chat::ChatHeader::toggleSidebarRequested, this, [this] {
             m_splitView->togglePane(0, true);
             m_pane->header()->setSidebarExpanded(m_splitView->isPaneExpanded(0));
         });
+        connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::modelButtonClicked, this, &WorkPage::showModelPicker);
         if (m_viewModel) {
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::sendRequested, this, [this](const QString& text) { m_viewModel->startTask(text); });
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::stopRequested, m_viewModel, &WorkViewModel::cancelTask);
+            connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::webSearchToggled, m_viewModel, &WorkViewModel::setWebSearchEnabled);
+            connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::deepThinkToggled, m_viewModel, &WorkViewModel::setDeepThinkingEnabled);
         }
 
         fluent::collections::SplitViewPaneOptions workPaneOptions;
@@ -319,6 +349,13 @@ using widget::basic::LeftAlignedButton;
         m_pane->messageList()->syncMessages(state.messages);
         m_pane->inputBox()->setEnabled(!state.currentSessionId.isEmpty());
         m_pane->inputBox()->setSendState(state.isProcessing ? ui::widget::chat::ChatInputBox::SendState::Generating : ui::widget::chat::ChatInputBox::SendState::Idle);
+        m_pane->inputBox()->setModelPresentation(state.currentModelName, state.reasoningEffort);
+        const auto current = std::find_if(state.availableModels.cbegin(), state.availableModels.cend(), [&](const ui::screen::chat::ChatModelOption& option) {
+            return option.providerId == state.currentModelProviderId && option.modelId == state.currentModelId;
+        });
+        const bool hasReasoningEffort = (current != state.availableModels.cend()) && !current->reasoningEfforts.isEmpty();
+        m_pane->inputBox()->setToolAvailability(true, true, hasReasoningEffort);
+        updateModelChoices(state);
     }
 
     void WorkPage::showProjectContextMenu(const QUuid &projectId, const QPoint &globalPos) {
@@ -377,5 +414,170 @@ using widget::basic::LeftAlignedButton;
 
         menu->exec(globalPos);
         menu->deleteLater();
+    }
+
+    void WorkPage::updateModelChoices(const WorkState& state) {
+        m_modelChoices.clear();
+        m_currentModelProviderId = state.currentModelProviderId;
+        m_currentModelId = state.currentModelId;
+        m_modelChoices.reserve(state.availableModels.size());
+        for (const auto& option : state.availableModels) {
+            m_modelChoices.push_back({option.providerId, option.modelId, option.displayName, option.providerName});
+        }
+        if (m_modelPickerPopup && m_modelPickerPopup->isVisible()) rebuildModelPicker({});
+    }
+
+    void WorkPage::showModelPicker() {
+        if (!m_pane->inputBox() || !m_pane->inputBox()->modelAnchor()) return;
+        m_pane->inputBox()->notifyModelMenuOpened();
+
+        auto* menu = new fluent::menus_toolbars::FluentMenu(QString(), this);
+        menu->setMinimumWidth(220);
+        connect(menu, &fluent::menus_toolbars::FluentMenu::aboutToHide, this, [this]() {
+            if (m_pane && m_pane->inputBox()) {
+                m_pane->inputBox()->notifyModelMenuClosed();
+            }
+        });
+
+        auto* modelMenu = new fluent::menus_toolbars::FluentMenu(tr("模型"), menu);
+        modelMenu->setMinimumWidth(260);
+        modelMenu->menuAction()->setText(tr("模型\t%1").arg(m_pane->inputBox()->modelName()));
+        QString previousProvider;
+        for (const auto& choice : m_modelChoices) {
+            if (choice.providerName != previousProvider) {
+                modelMenu->addSection(choice.providerName.isEmpty() ? tr("模型") : choice.providerName);
+                previousProvider = choice.providerName;
+            }
+            QAction* action = modelMenu->addAction(choice.displayName);
+            action->setCheckable(true);
+            action->setChecked(choice.providerId == m_currentModelProviderId && choice.modelId == m_currentModelId);
+            connect(action, &QAction::triggered, this, [this, choice] {
+                if (m_viewModel) m_viewModel->setModel(choice.providerId, choice.modelId);
+            });
+        }
+        if (modelMenu->actions().isEmpty()) {
+            QAction* empty = modelMenu->addAction(tr("没有可用模型"));
+            empty->setEnabled(false);
+        }
+        menu->addMenu(modelMenu);
+        const auto current = std::find_if(m_modelChoices.cbegin(), m_modelChoices.cend(), [this](const ModelChoice& choice) {
+            return choice.providerId == m_currentModelProviderId && choice.modelId == m_currentModelId;
+        });
+        if (current != m_modelChoices.cend()) {
+            auto* effortMenu = new fluent::menus_toolbars::FluentMenu(tr("推理强度"), menu);
+            const auto state = m_viewModel ? m_viewModel->state() : WorkState{};
+            const auto option = std::find_if(state.availableModels.cbegin(), state.availableModels.cend(), [this](const ui::screen::chat::ChatModelOption& item) {
+                return item.providerId == m_currentModelProviderId && item.modelId == m_currentModelId;
+            });
+            if (option != state.availableModels.cend()) {
+                for (const auto& effort : option->reasoningEfforts) {
+                    QAction* action = effortMenu->addAction(effort);
+                    action->setCheckable(true); action->setChecked(effort == state.reasoningEffort);
+                    connect(action, &QAction::triggered, this, [this, effort] { if (m_viewModel) m_viewModel->setReasoningEffort(effort); });
+                }
+            }
+            if (!effortMenu->actions().isEmpty()) menu->addMenu(effortMenu);
+        }
+        menu->popup(m_pane->inputBox()->modelAnchor()->mapToGlobal(QPoint(0, -menu->sizeHint().height())));
+    }
+
+    void WorkPage::showFullModelPicker(const QPoint& globalOrigin) {
+        if (!m_pane->inputBox() || !m_pane->inputBox()->modelAnchor()) return;
+        if (m_modelPickerPopup) m_modelPickerPopup->close();
+        auto* popup = new ModelPickerPopup(nullptr);
+        m_modelPickerPopup = popup;
+        popup->setFixedWidth(280);
+        auto* layout = new QVBoxLayout(popup);
+        layout->setContentsMargins(12, 12, 12, 12);
+        layout->setSpacing(8);
+        auto* search = new fluent::textfields::LineEdit(popup);
+        search->setPlaceholderText(tr("搜索模型…"));
+        search->setClearButtonEnabled(true);
+        search->setFixedHeight(32);
+        layout->addWidget(search);
+        auto* scroll = new QScrollArea(popup);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; border: none; } QScrollArea > QWidget > QWidget { background: transparent; }"));
+        scroll->setWidgetResizable(true);
+        auto* rows = new QWidget(scroll);
+        rows->setObjectName(QStringLiteral("modelPickerRows"));
+        scroll->setWidget(rows);
+        m_modelPickerRows = rows;
+        layout->addWidget(scroll, 1);
+        connect(search, &QLineEdit::textChanged, this, &WorkPage::rebuildModelPicker);
+        connect(popup, &QObject::destroyed, this, [this, popup] {
+            if (m_modelPickerPopup == popup) { m_modelPickerPopup = nullptr; m_modelPickerRows = nullptr; m_modelPickerOrigin = {}; }
+        });
+        rebuildModelPicker({});
+        const QPoint global = globalOrigin.isNull()
+            ? m_pane->inputBox()->modelAnchor()->mapToGlobal(QPoint(m_pane->inputBox()->modelAnchor()->width() - popup->width(), 0))
+            : globalOrigin;
+        m_modelPickerOrigin = globalOrigin;
+        popup->move(globalOrigin.isNull() ? global - QPoint(0, popup->height() + 8) : global);
+        popup->show();
+        search->setFocus();
+    }
+
+    void WorkPage::rebuildModelPicker(const QString& query) {
+        if (!m_modelPickerRows) return;
+        auto* old = m_modelPickerRows->layout();
+        if (old) {
+            while (QLayoutItem* item = old->takeAt(0)) { delete item->widget(); delete item; }
+            delete old;
+        }
+        auto* layout = new QVBoxLayout(m_modelPickerRows);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(2);
+        const QString filter = query.trimmed();
+        QMap<QString, QVector<ModelChoice>> groups;
+        for (const auto& choice : m_modelChoices) {
+            const QString searchable = choice.displayName + QLatin1Char(' ') + choice.providerName;
+            if (filter.isEmpty() || searchable.contains(filter, Qt::CaseInsensitive)) groups[choice.providerName].push_back(choice);
+        }
+        bool hasMatch = false;
+        int visibleRows = 0;
+        for (auto it = groups.cbegin(); it != groups.cend(); ++it) {
+            auto* header = new fluent::textfields::Label(it.key().isEmpty() ? tr("模型") : it.key(), m_modelPickerRows);
+            header->setFluentTypography(Typography::FontRole::Caption);
+            header->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
+            header->setContentsMargins(12, visibleRows == 0 ? 4 : 10, 8, 3);
+            layout->addWidget(header);
+            ++visibleRows;
+            for (const auto& choice : it.value()) {
+                auto* button = new ModelChoiceButton(m_modelPickerRows);
+                button->setFluentLayout(fluent::basicinput::Button::TextOnly);
+                button->setFluentStyle(fluent::basicinput::Button::Subtle);
+                button->setText(choice.displayName);
+                button->setFixedHeight(34);
+                const bool selected = choice.providerId == m_currentModelProviderId && choice.modelId == m_currentModelId;
+                button->setCheckable(true);
+                button->setChecked(selected);
+                button->setCursor(Qt::PointingHandCursor);
+                connect(button, &QPushButton::clicked, this, [this, choice] {
+                    if (m_viewModel) m_viewModel->setModel(choice.providerId, choice.modelId);
+                    if (m_modelPickerPopup) m_modelPickerPopup->close();
+                });
+                layout->addWidget(button);
+                hasMatch = true;
+                ++visibleRows;
+            }
+        }
+        if (!hasMatch) {
+            auto* empty = new fluent::textfields::Label(tr("没有匹配的模型"), m_modelPickerRows);
+            empty->setAlignment(Qt::AlignCenter);
+            empty->setContentsMargins(0, 24, 0, 24);
+            layout->addWidget(empty);
+        }
+        layout->addStretch();
+        if (m_modelPickerPopup) {
+            const int rowsHeight = hasMatch ? visibleRows * 34 + groups.size() * 6 : 88;
+            m_modelPickerPopup->setFixedHeight(qBound(120, rowsHeight + 54, 280));
+            if (m_modelPickerPopup->isVisible() && !m_modelPickerOrigin.isNull()) {
+                m_modelPickerPopup->move(m_modelPickerOrigin);
+            } else if (m_modelPickerPopup->isVisible() && m_pane->inputBox() && m_pane->inputBox()->modelAnchor()) {
+                const QPoint global = m_pane->inputBox()->modelAnchor()->mapToGlobal(QPoint(m_pane->inputBox()->modelAnchor()->width() - m_modelPickerPopup->width(), 0));
+                m_modelPickerPopup->move(global - QPoint(0, m_modelPickerPopup->height() + 8));
+            }
+        }
     }
 } // namespace ui::screen::work
