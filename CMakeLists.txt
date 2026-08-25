@@ -162,7 +162,19 @@ if (BUILD_TESTING)
     qt_add_executable(WorkIntegrationTests tests/WorkIntegrationTests.cpp)
     target_link_libraries(WorkIntegrationTests PRIVATE ForgeAICore Qt::Test)
     deploy_qt_application(WorkIntegrationTests)
+    if (WIN32 AND QT_QSQLITE_DLL)
+        add_custom_command(TARGET WorkIntegrationTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:WorkIntegrationTests>/sqldrivers"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${QT_QSQLITE_DLL}"
+                "$<TARGET_FILE_DIR:WorkIntegrationTests>/sqldrivers/qsqlite.dll"
+            COMMENT "Deploying Qt sqlite plugin for WorkIntegrationTests..."
+        )
+    endif()
     add_test(NAME WorkIntegrationTests COMMAND WorkIntegrationTests)
+    set_tests_properties(AgentToolTests PROPERTIES TIMEOUT 20)
+    set_tests_properties(AgentProtocolTests PROPERTIES TIMEOUT 20)
+    set_tests_properties(WorkIntegrationTests PROPERTIES TIMEOUT 20)
 endif ()
 
 deploy_qt_application(${PROJECT_NAME})

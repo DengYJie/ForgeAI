@@ -218,7 +218,7 @@ void AgentToolTests::skillLoaderParsesFrontmatter() {
     file.close();
 
     agent::skill::SkillLoader loader;
-    auto skillOpt = loader.loadFromFile(filePath);
+    auto skillOpt = loader.loadFromFile(filePath, true);
     QVERIFY(skillOpt.has_value());
     QCOMPARE(skillOpt->name, QStringLiteral("git-helper"));
     QCOMPARE(skillOpt->id, QStringLiteral("git_tool"));
@@ -228,8 +228,19 @@ void AgentToolTests::skillLoaderParsesFrontmatter() {
 
 void AgentToolTests::skillRegistryOperations() {
     agent::skill::SkillRegistry registry;
-    domain::agent::Skill s1{"s1", "skill1", "desc1", "inst1", {}, {}, true};
-    domain::agent::Skill s2{"s2", "skill2", "desc2", "inst2", {}, {}, false};
+    domain::agent::Skill s1;
+    s1.id = QStringLiteral("s1");
+    s1.name = QStringLiteral("skill1");
+    s1.description = QStringLiteral("desc1");
+    s1.instructions = QStringLiteral("inst1");
+    s1.isEnabled = true;
+
+    domain::agent::Skill s2;
+    s2.id = QStringLiteral("s2");
+    s2.name = QStringLiteral("skill2");
+    s2.description = QStringLiteral("desc2");
+    s2.instructions = QStringLiteral("inst2");
+    s2.isEnabled = false;
 
     registry.registerSkills({s1, s2});
     QCOMPARE(registry.allSkills().size(), 2);
@@ -255,7 +266,14 @@ void AgentToolTests::agentContextBuilderBuildsCleanPrompt() {
     projCtx.rootPath = QStringLiteral("C:/workspace/my_project");
     projCtx.agentsInstructions = QStringLiteral("Follow clean code standards.");
     projCtx.mcpConfigContent = QStringLiteral("{\"mcpServers\":{\"sqlite\":{}}}");
-    projCtx.skills.append(domain::agent::Skill{"c1", "cmake-helper", "help cmake", "Always use ctest", {}, {}, true});
+
+    domain::agent::Skill cmakeSkill;
+    cmakeSkill.id = QStringLiteral("c1");
+    cmakeSkill.name = QStringLiteral("cmake-helper");
+    cmakeSkill.description = QStringLiteral("help cmake");
+    cmakeSkill.instructions = QStringLiteral("Always use ctest");
+    cmakeSkill.isEnabled = true;
+    projCtx.skills.append(cmakeSkill);
 
     const QString prompt = builder.buildSystemPrompt(runCtx, projCtx);
 
