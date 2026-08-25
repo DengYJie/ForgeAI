@@ -1,0 +1,123 @@
+#include "WorkspaceFileSystem.h"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QRegularExpression>
+
+namespace llm::workspace {
+
+    WorkspaceFileSystem::WorkspaceFileSystem(QStringList ignorePatterns)
+        : m_ignorePatterns(std::move(ignorePatterns)) {
+        if (m_ignorePatterns.isEmpty()) {
+            m_ignorePatterns = {
+                QStringLiteral(".git"),
+                QStringLiteral("node_modules"),
+                QStringLiteral("build"),
+                QStringLiteral(".vs"),
+                QStringLiteral(".idea"),
+                QStringLiteral("__pycache__")
+            };
+        }
+    }
+
+    QStringList WorkspaceFileSystem::ignorePatterns() const {
+        return m_ignorePatterns;
+    }
+
+    bool WorkspaceFileSystem::isIgnored(const QString& relativePath) const {
+        const QString cleaned = QDir::cleanPath(relativePath);
+        const QStringList segments = cleaned.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        for (const auto& pattern : m_ignorePatterns) {
+            for (const auto& segment : segments) {
+                if (segment.compare(pattern, Qt::CaseInsensitive) == 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    QString WorkspaceFileSystem::resolveReadablePath(
+        const QString& workspaceRoot,
+        const QString& relativePath,
+        QString* error
+    ) const {
+        const QString canonicalRoot = QDir(workspaceRoot).canonicalPath();
+        if (canonicalRoot.isEmpty()) {
+            if (error) *error = QStringLiteral("工作区根目录不存在");
+            return {};
+        }
+
+        const QString cleanedRelative = QDir::cleanPath(relativePath);
+        if (cleanedRelative.startsWith(QStringLiteral("../")) || cleanedRelative == QStringLiteral("..")) {
+            if (error) *error = QStringLiteral("路径必须位于工作区内");
+            return {};
+        }
+
+        const QString candidate = QDir(canonicalRoot).absoluteFilePath(cleanedRelative.isEmpty() ? QStringLiteral(".") : cleanedRelative);
+        const QString resolved = QFileInfo(candidate).canonicalFilePath();
+
+#ifdef Q_OS_WIN
+        constexpr Qt::CaseSensitivity caseSensitivity = Qt::CaseInsensitive;
+#else
+        constexpr Qt::CaseSensitivity caseSensitivity = Qt::CaseSensitive;
+#endif
+        const QString prefix = QDir::cleanPath(canonicalRoot + QLatin1Char('/'));
+        if (resolved.isEmpty() || (resolved.compare(canonicalRoot, caseSensitivity) != 0
+            && !resolved.startsWith(prefix, caseSensitivity))) {
+            if (error) *error = QStringLiteral("路径必须位于工作区内或文件不存在");
+            return {};
+        }
+
+        return resolved;
+    }
+
+    QString WorkspaceFileSystem::resolveWritablePath(
+        const QString& workspaceRoot,
+        const QString& relativePath,
+        QString* error
+    ) const {
+        const QString canonicalRoot = QDir(workspaceRoot).canonicalPath();
+        if (canonicalRoot.isEmpty()) {
+            if (error) *error = QStringLiteral("工作区根目录不存在");
+            return {};
+        }
+
+        const QString cleaned = QDir::cleanPath(relativePath);
+        if (cleaned.isEmpty() || QDir::isAbsolutePath(cleaned) || cleaned == QStringLiteral("..") || cleaned.startsWith(QStringLiteral("../"))) {
+            if (error) *error = QStringLiteral("路径必须位于工作区内");
+            return {};
+        }
+
+        const QString candidate = QDir(canonicalRoot).absoluteFilePath(cleaned);
+        const QFileInfo parentInfo(QFileInfo(candidate).dir().absolutePath());
+        const QString parent = parentInfo.canonicalFilePath();
+        if (parent.isEmpty()) {
+            if (error) *error = QStringLiteral("目标目录不存在");
+            return {};
+        }
+
+#ifdef Q_OS_WIN
+        constexpr Qt::CaseSensitivity sensitivity = Qt::CaseInsensitive;
+#else
+        constexpr Qt::CaseSensitivity sensitivity = Qt::CaseSensitive;
+#endif
+        const QString prefix = QDir::cleanPath(canonicalRoot + QLatin1Char('/'));
+        if (parent.compare(canonicalRoot, sensitivity) != 0 && !parent.startsWith(prefix, sensitivity)) {
+            if (error) *error = QStringLiteral("路径必须位于工作区内");
+            return {};
+        }
+
+        QFileInfo candidateInfo(candidate);
+        if (candidateInfo.exists()) {
+            const QString candidateCanonical = candidateInfo.canonicalFilePath();
+            if (candidateCanonical.compare(canonicalRoot, sensitivity) != 0 && !candidateCanonical.startsWith(prefix, sensitivity)) {
+                if (error) *error = QStringLiteral("已存在的文件是符号链接且指向工作区外");
+                return {};
+            }
+        }
+
+        return candidate;
+    }
+
+} // namespace llm::workspace

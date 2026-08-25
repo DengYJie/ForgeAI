@@ -35,4 +35,20 @@ target_sources(ForgeAICore PRIVATE
     ModelProviderService.cpp
     ModelDiscoveryService.h
     ModelDiscoveryService.cpp
+    workspace/WorkspaceFileSystem.h
+    workspace/WorkspaceFileSystem.cpp
+    mcp/McpServerConfig.h
+    mcp/IMcpTransport.h
+    mcp/StdioMcpTransport.h
+    mcp/StdioMcpTransport.cpp
+    mcp/McpClient.h
+    mcp/McpClient.cpp
+    mcp/McpSession.h
+    mcp/McpSession.cpp
+    mcp/McpTool.h
+    mcp/McpTool.cpp
+    mcp/McpToolProvider.h
+    mcp/McpToolProvider.cpp
+    mcp/McpManager.h
+    mcp/McpManager.cpp
 )
