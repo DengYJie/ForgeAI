@@ -29,6 +29,8 @@
 #include "llm/mcp/StreamableHttpMcpTransport.h"
 #include "llm/mcp/McpResourceProvider.h"
 #include "llm/mcp/McpPromptProvider.h"
+#include "llm/mcp/McpTool.h"
+#include "agent/runtime/ToolExecutionScheduler.h"
 #include "domain/mcp/McpServerTrust.h"
 #include "core/logging/SensitiveDataFilter.h"
 #include "core/logging/LogCategory.h"
@@ -61,6 +63,8 @@ private slots:
     void streamableHttpMcpTransportSseIntegrationTests();
     void testSensitiveDataFilterAndArgKeys();
     void testToolExecutionErrorSanitization();
+    void testToolExecutionSchedulerBatches();
+    void testAsyncToolOperationLifecycle();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -133,12 +137,25 @@ void AgentToolTests::toolRegistryDuplicateRejection() {
     QVERIFY(!registry.registerTool(readTool2));
 }
 
+static domain::agent::ToolResult runOpSync(std::unique_ptr<application::ports::IToolOperation> op) {
+    if (!op) return {};
+    domain::agent::ToolResult res;
+    QEventLoop loop;
+    QObject::connect(op.get(), &application::ports::IToolOperation::finished, [&](const domain::agent::ToolResult& r) {
+        res = r;
+        loop.quit();
+    });
+    op->start();
+    loop.exec();
+    return res;
+}
+
 void AgentToolTests::toolRegistryUnknownToolError() {
     agent::tool::ToolRegistry registry;
     application::ports::ToolExecutionContext ctx{QStringLiteral("/tmp"), QStringLiteral("s1"), {}};
     domain::agent::ToolCall call{QStringLiteral("call_x"), QStringLiteral("non_existent_tool"), QStringLiteral("{}")};
 
-    auto result = registry.execute(call, ctx);
+    auto result = runOpSync(registry.execute(call, ctx));
     QVERIFY(result.isError);
     QCOMPARE(result.toolCallId, QStringLiteral("call_x"));
     QVERIFY(result.content.contains(QStringLiteral("未知工具")));
@@ -159,7 +176,7 @@ void AgentToolTests::builtinToolsExecution() {
         QStringLiteral("write_file"),
         QStringLiteral(R"({"path":"hello.txt","content":"Hello World\nLine 2"})")
     };
-    auto writeResult = registry.execute(writeCall, ctx);
+    auto writeResult = runOpSync(registry.execute(writeCall, ctx));
     QVERIFY(!writeResult.isError);
 
     // 2. read_file
@@ -168,7 +185,7 @@ void AgentToolTests::builtinToolsExecution() {
         QStringLiteral("read_file"),
         QStringLiteral(R"({"path":"hello.txt"})")
     };
-    auto readResult = registry.execute(readCall, ctx);
+    auto readResult = runOpSync(registry.execute(readCall, ctx));
     QVERIFY(!readResult.isError);
     QCOMPARE(readResult.content, QStringLiteral("Hello World\nLine 2"));
 
@@ -178,7 +195,7 @@ void AgentToolTests::builtinToolsExecution() {
         QStringLiteral("list_files"),
         QStringLiteral(R"({"path":"."})")
     };
-    auto listResult = registry.execute(listCall, ctx);
+    auto listResult = runOpSync(registry.execute(listCall, ctx));
     QVERIFY(!listResult.isError);
     auto filesArray = QJsonDocument::fromJson(listResult.content.toUtf8()).array();
     QVERIFY(filesArray.contains(QJsonValue(QStringLiteral("hello.txt"))));
@@ -189,7 +206,7 @@ void AgentToolTests::builtinToolsExecution() {
         QStringLiteral("search_text"),
         QStringLiteral(R"({"query":"World"})")
     };
-    auto searchResult = registry.execute(searchCall, ctx);
+    auto searchResult = runOpSync(registry.execute(searchCall, ctx));
     QVERIFY(!searchResult.isError);
     auto searchArray = QJsonDocument::fromJson(searchResult.content.toUtf8()).array();
     QCOMPARE(searchArray.size(), 1);
@@ -914,21 +931,84 @@ void AgentToolTests::testToolExecutionErrorSanitization() {
 
     // 1. 缺少参数：提供模型可识别的明确错误
     domain::agent::ToolCall callEmptyRead{QStringLiteral("c1"), QStringLiteral("read_file"), QStringLiteral("{}")};
-    auto resEmpty = readTool.execute(callEmptyRead, ctx);
+    auto resEmpty = runOpSync(readTool.execute(callEmptyRead, ctx));
     QVERIFY(resEmpty.isError);
     QCOMPARE(resEmpty.content, QStringLiteral("缺少 path 参数"));
 
     // 2. 越界路径：返回友好的脱敏错误提示
     domain::agent::ToolCall callEscapeRead{QStringLiteral("c2"), QStringLiteral("read_file"), QStringLiteral(R"({"path":"../../etc/passwd"})")};
-    auto resEscape = readTool.execute(callEscapeRead, ctx);
+    auto resEscape = runOpSync(readTool.execute(callEscapeRead, ctx));
     QVERIFY(resEscape.isError);
     QVERIFY(resEscape.content.contains(QStringLiteral("出于安全原因，无法访问项目外的路径")));
 
     // 3. 不存在的文件读写
     domain::agent::ToolCall callNotFoundRead{QStringLiteral("c3"), QStringLiteral("read_file"), QStringLiteral(R"({"path":"not_exist.txt"})")};
-    auto resNotFound = readTool.execute(callNotFoundRead, ctx);
+    auto resNotFound = runOpSync(readTool.execute(callNotFoundRead, ctx));
     QVERIFY(resNotFound.isError);
     QVERIFY(resNotFound.content.contains(QStringLiteral("出于安全原因，无法访问项目外的路径或文件不存在。")));
+}
+
+void AgentToolTests::testToolExecutionSchedulerBatches() {
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(fs));
+
+    llm::mcp::McpServerConfig srv1Cfg{QStringLiteral("github")};
+    llm::mcp::McpSession srv1Session(srv1Cfg);
+    domain::agent::ToolDefinition def1;
+    def1.name = QStringLiteral("get_issue");
+    auto mcpTool1 = std::make_shared<llm::mcp::McpTool>(&srv1Session, QStringLiteral("github"), def1);
+    registry.registerTool(mcpTool1);
+
+    domain::agent::ToolDefinition def2;
+    def2.name = QStringLiteral("create_issue");
+    auto mcpTool2 = std::make_shared<llm::mcp::McpTool>(&srv1Session, QStringLiteral("github"), def2);
+    registry.registerTool(mcpTool2);
+
+    llm::mcp::McpServerConfig srv2Cfg{QStringLiteral("weather")};
+    llm::mcp::McpSession srv2Session(srv2Cfg);
+    domain::agent::ToolDefinition def3;
+    def3.name = QStringLiteral("query_weather");
+    auto mcpTool3 = std::make_shared<llm::mcp::McpTool>(&srv2Session, QStringLiteral("weather"), def3);
+    registry.registerTool(mcpTool3);
+
+    QList<domain::agent::ToolCall> calls = {
+        {QStringLiteral("c1"), QStringLiteral("read_file"), QStringLiteral("{}")},
+        {QStringLiteral("c2"), QStringLiteral("mcp::github::get_issue"), QStringLiteral("{}")},
+        {QStringLiteral("c3"), QStringLiteral("mcp::weather::query_weather"), QStringLiteral("{}")},
+        {QStringLiteral("c4"), QStringLiteral("mcp::github::create_issue"), QStringLiteral("{}")},
+        {QStringLiteral("c5"), QStringLiteral("write_file"), QStringLiteral("{}")}
+    };
+
+    auto batches = agent::runtime::ToolExecutionScheduler::scheduleBatches(calls, &registry, true);
+    QCOMPARE(batches.size(), 3);
+
+    // Batch 0: read_file, github::get_issue, weather::query_weather
+    QCOMPARE(batches[0].size(), 3);
+    QCOMPARE(batches[0][0].name, QStringLiteral("read_file"));
+    QCOMPARE(batches[0][1].name, QStringLiteral("mcp::github::get_issue"));
+    QCOMPARE(batches[0][2].name, QStringLiteral("mcp::weather::query_weather"));
+
+    // Batch 1: github::create_issue
+    QCOMPARE(batches[1].size(), 1);
+    QCOMPARE(batches[1][0].name, QStringLiteral("mcp::github::create_issue"));
+
+    // Batch 2: write_file
+    QCOMPARE(batches[2].size(), 1);
+    QCOMPARE(batches[2][0].name, QStringLiteral("write_file"));
+}
+
+void AgentToolTests::testAsyncToolOperationLifecycle() {
+    auto op = std::make_unique<application::ports::ImmediateToolOperation>(
+        QStringLiteral("test_op"),
+        []() -> domain::agent::ToolResult {
+            return {QStringLiteral("test_op"), QStringLiteral("done"), false};
+        }
+    );
+    QCOMPARE(op->state(), application::ports::ToolOperationState::Created);
+
+    op->cancel();
+    QCOMPARE(op->state(), application::ports::ToolOperationState::Cancelled);
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)

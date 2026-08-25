@@ -71,8 +71,37 @@ namespace llm::mcp {
             application::ports::CancellationToken cancellationToken = {}
         );
 
+        using McpResponseCallback = std::function<void(const QJsonObject& response, bool isError, const QString& errorMessage)>;
+
         /**
-         * @brief 发送通用 JSON-RPC 请求并同步等待回复
+         * @brief 发起非阻塞异步 JSON-RPC 请求
+         * @return 请求 ID（可用于取消）
+         */
+        int sendRequestAsync(
+            const QString& method,
+            const QJsonObject& params,
+            int timeoutMs,
+            McpResponseCallback callback
+        );
+
+        /**
+         * @brief 取消指定的待处理异步请求
+         */
+        void cancelRequest(int requestId);
+
+        /**
+         * @brief 异步调用指定 MCP 工具并返回非阻塞 IToolOperation
+         */
+        std::unique_ptr<application::ports::IToolOperation> callToolAsync(
+            const QString& toolCallId,
+            const QString& name,
+            const QString& argumentsJson,
+            int timeoutMs = 30000,
+            application::ports::CancellationToken cancellationToken = {}
+        );
+
+        /**
+         * @brief 发送通用 JSON-RPC 请求并同步等待回复（初始化/元数据加载使用）
          */
         QJsonObject sendRequestSync(
             const QString& method,
@@ -95,12 +124,20 @@ namespace llm::mcp {
         void onMessageReceived(const QJsonObject& message);
 
     private:
+        struct PendingAsyncRequest {
+            int id = 0;
+            QString method;
+            McpResponseCallback callback;
+            QTimer* timeoutTimer = nullptr;
+        };
+
         bool isProtocolVersionSupported(const QString& version) const;
 
         IMcpTransport* m_transport = nullptr;
         std::atomic<int> m_nextRequestId{1};
         QHash<int, QJsonObject> m_pendingResponses;
         QHash<int, QEventLoop*> m_activeLoops;
+        QHash<int, PendingAsyncRequest> m_pendingAsyncRequests;
         QString m_lastError;
     };
 

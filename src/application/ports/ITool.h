@@ -8,6 +8,8 @@
 #include "domain/agent/ToolDefinition.h"
 #include "domain/agent/ToolExecution.h"
 #include "domain/agent/ToolPermission.h"
+#include "ToolExecutionTraits.h"
+#include "IToolOperation.h"
 
 namespace application::ports {
 
@@ -67,6 +69,11 @@ namespace application::ports {
         virtual domain::agent::ToolDefinition definition() const = 0;
 
         /**
+         * @brief 获取工具执行特征属性
+         */
+        virtual ToolExecutionTraits traits() const = 0;
+
+        /**
          * @brief 获取该工具声明所需的权限要求
          */
         virtual QList<domain::agent::ToolPermission> permissions() const {
@@ -74,20 +81,12 @@ namespace application::ports {
         }
 
         /**
-         * @brief 该工具是否支持并发多线程执行
-         * @details 内置纯文件IO与计算工具返回 true；依赖主线程 QObject / IPC 子进程的工具返回 false
-         */
-        virtual bool isThreadSafe() const {
-            return true;
-        }
-
-        /**
-         * @brief 执行工具调用
+         * @brief 异步执行工具调用
          * @param call 模型下发的工具调用指令（含 id, name, arguments）
          * @param context 运行期执行上下文
-         * @return 执行产出的结果实体
+         * @return 异步操作实例（生命周期由调用方管理）
          */
-        virtual domain::agent::ToolResult execute(
+        virtual std::unique_ptr<IToolOperation> execute(
             const domain::agent::ToolCall& call,
             const ToolExecutionContext& context
         ) = 0;

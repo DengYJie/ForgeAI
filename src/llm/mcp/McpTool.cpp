@@ -26,22 +26,31 @@ namespace llm::mcp {
         return m_originalToolName;
     }
 
-    domain::agent::ToolResult McpTool::execute(
+    std::unique_ptr<application::ports::IToolOperation> McpTool::execute(
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {
-        Q_UNUSED(context);
         if (!m_session || !m_session->client()) {
-            return domain::agent::ToolResult{
+            return std::make_unique<application::ports::ImmediateToolOperation>(
                 call.id,
-                QStringLiteral("MCP 服务未就绪或未连接: %1").arg(m_serverName),
-                true
-            };
+                [this, call]() {
+                    return domain::agent::ToolResult{
+                        call.id,
+                        QStringLiteral("MCP 服务未就绪或未连接: %1").arg(m_serverName),
+                        true
+                    };
+                }
+            );
         }
 
-        // 统一转发给底层客户端时使用 MCP 服务的原始工具名，并在主线程事件循环中完成超时与取消
         const int timeoutMs = context.timeoutMs > 0 ? context.timeoutMs : 30000;
-        return m_session->client()->callTool(call.id, m_originalToolName, call.arguments, timeoutMs, context.cancellationToken);
+        return m_session->client()->callToolAsync(
+            call.id,
+            m_originalToolName,
+            call.arguments,
+            timeoutMs,
+            context.cancellationToken
+        );
     }
 
 } // namespace llm::mcp

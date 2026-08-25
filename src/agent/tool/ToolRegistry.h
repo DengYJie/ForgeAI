@@ -63,7 +63,7 @@ namespace agent::tool {
          * @param context 包含工作区根路径的执行上下文
          * @return 执行结果（未找到工具时返回统一的标准化错误）
          */
-        domain::agent::ToolResult execute(
+        std::unique_ptr<application::ports::IToolOperation> execute(
             const domain::agent::ToolCall& call,
             const application::ports::ToolExecutionContext& context
         );

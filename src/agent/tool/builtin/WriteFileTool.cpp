@@ -39,7 +39,20 @@ namespace agent::tool::builtin {
         };
     }
 
-    domain::agent::ToolResult WriteFileTool::execute(
+    std::unique_ptr<application::ports::IToolOperation> WriteFileTool::execute(
+        const domain::agent::ToolCall& call,
+        const application::ports::ToolExecutionContext& context
+    ) {
+        return std::make_unique<application::ports::ThreadedToolOperation>(
+            call.id,
+            [this, call, context]() {
+                return executeInternal(call, context);
+            },
+            context.timeoutMs > 0 ? context.timeoutMs : 30000
+        );
+    }
+
+    domain::agent::ToolResult WriteFileTool::executeInternal(
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {

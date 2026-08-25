@@ -12,15 +12,23 @@ namespace agent::tool::builtin {
         ~ReadFileTool() override = default;
 
         domain::agent::ToolDefinition definition() const override;
+        application::ports::ToolExecutionTraits traits() const override {
+            return {true, true, true, QString()};
+        }
         QList<domain::agent::ToolPermission> permissions() const override {
             return {{domain::agent::ToolPermissionType::ReadOnly, QStringLiteral("读取工作区文件内容")}};
         }
-        domain::agent::ToolResult execute(
+        std::unique_ptr<application::ports::IToolOperation> execute(
             const domain::agent::ToolCall& call,
             const application::ports::ToolExecutionContext& context
         ) override;
 
     private:
+        domain::agent::ToolResult executeInternal(
+            const domain::agent::ToolCall& call,
+            const application::ports::ToolExecutionContext& context
+        );
+
         std::shared_ptr<llm::workspace::WorkspaceFileSystem> m_fs;
     };
 

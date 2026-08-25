@@ -57,6 +57,8 @@ target_sources(ForgeAICore PRIVATE
     mcp/McpRuntime.cpp
     mcp/McpTool.h
     mcp/McpTool.cpp
+    mcp/McpToolOperation.h
+    mcp/McpToolOperation.cpp
     mcp/McpToolProvider.h
     mcp/McpToolProvider.cpp
     mcp/McpResourceProvider.h

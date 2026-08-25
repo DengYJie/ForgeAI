@@ -19,13 +19,18 @@ namespace llm::mcp {
         ~McpTool() override = default;
 
         domain::agent::ToolDefinition definition() const override;
+        application::ports::ToolExecutionTraits traits() const override {
+            return {
+                false,
+                true,
+                false,
+                QStringLiteral("mcp-session:%1").arg(m_serverName)
+            };
+        }
         QList<domain::agent::ToolPermission> permissions() const override {
             return {{domain::agent::ToolPermissionType::ExternalService, QStringLiteral("调用外部 MCP 服务: %1").arg(m_serverName)}};
         }
-        bool isThreadSafe() const override {
-            return false;
-        }
-        domain::agent::ToolResult execute(
+        std::unique_ptr<application::ports::IToolOperation> execute(
             const domain::agent::ToolCall& call,
             const application::ports::ToolExecutionContext& context
         ) override;

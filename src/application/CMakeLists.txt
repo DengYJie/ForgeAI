@@ -2,6 +2,8 @@ target_sources(ForgeAICore PRIVATE
     ports/IChatModelGateway.h
     ports/IModelDiscoveryGateway.h
     ports/ITool.h
+    ports/ToolExecutionTraits.h
+    ports/IToolOperation.h
     ports/IToolProvider.h
     ports/IAgentRuntime.h
     ports/IProjectRuntimeCoordinator.h

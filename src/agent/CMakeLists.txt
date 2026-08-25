@@ -2,6 +2,8 @@ target_sources(ForgeAICore PRIVATE
     runtime/AgentRunContext.h
     runtime/AgentRuntime.h
     runtime/AgentRuntime.cpp
+    runtime/ToolExecutionScheduler.h
+    runtime/ToolExecutionScheduler.cpp
     runtime/AgentContextBuilder.h
     runtime/AgentContextBuilder.cpp
     skill/SkillLoader.h

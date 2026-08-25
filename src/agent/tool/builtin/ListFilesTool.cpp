@@ -34,7 +34,20 @@ namespace agent::tool::builtin {
         };
     }
 
-    domain::agent::ToolResult ListFilesTool::execute(
+    std::unique_ptr<application::ports::IToolOperation> ListFilesTool::execute(
+        const domain::agent::ToolCall& call,
+        const application::ports::ToolExecutionContext& context
+    ) {
+        return std::make_unique<application::ports::ThreadedToolOperation>(
+            call.id,
+            [this, call, context]() {
+                return executeInternal(call, context);
+            },
+            context.timeoutMs > 0 ? context.timeoutMs : 30000
+        );
+    }
+
+    domain::agent::ToolResult ListFilesTool::executeInternal(
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {

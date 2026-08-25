@@ -856,21 +856,27 @@ public:
         def.name = QStringLiteral("slow_tool");
         return def;
     }
-    bool isThreadSafe() const override {
-        return true;
+    application::ports::ToolExecutionTraits traits() const override {
+        return {true, true, false, QString()};
     }
-    domain::agent::ToolResult execute(
+    std::unique_ptr<application::ports::IToolOperation> execute(
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) override {
-        for (int i = 0; i < 40; ++i) {
-            if (context.cancellationToken.isCanceled()) {
-                wasCanceled = true;
-                return domain::agent::ToolResult{call.id, QStringLiteral("操作已合作式取消"), true};
-            }
-            QThread::msleep(10);
-        }
-        return domain::agent::ToolResult{call.id, QStringLiteral("slow finish"), false};
+        return std::make_unique<application::ports::ThreadedToolOperation>(
+            call.id,
+            [this, call, context]() {
+                for (int i = 0; i < 40; ++i) {
+                    if (context.cancellationToken.isCanceled()) {
+                        wasCanceled = true;
+                        return domain::agent::ToolResult{call.id, QStringLiteral("操作已合作式取消"), true};
+                    }
+                    QThread::msleep(10);
+                }
+                return domain::agent::ToolResult{call.id, QStringLiteral("slow finish"), false};
+            },
+            context.timeoutMs > 0 ? context.timeoutMs : 10000
+        );
     }
 
     std::atomic<bool> wasCanceled{false};
@@ -885,15 +891,20 @@ public:
         def.name = m_name;
         return def;
     }
-    bool isThreadSafe() const override {
-        return false;
+    application::ports::ToolExecutionTraits traits() const override {
+        return {false, true, false, QStringLiteral("mcp-session:%1").arg(m_name)};
     }
-    domain::agent::ToolResult execute(
+    std::unique_ptr<application::ports::IToolOperation> execute(
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) override {
         Q_UNUSED(context);
-        return domain::agent::ToolResult{call.id, QStringLiteral("mcp res: %1").arg(m_name), false};
+        return std::make_unique<application::ports::ImmediateToolOperation>(
+            call.id,
+            [this, call]() {
+                return domain::agent::ToolResult{call.id, QStringLiteral("mcp res: %1").arg(m_name), false};
+            }
+        );
     }
 private:
     QString m_name;
@@ -1085,26 +1096,24 @@ public:
     domain::agent::ToolDefinition definition() const override {
         return {QStringLiteral("mcp_loop_tool"), {}};
     }
-    bool isThreadSafe() const override { return false; }
-    domain::agent::ToolResult execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
-        QEventLoop loop;
-        domain::agent::ToolResult result{call.id, QStringLiteral("MCP_Finished_Naturally"), false};
-        
-        QTimer timer;
-        QObject::connect(&timer, &QTimer::timeout, [&]() {
-            if (context.cancellationToken.isCanceled()) {
-                wasCanceled = true;
-                result.content = QStringLiteral("MCP_Cancelled_Via_Token");
-                result.isError = true;
-                loop.quit();
-            }
-        });
-        timer.start(10);
-        
-        QTimer::singleShot(800, &loop, &QEventLoop::quit);
-        loop.exec();
-        
-        return result;
+    application::ports::ToolExecutionTraits traits() const override {
+        return {false, true, false, QStringLiteral("mcp-session:mock_loop")};
+    }
+    std::unique_ptr<application::ports::IToolOperation> execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
+        return std::make_unique<application::ports::ThreadedToolOperation>(
+            call.id,
+            [this, call, context]() {
+                for (int i = 0; i < 80; ++i) {
+                    if (context.cancellationToken.isCanceled()) {
+                        wasCanceled = true;
+                        return domain::agent::ToolResult{call.id, QStringLiteral("MCP_Cancelled_Via_Token"), true};
+                    }
+                    QThread::msleep(10);
+                }
+                return domain::agent::ToolResult{call.id, QStringLiteral("MCP_Finished_Naturally"), false};
+            },
+            context.timeoutMs > 0 ? context.timeoutMs : 10000
+        );
     }
     std::atomic<bool> wasCanceled{false};
 };
@@ -1149,27 +1158,31 @@ void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
         loop.quit();
     });
 
-    // 为了在并发工具 (cv->wait_for) 阻塞主线程时强行调用 cancelRun，我们启动一个后台线程执行 cancel
-    std::thread([&runtime]() {
-        QThread::msleep(150); // 确保存储执行已开始
-        // 注意：这在实际应用中是不安全的（Qt组件不支持跨线程调用），但对于本测试来说
-        // AgentRuntime 处于 cv->wait_for，不会访问 m_currentOp 等敏感字段
+    // 启动非阻塞取消定时器
+    QTimer::singleShot(150, [&runtime]() {
         runtime.cancelRun();
-    }).detach();
+    });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("触发取消"));
     loop.exec();
 
+    // cancelRun() destroys ops immediately (after emitting toolResultReady) and then
+    // emits runCompleted synchronously. The background threads may still be sleeping
+    // at that point. Give them a moment to detect the cancellation token.
+    QTest::qWait(400);
+
     // 验证：
-    // 1. 并发工具是否捕获到取消信号 (通过 linkParent 传播)
+    // 1. 并发工具捕获到了取消信号（通过 CancellationToken 合作式传播）
     QVERIFY2(slowTool->wasCanceled, "Slow built-in tool was not cooperatively cancelled");
     QCOMPARE(resultsMap.size(), 2);
-    QVERIFY(resultsMap.value(QStringLiteral("call_slow")).content.contains(QStringLiteral("合作式取消")));
+    // cancelRun() emits a generic "操作已取消" result for rapid cleanup; the thread's
+    // cooperative result arrives later (discarded via QPointer) — so isError is the right check.
+    QVERIFY(resultsMap.value(QStringLiteral("call_slow")).isError);
 
-    // 2. MCP 模拟工具是否也捕获到了取消信号
+    // 2. MCP 模拟工具也捕获到了取消信号
     QVERIFY2(mcpTool->wasCanceled, "MCP tool was not cooperatively cancelled");
-    QCOMPARE(resultsMap.value(QStringLiteral("call_mcp")).content, QStringLiteral("MCP_Cancelled_Via_Token"));
+    QVERIFY(resultsMap.value(QStringLiteral("call_mcp")).isError);
 }
 
 class UncooperativeSlowTool final : public application::ports::ITool {
@@ -1179,12 +1192,18 @@ public:
         def.name = QStringLiteral("uncooperative_tool");
         return def;
     }
-    bool isThreadSafe() const override { return true; }
-    domain::agent::ToolResult execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
-        Q_UNUSED(context);
-        // 完全不理会取消令牌，强行阻塞（模拟不合作或陷入死循环的工具）
-        QThread::msleep(800);
-        return domain::agent::ToolResult{call.id, QStringLiteral("不合作执行完毕"), false};
+    application::ports::ToolExecutionTraits traits() const override {
+        return {true, true, false, QString()};
+    }
+    std::unique_ptr<application::ports::IToolOperation> execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
+        return std::make_unique<application::ports::ThreadedToolOperation>(
+            call.id,
+            [call]() {
+                QThread::msleep(800);
+                return domain::agent::ToolResult{call.id, QStringLiteral("不合作执行完毕"), false};
+            },
+            context.timeoutMs > 0 ? context.timeoutMs : 30000
+        );
     }
 };
 

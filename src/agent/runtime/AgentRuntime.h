@@ -8,6 +8,8 @@
 #include "agent/tool/ToolRegistry.h"
 #include <QMap>
 #include <QHash>
+#include <vector>
+#include <memory>
 
 namespace agent::runtime {
 
@@ -49,6 +51,8 @@ namespace agent::runtime {
         void cleanupCurrentOp();
         void saveCheckpoint();
         void processExecutableToolCalls();
+        void executeNextBatch();
+        void onToolOperationFinished(const QString& toolCallId, const domain::agent::ToolResult& result);
         void finishToolExecutionRound();
 
         application::ports::IChatModelGateway* m_chatGateway = nullptr;
@@ -66,6 +70,8 @@ namespace agent::runtime {
         QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
         QList<domain::agent::ToolResult> m_pendingToolResults;
         QMap<QString, std::pair<domain::agent::ToolCall, domain::agent::ToolPermission>> m_pendingPermissions;
+        QList<QList<domain::agent::ToolCall>> m_pendingBatches;
+        std::vector<std::unique_ptr<application::ports::IToolOperation>> m_activeOperations;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
 
         application::ports::CancellationToken m_runCancellationToken;

@@ -103,17 +103,22 @@ namespace agent::tool {
         return defs;
     }
 
-    domain::agent::ToolResult ToolRegistry::execute(
+    std::unique_ptr<application::ports::IToolOperation> ToolRegistry::execute(
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {
         auto tool = findTool(call.name);
         if (!tool) {
-            return domain::agent::ToolResult{
+            return std::make_unique<application::ports::ImmediateToolOperation>(
                 call.id,
-                QStringLiteral("未知工具: %1").arg(call.name),
-                true
-            };
+                [call]() {
+                    return domain::agent::ToolResult{
+                        call.id,
+                        QStringLiteral("未知工具: %1").arg(call.name),
+                        true
+                    };
+                }
+            );
         }
 
         return tool->execute(call, context);

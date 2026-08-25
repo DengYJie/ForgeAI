@@ -1,4 +1,5 @@
 #include "AgentRuntime.h"
+#include "ToolExecutionScheduler.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
 #include "core/logging/SensitiveDataFilter.h"
@@ -316,6 +317,23 @@ namespace agent::runtime {
             m_currentOp->cancel();
             cleanupCurrentOp();
         }
+        // Drain ops one by one: disconnect finished first to prevent onToolOperationFinished
+        // from modifying m_activeOperations mid-loop (iterator invalidation / recursive
+        // executeNextBatch). Emit toolResultReady manually so callers receive a cancel result.
+        while (!m_activeOperations.empty()) {
+            auto op = std::move(m_activeOperations.front());
+            m_activeOperations.erase(m_activeOperations.begin());
+            if (!op) continue;
+            disconnect(op.get(), &application::ports::IToolOperation::finished, this, nullptr);
+            const domain::agent::ToolResult cancelResult{
+                op->operationId(), QStringLiteral("操作已取消"), true
+            };
+            m_pendingToolResults.append(cancelResult);
+            emit toolResultReady(m_context.sessionId, cancelResult);
+            op->cancel(); // stop timeout watchdog; background thread result will be discarded via QPointer
+        } // op destroyed here — background threads see weakSelf==null and exit cleanly
+        m_pendingBatches.clear();
+
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
         m_activeToolCalls.clear();
@@ -376,19 +394,29 @@ namespace agent::runtime {
             application::ports::ToolExecutionContext execContext{
                 m_context.workspaceRoot,
                 m_context.sessionId,
-                m_context.projectId
+                m_context.projectId,
+                m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000,
+                m_runCancellationToken
             };
 
-            domain::agent::ToolResult result;
+            std::unique_ptr<application::ports::IToolOperation> op;
             if (m_toolRegistry) {
-                result = m_toolRegistry->execute(call, execContext);
+                op = m_toolRegistry->execute(call, execContext);
             } else {
-                result = domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
+                op = std::make_unique<application::ports::ImmediateToolOperation>(
+                    call.id,
+                    [call]() {
+                        return domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
+                    }
+                );
             }
-            m_pendingToolResults.append(result);
-            m_state.results = m_pendingToolResults;
-            emit toolResultReady(m_context.sessionId, result);
-            emit stateChanged(m_state);
+
+            auto* opPtr = op.get();
+            connect(opPtr, &application::ports::IToolOperation::finished, this, [this, toolCallId](const domain::agent::ToolResult& result) {
+                onToolOperationFinished(toolCallId, result);
+            });
+            m_activeOperations.push_back(std::move(op));
+            opPtr->start();
         } else {
             core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户拒绝工具权限授权"), {
                 {QStringLiteral("toolName"), call.name},
@@ -404,10 +432,10 @@ namespace agent::runtime {
             m_state.results = m_pendingToolResults;
             emit toolResultReady(m_context.sessionId, result);
             emit stateChanged(m_state);
-        }
 
-        if (m_pendingPermissions.isEmpty()) {
-            finishToolExecutionRound();
+            if (m_pendingPermissions.isEmpty() && m_activeOperations.empty() && m_pendingBatches.isEmpty()) {
+                finishToolExecutionRound();
+            }
         }
     }
 
@@ -416,20 +444,10 @@ namespace agent::runtime {
             m_timeoutTimer->stop();
         }
 
-        application::ports::ToolExecutionContext execContext{
-            m_context.workspaceRoot,
-            m_context.sessionId,
-            m_context.projectId,
-            m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000,
-            m_runCancellationToken
-        };
-
         bool hasPendingPermission = false;
-        QList<domain::agent::ToolCall> parallelCalls;
-        QList<domain::agent::ToolCall> serialCalls;
+        QList<domain::agent::ToolCall> executableCalls;
 
         for (const auto& call : m_activeToolCalls) {
-            // 如果该工具调用已存在执行结果，跳过避免重复执行
             bool alreadyExecuted = false;
             for (const auto& existingRes : m_pendingToolResults) {
                 if (existingRes.toolCallId == call.id) {
@@ -439,7 +457,6 @@ namespace agent::runtime {
             }
             if (alreadyExecuted) continue;
 
-            // 1. 校验 enabledTools
             if (!m_context.enabledTools.isEmpty() && !m_context.enabledTools.contains(call.name)) {
                 core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("工具未在启用列表中被拦截"), {
                     {QStringLiteral("toolName"), call.name},
@@ -459,12 +476,10 @@ namespace agent::runtime {
 
             domain::agent::ToolPermission requiredPerm;
             domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
-            bool isToolThreadSafe = true;
 
             if (m_toolRegistry) {
                 auto tool = m_toolRegistry->findTool(call.name);
                 if (tool) {
-                    isToolThreadSafe = tool->isThreadSafe();
                     for (const auto& perm : tool->permissions()) {
                         auto d = m_context.policy.evaluatePermission(perm.type);
                         if (d == domain::agent::PermissionDecision::Deny) {
@@ -499,130 +514,99 @@ namespace agent::runtime {
                 hasPendingPermission = true;
                 emit permissionRequested(m_context.sessionId, call, requiredPerm);
             } else {
-                if (m_context.policy.allowParallelToolExecution && isToolThreadSafe) {
-                    parallelCalls.append(call);
-                } else {
-                    serialCalls.append(call);
-                }
+                executableCalls.append(call);
             }
-        }
-
-        // 2. 统一受控并发执行所有线程安全的工具（涵盖 size >= 1 的所有情况）
-        if (!parallelCalls.isEmpty()) {
-            const int timeoutMs = execContext.timeoutMs;
-
-            struct ParallelTask {
-                domain::agent::ToolCall call;
-                application::ports::CancellationToken token;
-                std::shared_ptr<std::atomic<bool>> done = std::make_shared<std::atomic<bool>>(false);
-                std::shared_ptr<domain::agent::ToolResult> result = std::make_shared<domain::agent::ToolResult>();
-            };
-
-            std::vector<ParallelTask> tasks;
-            tasks.reserve(parallelCalls.size());
-
-            auto cvMutex = std::make_shared<std::mutex>();
-            auto cv = std::make_shared<std::condition_variable>();
-            auto completedCount = std::make_shared<std::atomic<int>>(0);
-            const int totalTasks = static_cast<int>(parallelCalls.size());
-
-            for (const auto& call : parallelCalls) {
-                ParallelTask task;
-                task.call = call;
-                task.token.linkParent(execContext.cancellationToken); // 使单次任务令牌可被全局取消
-                application::ports::ToolExecutionContext taskContext = execContext;
-                taskContext.cancellationToken = task.token; // 为此任务分配独立的取消令牌
-
-                auto doneFlag = task.done;
-                auto resultHolder = task.result;
-
-                // 在主线程解析工具，剥离 this，防止超时后 AgentRuntime 析构导致的 UAF
-                auto tool = m_toolRegistry ? m_toolRegistry->findTool(call.name) : nullptr;
-
-                core::logging::LoggingService::instance().debug(core::logging::Category::AgentRuntime, QStringLiteral("派发并发工具调用"), {
-                    {QStringLiteral("toolName"), call.name},
-                    {QStringLiteral("callId"), call.id},
-                    {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(call.arguments)}
-                });
-
-                std::thread([tool, call, taskContext, doneFlag, resultHolder, completedCount, cv, cvMutex]() {
-                    domain::agent::ToolResult res;
-                    if (tool) {
-                        res = tool->execute(call, taskContext);
-                    } else {
-                        res = domain::agent::ToolResult{call.id, QStringLiteral("请求的工具当前不可用。"), true};
-                    }
-                    *resultHolder = std::move(res);
-                    doneFlag->store(true, std::memory_order_release);
-                    completedCount->fetch_add(1, std::memory_order_relaxed);
-                    {
-                        std::lock_guard<std::mutex> lock(*cvMutex);
-                    }
-                    cv->notify_one();
-                }).detach();
-
-                tasks.push_back(std::move(task));
-            }
-
-            // 限时等待任务完成（超时后立刻唤醒，不阻塞在工作线程析构上）
-            {
-                std::unique_lock<std::mutex> lock(*cvMutex);
-                cv->wait_for(lock, std::chrono::milliseconds(timeoutMs), [&]() {
-                    return completedCount->load(std::memory_order_relaxed) >= totalTasks;
-                });
-            }
-
-            // 收集结果并对未完成的任务发出取消信号
-            for (auto& task : tasks) {
-                if (task.done->load(std::memory_order_acquire)) {
-                    m_pendingToolResults.append(*task.result);
-                    m_state.results = m_pendingToolResults;
-                    emit toolResultReady(m_context.sessionId, *task.result);
-                } else {
-                    // 超时：发出合作式取消信号，立即生成超时结果并不阻塞流转
-                    task.token.cancel();
-                    core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("工具后台执行超时"), {
-                        {QStringLiteral("toolName"), task.call.name},
-                        {QStringLiteral("callId"), task.call.id},
-                        {QStringLiteral("timeoutMs"), QString::number(timeoutMs)}
-                    });
-
-                    domain::agent::ToolResult timeoutResult{
-                        task.call.id,
-                        QStringLiteral("工具执行响应超时，请稍后重试。"),
-                        true
-                    };
-                    m_pendingToolResults.append(timeoutResult);
-                    m_state.results = m_pendingToolResults;
-                    emit toolResultReady(m_context.sessionId, timeoutResult);
-                }
-            }
-        }
-
-        // 3. 在主线程顺序执行需保证 QObject 亲和性的工具（如 MCP / UI 交互）
-        for (const auto& call : serialCalls) {
-            core::logging::LoggingService::instance().debug(core::logging::Category::AgentRuntime, QStringLiteral("主线程执行工具调用"), {
-                {QStringLiteral("toolName"), call.name},
-                {QStringLiteral("callId"), call.id},
-                {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(call.arguments)}
-            });
-
-            domain::agent::ToolResult result;
-            if (m_toolRegistry) {
-                result = m_toolRegistry->execute(call, execContext);
-            } else {
-                result = domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
-            }
-            m_pendingToolResults.append(result);
-            m_state.results = m_pendingToolResults;
-            emit toolResultReady(m_context.sessionId, result);
         }
 
         if (hasPendingPermission) {
             setState(domain::agent::AgentRunStatus::WaitingPermission);
             saveCheckpoint();
-        } else {
+            return;
+        }
+
+        if (executableCalls.isEmpty()) {
             finishToolExecutionRound();
+            return;
+        }
+
+        m_pendingBatches = ToolExecutionScheduler::scheduleBatches(
+            executableCalls,
+            m_toolRegistry,
+            m_context.policy.allowParallelToolExecution
+        );
+
+        executeNextBatch();
+    }
+
+    void AgentRuntime::executeNextBatch() {
+        if (m_pendingBatches.isEmpty()) {
+            if (m_pendingPermissions.isEmpty() && m_activeOperations.empty()) {
+                finishToolExecutionRound();
+            }
+            return;
+        }
+
+        auto currentBatch = m_pendingBatches.takeFirst();
+        if (currentBatch.isEmpty()) {
+            executeNextBatch();
+            return;
+        }
+
+        application::ports::ToolExecutionContext execContext{
+            m_context.workspaceRoot,
+            m_context.sessionId,
+            m_context.projectId,
+            m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000,
+            m_runCancellationToken
+        };
+
+        for (const auto& call : currentBatch) {
+            if (m_runCancellationToken.isCanceled()) return;
+
+            core::logging::LoggingService::instance().debug(core::logging::Category::AgentRuntime, QStringLiteral("派发异步工具调用"), {
+                {QStringLiteral("toolName"), call.name},
+                {QStringLiteral("callId"), call.id},
+                {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(call.arguments)}
+            });
+
+            std::unique_ptr<application::ports::IToolOperation> op;
+            if (m_toolRegistry) {
+                op = m_toolRegistry->execute(call, execContext);
+            } else {
+                op = std::make_unique<application::ports::ImmediateToolOperation>(
+                    call.id,
+                    [call]() {
+                        return domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
+                    }
+                );
+            }
+
+            auto* opPtr = op.get();
+            const QString toolCallId = call.id;
+            connect(opPtr, &application::ports::IToolOperation::finished, this, [this, toolCallId](const domain::agent::ToolResult& result) {
+                onToolOperationFinished(toolCallId, result);
+            });
+
+            m_activeOperations.push_back(std::move(op));
+            opPtr->start();
+        }
+    }
+
+    void AgentRuntime::onToolOperationFinished(const QString& toolCallId, const domain::agent::ToolResult& result) {
+        m_pendingToolResults.append(result);
+        m_state.results = m_pendingToolResults;
+        emit toolResultReady(m_context.sessionId, result);
+        emit stateChanged(m_state);
+
+        for (auto it = m_activeOperations.begin(); it != m_activeOperations.end(); ++it) {
+            if ((*it) && (*it)->operationId() == toolCallId) {
+                m_activeOperations.erase(it);
+                break;
+            }
+        }
+
+        if (m_activeOperations.empty()) {
+            executeNextBatch();
         }
     }
 

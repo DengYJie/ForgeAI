@@ -1,4 +1,5 @@
 #include "McpClient.h"
+#include "McpToolOperation.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
 #include "core/logging/SensitiveDataFilter.h"
@@ -25,6 +26,16 @@ namespace llm::mcp {
                 auto* loop = m_activeLoops.value(id);
                 if (loop && loop->isRunning()) {
                     loop->quit();
+                }
+            }
+            if (m_pendingAsyncRequests.contains(id)) {
+                auto req = m_pendingAsyncRequests.take(id);
+                if (req.timeoutTimer) {
+                    req.timeoutTimer->stop();
+                    req.timeoutTimer->deleteLater();
+                }
+                if (req.callback) {
+                    req.callback(message, false, QString());
                 }
             }
         }
@@ -449,6 +460,135 @@ namespace llm::mcp {
             finalContent,
             isError
         };
+    }
+
+    int McpClient::sendRequestAsync(
+        const QString& method,
+        const QJsonObject& params,
+        int timeoutMs,
+        McpResponseCallback callback
+    ) {
+        if (!m_transport || !m_transport->isConnected()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 传输通道未就绪或已断开连接"), {
+                {QStringLiteral("method"), method}
+            });
+            if (callback) {
+                QTimer::singleShot(0, this, [callback]() {
+                    callback({}, true, QStringLiteral("MCP 服务未连接或已断开连接"));
+                });
+            }
+            return -1;
+        }
+
+        const int requestId = m_nextRequestId.fetch_add(1);
+        QJsonObject req{
+            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+            {QStringLiteral("id"), requestId},
+            {QStringLiteral("method"), method}
+        };
+        if (!params.isEmpty()) {
+            req.insert(QStringLiteral("params"), params);
+        }
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpProtocol, QStringLiteral("发送 MCP 异步请求"), {
+            {QStringLiteral("method"), method},
+            {QStringLiteral("requestId"), QString::number(requestId)}
+        });
+
+        PendingAsyncRequest pending;
+        pending.id = requestId;
+        pending.method = method;
+        pending.callback = std::move(callback);
+
+        auto* timer = new QTimer(this);
+        timer->setSingleShot(true);
+        connect(timer, &QTimer::timeout, this, [this, requestId, method]() {
+            if (m_pendingAsyncRequests.contains(requestId)) {
+                auto req = m_pendingAsyncRequests.take(requestId);
+                if (req.timeoutTimer) {
+                    req.timeoutTimer->deleteLater();
+                }
+                core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 异步请求超时"), {
+                    {QStringLiteral("method"), method},
+                    {QStringLiteral("requestId"), QString::number(requestId)}
+                });
+                if (req.callback) {
+                    req.callback({}, true, QStringLiteral("服务响应超时，请稍后重试。"));
+                }
+            }
+        });
+        timer->start(timeoutMs);
+        pending.timeoutTimer = timer;
+
+        m_pendingAsyncRequests.insert(requestId, pending);
+
+        if (!m_transport->sendJson(req)) {
+            if (m_pendingAsyncRequests.contains(requestId)) {
+                auto failedReq = m_pendingAsyncRequests.take(requestId);
+                if (failedReq.timeoutTimer) {
+                    failedReq.timeoutTimer->stop();
+                    failedReq.timeoutTimer->deleteLater();
+                }
+                core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("向 MCP 写入异步请求数据失败"), {
+                    {QStringLiteral("method"), method},
+                    {QStringLiteral("requestId"), QString::number(requestId)}
+                });
+                if (failedReq.callback) {
+                    failedReq.callback({}, true, QStringLiteral("发送 MCP 请求失败"));
+                }
+            }
+            return -1;
+        }
+
+        return requestId;
+    }
+
+    void McpClient::cancelRequest(int requestId) {
+        if (m_pendingAsyncRequests.contains(requestId)) {
+            auto req = m_pendingAsyncRequests.take(requestId);
+            if (req.timeoutTimer) {
+                req.timeoutTimer->stop();
+                req.timeoutTimer->deleteLater();
+            }
+            core::logging::LoggingService::instance().info(core::logging::Category::McpProtocol, QStringLiteral("取消 MCP 待处理异步请求"), {
+                {QStringLiteral("method"), req.method},
+                {QStringLiteral("requestId"), QString::number(requestId)}
+            });
+            if (req.callback) {
+                req.callback({}, true, QStringLiteral("操作已取消"));
+            }
+        }
+    }
+
+    std::unique_ptr<application::ports::IToolOperation> McpClient::callToolAsync(
+        const QString& toolCallId,
+        const QString& name,
+        const QString& argumentsJson,
+        int timeoutMs,
+        application::ports::CancellationToken cancellationToken
+    ) {
+        QJsonObject argsObj;
+        if (!argumentsJson.trimmed().isEmpty()) {
+            QJsonParseError err;
+            const auto doc = QJsonDocument::fromJson(argumentsJson.toUtf8(), &err);
+            if (err.error == QJsonParseError::NoError && doc.isObject()) {
+                argsObj = doc.object();
+            }
+        }
+
+        QJsonObject params{
+            {QStringLiteral("name"), name},
+            {QStringLiteral("arguments"), argsObj}
+        };
+
+        return std::make_unique<McpToolOperation>(
+            this,
+            toolCallId,
+            name,
+            params,
+            timeoutMs,
+            cancellationToken
+        );
     }
 
 } // namespace llm::mcp
