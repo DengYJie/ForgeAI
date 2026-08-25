@@ -106,6 +106,7 @@ private slots:
     void testAgentRuntimeConcurrentMcpToolCallsSafety();
     void testAgentRuntimeToolExecutionTimeoutProtection();
     void testAgentRuntimeSingleSlowToolTimeoutProtection();
+    void testAgentRuntimeCancelRunPropagatesToTools();
     void testAgentRuntimeUncooperativeToolRuntimeDestructionSafety();
 
 private:
@@ -1060,6 +1061,98 @@ void WorkIntegrationTests::testAgentRuntimeSingleSlowToolTimeoutProtection() {
 
     // 关键断言：即使只有 1 个工具，也应该受到超时与异步控制的保护
     QVERIFY2(totalElapsedMs < 300, QStringLiteral("单工具超时也应立即返回，实际耗时 %1 ms").arg(totalElapsedMs).toUtf8().constData());
+}
+
+class EventLoopMockMcpTool final : public application::ports::ITool {
+public:
+    domain::agent::ToolDefinition definition() const override {
+        return {QStringLiteral("mcp_loop_tool"), {}};
+    }
+    bool isThreadSafe() const override { return false; }
+    domain::agent::ToolResult execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
+        QEventLoop loop;
+        domain::agent::ToolResult result{call.id, QStringLiteral("MCP_Finished_Naturally"), false};
+        
+        QTimer timer;
+        QObject::connect(&timer, &QTimer::timeout, [&]() {
+            if (context.cancellationToken.isCanceled()) {
+                wasCanceled = true;
+                result.content = QStringLiteral("MCP_Cancelled_Via_Token");
+                result.isError = true;
+                loop.quit();
+            }
+        });
+        timer.start(10);
+        
+        QTimer::singleShot(800, &loop, &QEventLoop::quit);
+        loop.exec();
+        
+        return result;
+    }
+    std::atomic<bool> wasCanceled{false};
+};
+
+void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
+    MockChatGateway mockGateway;
+
+    // 模型下发两个工具：一个慢速并发工具（isThreadSafe=true），一个 MCP 模拟工具（isThreadSafe=false）
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow"), QStringLiteral("slow_tool")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow")});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_mcp"), QStringLiteral("mcp_loop_tool")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_mcp")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    auto slowTool = std::make_shared<SlowTestTool>();
+    auto mcpTool = std::make_shared<EventLoopMockMcpTool>();
+    auto provider = std::make_shared<SimpleMockProvider>(QList<std::shared_ptr<application::ports::ITool>>{slowTool, mcpTool});
+
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(provider);
+
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, nullptr);
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_cancel_test");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.timeoutMs = 5000; // 足够长，保证不会自然超时
+    context.policy.allowParallelToolExecution = true;
+
+    QMap<QString, domain::agent::ToolResult> resultsMap;
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        resultsMap.insert(res.toolCallId, res);
+    });
+
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        loop.quit();
+    });
+    connect(&runtime, &agent::runtime::AgentRuntime::runFailed, [&]() {
+        loop.quit();
+    });
+
+    // 为了在并发工具 (cv->wait_for) 阻塞主线程时强行调用 cancelRun，我们启动一个后台线程执行 cancel
+    std::thread([&runtime]() {
+        QThread::msleep(150); // 确保存储执行已开始
+        // 注意：这在实际应用中是不安全的（Qt组件不支持跨线程调用），但对于本测试来说
+        // AgentRuntime 处于 cv->wait_for，不会访问 m_currentOp 等敏感字段
+        runtime.cancelRun();
+    }).detach();
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("触发取消"));
+    loop.exec();
+
+    // 验证：
+    // 1. 并发工具是否捕获到取消信号 (通过 linkParent 传播)
+    QVERIFY2(slowTool->wasCanceled, "Slow built-in tool was not cooperatively cancelled");
+    QCOMPARE(resultsMap.size(), 2);
+    QVERIFY(resultsMap.value(QStringLiteral("call_slow")).content.contains(QStringLiteral("合作式取消")));
+
+    // 2. MCP 模拟工具是否也捕获到了取消信号
+    QVERIFY2(mcpTool->wasCanceled, "MCP tool was not cooperatively cancelled");
+    QCOMPARE(resultsMap.value(QStringLiteral("call_mcp")).content, QStringLiteral("MCP_Cancelled_Via_Token"));
 }
 
 class UncooperativeSlowTool final : public application::ports::ITool {
