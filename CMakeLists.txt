@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 project(ForgeAI LANGUAGES C CXX)
+
+set(CMAKE_UNITY_BUILD ON)
+set(CMAKE_UNITY_BUILD_BATCH_SIZE 16)
 
 include(qt.cmake)
 
@@ -20,29 +22,29 @@ find_package(Qt${QT_VERSION_MAJOR}
 
 include(FetchContent)
 find_package(Git REQUIRED)
-FetchContent_Declare(
-        fluentqt
-        GIT_REPOSITORY https://github.com/L-1124/Fluent-Qt.git
-        GIT_TAG my
-)
-FetchContent_MakeAvailable(fluentqt)
+FetchContent_Declare(fluentqt GIT_REPOSITORY https://github.com/L-1124/Fluent-Qt.git GIT_TAG my)
+FetchContent_GetProperties(fluentqt)
+if (NOT fluentqt_POPULATED)
+    FetchContent_Populate(fluentqt)
+    add_subdirectory(${fluentqt_SOURCE_DIR} ${fluentqt_BINARY_DIR})
+endif ()
 
-FetchContent_Declare(
-        qwindowkit
-        GIT_REPOSITORY https://github.com/stdware/qwindowkit.git
-        GIT_TAG 1.5.0
-)
-FetchContent_MakeAvailable(qwindowkit)
+FetchContent_Declare(qwindowkit GIT_REPOSITORY https://github.com/stdware/qwindowkit.git GIT_TAG 1.5.0)
+FetchContent_GetProperties(qwindowkit)
+if (NOT qwindowkit_POPULATED)
+    FetchContent_Populate(qwindowkit)
+    add_subdirectory(${qwindowkit_SOURCE_DIR} ${qwindowkit_BINARY_DIR})
+endif ()
 
 set(CMARK_TESTS OFF CACHE BOOL "" FORCE)
 set(CMARK_SHARED OFF CACHE BOOL "" FORCE)
 set(CMARK_STATIC ON CACHE BOOL "" FORCE)
-FetchContent_Declare(
-        cmark-gfm
-        GIT_REPOSITORY https://github.com/github/cmark-gfm.git
-        GIT_TAG 0.29.0.gfm.13
-)
-FetchContent_MakeAvailable(cmark-gfm)
+FetchContent_Declare(cmark-gfm GIT_REPOSITORY https://github.com/github/cmark-gfm.git GIT_TAG 0.29.0.gfm.13)
+FetchContent_GetProperties(cmark-gfm)
+if (NOT cmark-gfm_POPULATED)
+    FetchContent_Populate(cmark-gfm)
+    add_subdirectory(${cmark-gfm_SOURCE_DIR} ${cmark-gfm_BINARY_DIR})
+endif ()
 
 if (MSVC)
     if (TARGET libcmark-gfm_static)
@@ -60,11 +62,29 @@ if (TARGET libcmark-gfm-extensions_static AND NOT TARGET cmark-gfm::cmark-gfm-ex
     add_library(cmark-gfm::cmark-gfm-extensions ALIAS libcmark-gfm-extensions_static)
 endif ()
 
+macro(deploy_qt_application target)
+    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${target}>
+                $<TARGET_FILE_DIR:${target}>
+            COMMAND_EXPAND_LISTS
+            COMMENT "Deploying Qt runtime DLLs for ${target}..."
+        )
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe"
+                --verbose 0
+                --no-compiler-runtime
+                --no-opengl-sw
+                "$<TARGET_FILE:${target}>"
+            COMMENT "Running windeployqt to copy dependencies for ${target}..."
+        )
+    endif()
+endmacro()
+
 qt_standard_project_setup()
 
-set(PROJECT_SOURCES
-        src/main.cpp
-        
+set(CORE_SOURCES
         src/core/logging/LogLevel.h
         src/core/logging/LogCategory.h
         src/core/logging/LogRecord.h
@@ -458,32 +478,16 @@ set(PROJECT_SOURCES
         src/app/Application.cpp
 )
 
-qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
-
-add_subdirectory(res)
-
-set_target_properties(${PROJECT_NAME}
-        PROPERTIES
-        WIN32_EXECUTABLE TRUE
-)
-
-target_compile_definitions(${PROJECT_NAME}
-        PRIVATE
-        CMARK_GFM_STATIC_DEFINE
-        CMARK_GFM_EXTENSIONS_STATIC_DEFINE
-)
-
-target_include_directories(${PROJECT_NAME}
-        PRIVATE
+add_library(ForgeAICore STATIC ${CORE_SOURCES})
+target_compile_definitions(ForgeAICore PUBLIC CMARK_GFM_STATIC_DEFINE CMARK_GFM_EXTENSIONS_STATIC_DEFINE)
+target_include_directories(ForgeAICore PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${cmark-gfm_SOURCE_DIR}/src
         ${cmark-gfm_SOURCE_DIR}/extensions
         ${cmark-gfm_BINARY_DIR}/src
         ${cmark-gfm_BINARY_DIR}/extensions
 )
-
-target_link_libraries(${PROJECT_NAME}
-        PRIVATE
+target_link_libraries(ForgeAICore PUBLIC
         Qt::Core
         Qt::Gui
         Qt::Widgets
@@ -494,79 +498,26 @@ target_link_libraries(${PROJECT_NAME}
         cmark-gfm::cmark-gfm
         cmark-gfm::cmark-gfm-extensions
 )
+target_precompile_headers(ForgeAICore PRIVATE 
+    <QObject> <QWidget> <QString> <QNetworkReply> <memory> <vector> <QUuid> <QDateTime> <QList>
+)
+
+qt_add_executable(${PROJECT_NAME} src/main.cpp)
+target_link_libraries(${PROJECT_NAME} PRIVATE ForgeAICore)
+
+add_subdirectory(res)
+
+set_target_properties(${PROJECT_NAME}
+        PROPERTIES
+        WIN32_EXECUTABLE TRUE
+)
 
 include(CTest)
 if (BUILD_TESTING)
-    qt_add_executable(MarkdownCoreTests
-        tests/MarkdownCoreTests.cpp
-        src/ui/markdown/MarkdownDocument.h
-        src/ui/markdown/MarkdownDocument.cpp
-        src/ui/markdown/MarkdownTheme.h
-        src/ui/markdown/MarkdownTheme.cpp
-        src/ui/markdown/MarkdownLayout.h
-        src/ui/markdown/MarkdownLayout.cpp
-        src/ui/markdown/MarkdownRenderer.h
-        src/ui/markdown/MarkdownRenderer.cpp
-        src/ui/markdown/resource/MarkdownImageResourceManager.h
-        src/ui/markdown/resource/MarkdownImageResourceManager.cpp
-        src/ui/markdown/syntax/MarkdownSyntaxHighlighter.h
-        src/ui/markdown/syntax/MarkdownSyntaxHighlighter.cpp
-        src/ui/widget/MarkdownStyle.h
-        src/ui/widget/MarkdownStyle.cpp
-        src/ui/widget/MarkdownView.h
-        src/ui/widget/MarkdownView.cpp
-        src/ui/widget/message/MessageCardWidget.h
-        src/ui/widget/message/MessageCardWidget.cpp
-        src/ui/widget/message/MessageListView.h
-        src/ui/widget/message/MessageListView.cpp
-        src/ui/widget/message/ProcessGroupWidget.h
-        src/ui/widget/message/ProcessGroupWidget.cpp
-        src/ui/widget/message/blocks/ThinkingBlockWidget.h
-        src/ui/widget/message/blocks/ThinkingBlockWidget.cpp
-        src/ui/widget/message/blocks/AbstractToolBlockWidget.h
-        src/ui/widget/message/blocks/AbstractToolBlockWidget.cpp
-        src/ui/widget/message/blocks/ToolWidgetFactory.h
-        src/ui/widget/message/blocks/ToolWidgetFactory.cpp
-        src/ui/widget/message/blocks/tools/BashToolWidget.h
-        src/ui/widget/message/blocks/tools/BashToolWidget.cpp
-        src/ui/widget/message/blocks/tools/FileReadToolWidget.h
-        src/ui/widget/message/blocks/tools/FileReadToolWidget.cpp
-        src/ui/widget/message/blocks/tools/FileDiffToolWidget.h
-        src/ui/widget/message/blocks/tools/FileDiffToolWidget.cpp
-        src/ui/widget/message/blocks/tools/GenericToolWidget.h
-        src/ui/widget/message/blocks/tools/GenericToolWidget.cpp
-        src/ui/widget/message/blocks/ImageBlockWidget.h
-        src/ui/widget/message/blocks/ImageBlockWidget.cpp
-        src/ui/widget/message/blocks/ErrorBlockWidget.h
-        src/ui/widget/message/blocks/ErrorBlockWidget.cpp
-        src/ui/widget/message/blocks/FlatExpander.h
-        src/ui/widget/message/blocks/FlatExpander.cpp
-    )
-    target_compile_definitions(MarkdownCoreTests PRIVATE CMARK_GFM_STATIC_DEFINE CMARK_GFM_EXTENSIONS_STATIC_DEFINE)
-    target_include_directories(MarkdownCoreTests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${cmark-gfm_SOURCE_DIR}/src
-        ${cmark-gfm_SOURCE_DIR}/extensions
-        ${cmark-gfm_BINARY_DIR}/src
-        ${cmark-gfm_BINARY_DIR}/extensions
-    )
-    target_link_libraries(MarkdownCoreTests PRIVATE Qt::Core Qt::Gui Qt::Widgets Qt::Network Qt::Test FluentQt::FluentQt cmark-gfm::cmark-gfm cmark-gfm::cmark-gfm-extensions)
-    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
-        add_custom_command(TARGET MarkdownCoreTests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:MarkdownCoreTests>
-                $<TARGET_FILE_DIR:MarkdownCoreTests>
-            COMMAND_EXPAND_LISTS
-            COMMENT "Deploying Qt runtime DLLs for MarkdownCoreTests..."
-        )
-        add_custom_command(TARGET MarkdownCoreTests POST_BUILD
-            COMMAND "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe"
-                --verbose 0
-                --no-compiler-runtime
-                --no-opengl-sw
-                "$<TARGET_FILE:MarkdownCoreTests>"
-            COMMENT "Deploying Qt platform plugins for MarkdownCoreTests..."
-        )
+    qt_add_executable(MarkdownCoreTests tests/MarkdownCoreTests.cpp)
+    target_link_libraries(MarkdownCoreTests PRIVATE ForgeAICore Qt::Test)
+    deploy_qt_application(MarkdownCoreTests)
+    if (WIN32)
         add_custom_command(TARGET MarkdownCoreTests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:MarkdownCoreTests>/platforms"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -574,75 +525,25 @@ if (BUILD_TESTING)
                 "$<TARGET_FILE_DIR:MarkdownCoreTests>/platforms/qoffscreend.dll"
             COMMENT "Deploying Qt offscreen platform plugin for MarkdownCoreTests..."
         )
-    endif ()
+    endif()
     add_test(NAME MarkdownCoreTests COMMAND MarkdownCoreTests)
-    # QTextLayout/QFontDatabase require QGuiApplication, but no visible desktop.
     set_tests_properties(MarkdownCoreTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_FONTDIR=C:/Windows/Fonts")
-    qt_add_executable(AgentToolTests
-        tests/AgentToolTests.cpp
-        src/domain/agent/ToolDefinition.h src/domain/agent/ToolExecution.h
-        src/domain/project/ProjectContext.h
-        src/domain/service/IAgentToolService.h src/domain/service/IProjectContextService.h
-        src/services/agent/AgentToolService.h src/services/agent/AgentToolService.cpp
-        src/services/project/ProjectContextService.h src/services/project/ProjectContextService.cpp
-    )
-    target_include_directories(AgentToolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(AgentToolTests PRIVATE Qt::Core Qt::Test)
-    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
-        add_custom_command(TARGET AgentToolTests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:AgentToolTests>
-                $<TARGET_FILE_DIR:AgentToolTests>
-            COMMAND_EXPAND_LISTS
-            COMMENT "Deploying Qt runtime DLLs for AgentToolTests..."
-        )
-    endif ()
+
+    qt_add_executable(AgentToolTests tests/AgentToolTests.cpp)
+    target_link_libraries(AgentToolTests PRIVATE ForgeAICore Qt::Test)
+    deploy_qt_application(AgentToolTests)
     add_test(NAME AgentToolTests COMMAND AgentToolTests)
-    qt_add_executable(AgentProtocolTests
-        tests/AgentProtocolTests.cpp
-        src/llm/protocol/IStreamParser.h src/llm/protocol/IProtocolAdapter.h
-        src/llm/protocol/openai_responses/OpenAIResponsesAdapter.h
-        src/llm/protocol/openai_responses/OpenAIResponsesAdapter.cpp
-        src/llm/protocol/openai_responses/OpenAIResponsesStreamParser.h
-        src/llm/protocol/openai_responses/OpenAIResponsesStreamParser.cpp
-        src/llm/protocol/ollama/OllamaProtocolAdapter.h
-        src/llm/protocol/ollama/OllamaProtocolAdapter.cpp
-        src/llm/protocol/ollama/OllamaStreamParser.h
-        src/llm/protocol/ollama/OllamaStreamParser.cpp
-    )
-    target_include_directories(AgentProtocolTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(AgentProtocolTests PRIVATE Qt::Core Qt::Test)
-    if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
-        add_custom_command(TARGET AgentProtocolTests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:AgentProtocolTests>
-                $<TARGET_FILE_DIR:AgentProtocolTests>
-            COMMAND_EXPAND_LISTS
-            COMMENT "Deploying Qt runtime DLLs for AgentProtocolTests..."
-        )
-    endif ()
+
+    qt_add_executable(AgentProtocolTests tests/AgentProtocolTests.cpp)
+    target_link_libraries(AgentProtocolTests PRIVATE ForgeAICore Qt::Test)
+    deploy_qt_application(AgentProtocolTests)
     add_test(NAME AgentProtocolTests COMMAND AgentProtocolTests)
+
+    qt_add_executable(WorkIntegrationTests tests/WorkIntegrationTests.cpp)
+    target_link_libraries(WorkIntegrationTests PRIVATE ForgeAICore Qt::Test)
+    deploy_qt_application(WorkIntegrationTests)
+    add_test(NAME WorkIntegrationTests COMMAND WorkIntegrationTests)
 endif ()
 
-if (WIN32)
-    if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
-                $<TARGET_FILE_DIR:${PROJECT_NAME}>
-                COMMAND_EXPAND_LISTS
-                COMMENT "Copying required third-party runtime DLLs..."
-        )
-    endif ()
-
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "Deploying Qt libraries..."
-            COMMAND "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe"
-            --verbose 0
-            --no-compiler-runtime
-            --no-opengl-sw
-            "$<TARGET_FILE:${PROJECT_NAME}>"
-            COMMENT "Running windeployqt to copy dependencies..."
-    )
-endif ()
+deploy_qt_application(${PROJECT_NAME})
 
