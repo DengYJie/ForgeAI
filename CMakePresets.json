@@ -20,8 +20,7 @@
       "cacheVariables": {
         "BUILD_TESTING": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "FETCHCONTENT_UPDATES_DISCONNECTED": "ON",
-        "FORGEAI_UPDATE_MODELS": "OFF"
+        "FETCHCONTENT_UPDATES_DISCONNECTED": "ON"
       }
     },
     {

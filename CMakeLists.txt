@@ -4,7 +4,6 @@ project(ForgeAI VERSION 1.7.1 LANGUAGES C CXX)
 include(qt.cmake)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-option(FORGEAI_UPDATE_MODELS "Refresh models.dev metadata while configuring" OFF)
 
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR}
