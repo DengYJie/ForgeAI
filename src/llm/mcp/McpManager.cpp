@@ -70,7 +70,14 @@ namespace llm::mcp {
         if (config.name.isEmpty()) return;
 
         if (m_sessions.contains(config.name)) {
+            auto existing = m_sessions.value(config.name);
+            if (existing && existing->config() == config &&
+                (existing->state() == McpSessionState::Connected || existing->state() == McpSessionState::Connecting)) {
+                return;
+            }
             stopServer(config.name);
+            m_toolProvider->removeSession(existing.get());
+            m_sessions.remove(config.name);
         }
 
         auto session = std::make_shared<McpSession>(config, this);
@@ -94,6 +101,9 @@ namespace llm::mcp {
         if (!m_sessions.contains(name)) return false;
 
         auto session = m_sessions.value(name);
+        if (session && session->state() == McpSessionState::Connected) {
+            return true;
+        }
         if (session && session->start()) {
             emit serverStarted(name);
             return true;
@@ -108,6 +118,19 @@ namespace llm::mcp {
                 session->stop();
             }
             emit serverStopped(name);
+        }
+    }
+
+    void McpManager::stopServersForProject(const QString& workspaceRoot) {
+        if (workspaceRoot.isEmpty()) return;
+        QStringList toRemove;
+        for (auto it = m_sessions.begin(); it != m_sessions.end(); ++it) {
+            if (it.value() && it.value()->config().cwd == workspaceRoot) {
+                toRemove.append(it.key());
+            }
+        }
+        for (const auto& name : toRemove) {
+            unregisterServer(name);
         }
     }
 

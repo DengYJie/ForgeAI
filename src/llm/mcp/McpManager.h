@@ -61,6 +61,11 @@ namespace llm::mcp {
         void stopAll();
 
         /**
+         * @brief 停止并卸载指定工作区项目下的 MCP 服务
+         */
+        void stopServersForProject(const QString& workspaceRoot);
+
+        /**
          * @brief 获取 MCP 工具提供者实例
          */
         std::shared_ptr<McpToolProvider> toolProvider() const;
