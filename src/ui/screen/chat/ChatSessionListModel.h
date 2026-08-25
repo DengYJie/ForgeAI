@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QString>
+#include <QUuid>
 #include <optional>
 
 namespace ui::screen::chat {
