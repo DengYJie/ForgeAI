@@ -63,16 +63,14 @@ namespace ui::widget::message {
         void setHeaderVisible(bool visible);
         bool isHeaderVisible() const { return m_headerVisible; }
 
+        bool hasHeightForWidth() const override;
+        int heightForWidth(int width) const override;
         QSize sizeHint() const override;
         QSize minimumSizeHint() const override;
 
         void onThemeUpdated() override;
 
         class ProcessGroupWidget* processGroup();
-
-        void freezeHeight();
-        void unfreezeHeight();
-        bool isHeightFrozen() const { return m_isHeightFrozen; }
 
     signals:
         void linkActivated(const QUrl& url);
@@ -91,7 +89,10 @@ namespace ui::widget::message {
         QString m_senderName;
         bool m_avatarVisible = false;
         bool m_headerVisible = true;
-        bool m_isHeightFrozen = false;
+        domain::MessageRole m_currentVisualRole = domain::MessageRole::System;
+        bool m_currentVisualAvatarVisible = false;
+        bool m_currentVisualHeaderVisible = false;
+        bool m_visualsConstructed = false;
 
         QVBoxLayout* m_mainLayout = nullptr;
 

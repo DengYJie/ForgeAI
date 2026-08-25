@@ -235,6 +235,18 @@ bool MarkdownView::isAutoFitHeight() const
     return m_autoFitHeight;
 }
 
+void MarkdownView::setMaxContentWidth(qreal maxWidth)
+{
+    if (qAbs(m_maxContentWidth - maxWidth) < 0.5) return;
+    m_maxContentWidth = maxWidth;
+    relayout();
+}
+
+qreal MarkdownView::maxContentWidth() const
+{
+    return m_maxContentWidth;
+}
+
 void MarkdownView::onThemeUpdated()
 {
     if (m_usesThemeStyleSheet) {
@@ -380,7 +392,7 @@ bool MarkdownView::findText(const QString &text,
 
 void MarkdownView::updateAutoFitHeight()
 {
-    const int h = qMax(24, qCeil(m_documentLayout.size.height()));
+    const int h = qMax(16, qCeil(m_documentLayout.size.height()));
     if (h != m_autoFitContentHeight) {
         m_autoFitContentHeight = h;
         updateGeometry();
@@ -388,16 +400,35 @@ void MarkdownView::updateAutoFitHeight()
     }
 }
 
+bool MarkdownView::hasHeightForWidth() const
+{
+    return m_autoFitHeight;
+}
+
+int MarkdownView::heightForWidth(int width) const
+{
+    if (!m_autoFitHeight || width <= 0) {
+        return sizeHint().height();
+    }
+    const qreal contentWidth = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
+    if (qAbs(m_documentLayout.width - contentWidth) < 1.0 && m_autoFitContentHeight > 0) {
+        return m_autoFitContentHeight;
+    }
+    const auto docLayout = m_layoutEngine.layout(m_document, contentWidth, m_theme);
+    return qMax(16, qCeil(docLayout.size.height()));
+}
+
 QSize MarkdownView::sizeHint() const
 {
-    int h = m_autoFitContentHeight > 0 ? m_autoFitContentHeight : 34;
-    if (h <= 0) h = 34;
-    return QSize(256, h);
+    int h = m_autoFitContentHeight > 0 ? m_autoFitContentHeight : 16;
+    if (h <= 0) h = 16;
+    int w = m_documentLayout.size.width() > 0 ? qCeil(m_documentLayout.size.width()) : 256;
+    return QSize(qMax(20, w), h);
 }
 
 QSize MarkdownView::minimumSizeHint() const
 {
-    return QSize(50, sizeHint().height());
+    return QSize(20, m_autoFitHeight ? sizeHint().height() : 24);
 }
 
 void MarkdownView::wheelEvent(QWheelEvent *event)
@@ -425,7 +456,20 @@ void MarkdownView::rebuildDocument()
 
 void MarkdownView::relayout()
 {
-    const qreal contentWidth = qMax(1, viewport()->width());
+    qreal contentWidth = 0;
+    if (m_maxContentWidth > 0) {
+        contentWidth = m_maxContentWidth;
+    } else if (viewport() && viewport()->width() > 1) {
+        contentWidth = viewport()->width();
+    } else if (width() > 1) {
+        contentWidth = width();
+    } else if (parentWidget() && parentWidget()->width() > 50) {
+        contentWidth = parentWidget()->width();
+    } else if (window() && window()->width() > 100) {
+        contentWidth = qMin<qreal>(1000, window()->width() * 0.85);
+    } else {
+        contentWidth = 800;
+    }
     if (!m_streaming) {
         m_documentLayout = m_layoutEngine.layout(m_document, contentWidth, m_theme);
     } else {
@@ -569,10 +613,22 @@ bool MarkdownView::viewportEvent(QEvent* event)
 {
     if (event->type() == QEvent::Paint) { paintViewport(static_cast<QPaintEvent*>(event)); return true; }
     if (event->type() == QEvent::MouseMove) {
-        auto* mouse = static_cast<QMouseEvent*>(event); const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()));
-        m_hoveredBlock = hit.blockIndex; viewport()->setCursor(hit.kind == ui::markdown::HitKind::Link || hit.kind == ui::markdown::HitKind::CodeCopy ? Qt::PointingHandCursor : Qt::IBeamCursor);
+        auto* mouse = static_cast<QMouseEvent*>(event);
+        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()));
+        m_hoveredBlock = hit.blockIndex;
+        Qt::CursorShape cursor = Qt::ArrowCursor;
+        if (hit.kind == ui::markdown::HitKind::Link || hit.kind == ui::markdown::HitKind::CodeCopy) {
+            cursor = Qt::PointingHandCursor;
+        } else if (hit.kind == ui::markdown::HitKind::TaskCheckbox && m_taskListInteractive) {
+            cursor = Qt::PointingHandCursor;
+        } else if (hit.kind == ui::markdown::HitKind::Text) {
+            cursor = m_selectable ? Qt::IBeamCursor : Qt::ArrowCursor;
+        }
+        viewport()->setCursor(cursor);
         if (m_selecting) setSelectionPosition(hit.textOffset, true);
-        if (hit.kind == ui::markdown::HitKind::Link) emit linkHighlighted(QUrl(hit.value)); viewport()->update(); return true;
+        if (hit.kind == ui::markdown::HitKind::Link) emit linkHighlighted(QUrl(hit.value));
+        viewport()->update();
+        return true;
     }
     if (event->type() == QEvent::MouseButtonPress) {
         auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position())); m_selecting = m_selectable && (hit.kind == ui::markdown::HitKind::Text || hit.kind == ui::markdown::HitKind::Link); if (m_selecting) setSelectionPosition(hit.textOffset, mouse->modifiers().testFlag(Qt::ShiftModifier)); return true; }

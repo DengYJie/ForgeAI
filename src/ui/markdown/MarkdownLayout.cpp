@@ -70,15 +70,18 @@ InlineLayout::InlineLayout(QString value, const QFont& baseFont, const QVector<Q
     layout.setFormats(formats);
     layout.beginLayout();
     qreal y = 0;
+    qreal maxLineWidth = 0;
     while (true) {
         QTextLine line = layout.createLine();
         if (!line.isValid()) break;
         line.setLineWidth(width);
         line.setPosition(QPointF(0, y));
         y += line.height();
+        maxLineWidth = qMax(maxLineWidth, line.naturalTextWidth());
     }
     layout.endLayout();
     height = y;
+    width = maxLineWidth;
     if (height <= 0) height = QFontMetricsF(baseFont).height();
 }
 
@@ -283,7 +286,18 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
     DocumentLayout result; result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
     appendNodes(document.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset);
-    result.size = QSizeF(result.width, y + theme.contentMargins.bottom());
+    qreal maxContentWidth = 0;
+    for (const auto& b : result.blocks) {
+        if (b.inlineLayout) {
+            maxContentWidth = qMax(maxContentWidth, b.contentX + b.inlineLayout->width + theme.contentMargins.right());
+        } else {
+            maxContentWidth = qMax(maxContentWidth, b.rect.right() + theme.contentMargins.right());
+        }
+    }
+    const qreal totalHeight = result.blocks.isEmpty()
+        ? (theme.contentMargins.top() + theme.contentMargins.bottom())
+        : (result.blocks.back().rect.bottom() + theme.contentMargins.bottom());
+    result.size = QSizeF(maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : result.width, totalHeight);
     return result;
 }
 
@@ -294,7 +308,18 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
     qreal y = theme.contentMargins.top();
     appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset);
     appendNodes(activeTail.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset);
-    result.size = QSizeF(result.width, y + theme.contentMargins.bottom());
+    qreal maxContentWidth = 0;
+    for (const auto& b : result.blocks) {
+        if (b.inlineLayout) {
+            maxContentWidth = qMax(maxContentWidth, b.contentX + b.inlineLayout->width + theme.contentMargins.right());
+        } else {
+            maxContentWidth = qMax(maxContentWidth, b.rect.right() + theme.contentMargins.right());
+        }
+    }
+    const qreal totalHeight = result.blocks.isEmpty()
+        ? (theme.contentMargins.top() + theme.contentMargins.bottom())
+        : (result.blocks.back().rect.bottom() + theme.contentMargins.bottom());
+    result.size = QSizeF(maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : result.width, totalHeight);
     return result;
 }
 

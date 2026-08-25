@@ -81,6 +81,8 @@ public:
     bool isTransparentBackground() const;
     void setAutoFitHeight(bool enable);
     bool isAutoFitHeight() const;
+    void setMaxContentWidth(qreal maxWidth);
+    qreal maxContentWidth() const;
     void onThemeUpdated() override;
 
     // Resource & Security Pipeline
@@ -112,6 +114,8 @@ public:
                   bool incremental,
                   bool *wrapped = nullptr);
 
+    bool hasHeightForWidth() const override;
+    int heightForWidth(int width) const override;
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override;
 
@@ -160,6 +164,7 @@ private:
     bool m_transparentBackground = true;
     bool m_autoFitHeight = false;
     int m_autoFitContentHeight = 1;
+    qreal m_maxContentWidth = 0;
     bool m_streaming = false;
     bool m_allowNetworkAccess = true;
     bool m_allowHtml = true;

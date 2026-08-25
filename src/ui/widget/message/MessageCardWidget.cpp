@@ -84,8 +84,8 @@ namespace ui::widget::message {
         m_userBubbleCard->setBorderVisible(true);
 
         m_bubbleLayout = new QVBoxLayout(m_userBubbleCard);
-        m_bubbleLayout->setContentsMargins(12, 8, 12, 8);
-        m_bubbleLayout->setSpacing(4);
+        m_bubbleLayout->setContentsMargins(10, 6, 10, 6);
+        m_bubbleLayout->setSpacing(2);
 
         m_markdownView = new ui::widget::MarkdownView(this);
         m_markdownView->setTransparentBackground(true);
@@ -93,18 +93,10 @@ namespace ui::widget::message {
         m_markdownView->setAllowNetworkAccess(true);
         connect(m_markdownView, &ui::widget::MarkdownView::linkActivated, this, &MessageCardWidget::linkActivated);
         connect(m_markdownView, &ui::widget::MarkdownView::autoFitHeightChanged, this, [this](int) {
-            if (m_isHeightFrozen) {
-                unfreezeHeight();
-                QTimer::singleShot(50, this, [this]() {
-                    if (m_message.status != domain::MessageStatus::Sending) {
-                        freezeHeight();
-                    }
-                    });
-            }
             m_mainLayout->invalidate();
             updateGeometry();
             emit contentHeightChanged();
-            });
+        });
 
         m_mainLayout->addWidget(m_contentRow);
 
@@ -158,11 +150,19 @@ namespace ui::widget::message {
         updateVisuals();
     }
 
+    bool MessageCardWidget::hasHeightForWidth() const
+    {
+        return true;
+    }
+
+    int MessageCardWidget::heightForWidth(int width) const
+    {
+        if (width <= 0) return sizeHint().height();
+        return qMax(24, m_mainLayout->totalHeightForWidth(width));
+    }
+
     QSize MessageCardWidget::sizeHint() const
     {
-        if (m_isHeightFrozen && height() > 0) {
-            return QSize(256, height());
-        }
         return QSize(256, m_mainLayout->sizeHint().height());
     }
 
@@ -171,41 +171,13 @@ namespace ui::widget::message {
         return QSize(50, m_mainLayout->minimumSize().height());
     }
 
-    void MessageCardWidget::freezeHeight()
-    {
-        if (m_isHeightFrozen) return;
-        // MarkdownView 的高度严格依赖可用宽度。不能用无宽度约束的 sizeHint()
-        // 固化卡片，否则在虚拟列表首次测量/宽度变化后会留下正文与操作栏之间的空白。
-        if (width() <= 1) return;
-        m_isHeightFrozen = true;
-        m_mainLayout->activate();
-        const int h = m_mainLayout->totalHeightForWidth(width());
-        if (h > 0) {
-            setFixedHeight(h);
-        }
-    }
-
-    void MessageCardWidget::unfreezeHeight()
-    {
-        if (!m_isHeightFrozen) return;
-        m_isHeightFrozen = false;
-        setMinimumHeight(0);
-        setMaximumHeight(QWIDGETSIZE_MAX);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    }
-
     void MessageCardWidget::resizeEvent(QResizeEvent* event)
     {
         QWidget::resizeEvent(event);
-        if (event->oldSize().width() > 0 && event->oldSize().width() != event->size().width()) {
-            if (m_isHeightFrozen) {
-                unfreezeHeight();
-                QTimer::singleShot(50, this, [this]() {
-                    if (m_message.status != domain::MessageStatus::Sending) {
-                        freezeHeight();
-                    }
-                    });
-            }
+        if (m_message.role == domain::MessageRole::User) {
+            const int maxBubbleWidth = qMax(200, static_cast<int>(width() * 0.85));
+            if (m_userBubbleCard) m_userBubbleCard->setMaximumWidth(maxBubbleWidth);
+            if (m_markdownView) m_markdownView->setMaxContentWidth(maxBubbleWidth - 20);
         }
     }
 
@@ -256,18 +228,10 @@ namespace ui::widget::message {
         if (!m_processGroupWidget) {
             m_processGroupWidget = new ProcessGroupWidget(this);
             connect(m_processGroupWidget, &ProcessGroupWidget::contentHeightChanged, this, [this]() {
-                if (m_isHeightFrozen) {
-                    unfreezeHeight();
-                    QTimer::singleShot(200, this, [this]() {
-                        if (m_message.status != domain::MessageStatus::Sending) {
-                            freezeHeight();
-                        }
-                        });
-                }
                 m_mainLayout->invalidate();
                 updateGeometry();
                 emit contentHeightChanged();
-                });
+            });
 
             int index = m_mainLayout->indexOf(m_contentRow);
             if (index >= 0) {
@@ -387,28 +351,25 @@ namespace ui::widget::message {
             }
 
             if (justFinished) {
-                QTimer::singleShot(0, this, [this]() {
-                    if (m_processGroupWidget) {
-                        m_processGroupWidget->setExpanded(false);
-                    }
-                    freezeHeight();
-                    });
+                if (m_processGroupWidget) {
+                    m_processGroupWidget->setExpanded(false);
+                }
             }
             else if (isInitialLoad && m_message.status != domain::MessageStatus::Sending) {
                 if (m_processGroupWidget) {
                     m_processGroupWidget->setExpanded(false, false);
                 }
-                QTimer::singleShot(50, this, [this]() {
-                    freezeHeight();
-                    });
             }
         }
-        else {
-            if (justFinished || (isInitialLoad && m_message.status != domain::MessageStatus::Sending)) {
-                QTimer::singleShot(50, this, [this]() {
-                    freezeHeight();
-                    });
-            }
+
+        if (newMessage.role == domain::MessageRole::User) {
+            m_markdownView->setContentMargins(QMarginsF(0, 0, 0, 0));
+            const int availableCardWidth = width() > 100 ? width() : 800;
+            const int maxBubbleWidth = qMax(200, static_cast<int>(availableCardWidth * 0.85));
+            m_markdownView->setMaxContentWidth(maxBubbleWidth - 20);
+        } else {
+            m_markdownView->setContentMargins(QMarginsF(0, 2, 0, 2));
+            m_markdownView->setMaxContentWidth(0);
         }
 
         if (m_markdownView->markdown() != fullMarkdown) {
@@ -441,12 +402,12 @@ namespace ui::widget::message {
             m_errorWidget->hide();
         }
 
+        m_mainLayout->activate();
         updateActionBarVisibility();
     }
 
     void MessageCardWidget::resetForReuse()
     {
-        unfreezeHeight();
         if (m_processGroupWidget) {
             m_mainLayout->removeWidget(m_processGroupWidget);
             m_processGroupWidget->deleteLater();
@@ -456,7 +417,11 @@ namespace ui::widget::message {
         m_toolWidgets.clear();
         m_errorWidget = nullptr;
         m_message = {};
-        if (m_markdownView) m_markdownView->clear();
+        if (m_markdownView) {
+            m_markdownView->clear();
+            m_markdownView->setMaxContentWidth(0);
+            m_markdownView->setContentMargins(QMarginsF(0, 2, 0, 2));
+        }
         updateVisuals();
     }
 
@@ -489,41 +454,66 @@ namespace ui::widget::message {
         }
         m_timeLabel->setText(formatTime(m_message.createdAt));
 
-        while (m_headerLayout->count() > 0) m_headerLayout->takeAt(0);
-        while (m_contentRowLayout->count() > 0) m_contentRowLayout->takeAt(0);
-        while (m_actionLayout->count() > 0) m_actionLayout->takeAt(0);
-        while (m_bubbleLayout->count() > 0) m_bubbleLayout->takeAt(0);
+        const bool structureChanged = !m_visualsConstructed
+            || (m_currentVisualRole != m_message.role)
+            || (m_currentVisualAvatarVisible != m_avatarVisible)
+            || (m_currentVisualHeaderVisible != m_headerVisible);
 
-        if (isUser) {
-            m_headerWidget->hide();
+        if (structureChanged) {
+            m_visualsConstructed = true;
+            m_currentVisualRole = m_message.role;
+            m_currentVisualAvatarVisible = m_avatarVisible;
+            m_currentVisualHeaderVisible = m_headerVisible;
 
-            m_bubbleLayout->addWidget(m_markdownView);
-            m_userBubbleCard->show();
+            while (m_headerLayout->count() > 0) m_headerLayout->takeAt(0);
+            while (m_contentRowLayout->count() > 0) m_contentRowLayout->takeAt(0);
+            while (m_actionLayout->count() > 0) m_actionLayout->takeAt(0);
+            while (m_bubbleLayout->count() > 0) m_bubbleLayout->takeAt(0);
 
-            m_contentRowLayout->addStretch(1);
-            m_contentRowLayout->addWidget(m_userBubbleCard, 0, Qt::AlignRight | Qt::AlignTop);
-            m_contentRowLayout->addWidget(m_avatar, 0, Qt::AlignTop);
+            if (isUser) {
+                m_headerWidget->hide();
 
-            m_actionLayout->addStretch(1);
-            m_actionLayout->addWidget(m_timeLabel);
-            m_actionLayout->addWidget(m_copyButton);
-            if (m_avatarVisible) {
-                m_actionLayout->addSpacing(32);
+                m_bubbleLayout->addWidget(m_markdownView);
+                m_userBubbleCard->show();
+
+                m_contentRowLayout->addStretch(1);
+                m_contentRowLayout->addWidget(m_userBubbleCard, 0, Qt::AlignRight | Qt::AlignTop);
+                m_contentRowLayout->addWidget(m_avatar, 0, Qt::AlignTop);
+
+                m_actionLayout->addStretch(1);
+                m_actionLayout->addWidget(m_timeLabel);
+                m_actionLayout->addWidget(m_copyButton);
+                if (m_avatarVisible) {
+                    m_actionLayout->addSpacing(32);
+                }
+            }
+            else {
+                m_headerWidget->setVisible(m_headerVisible);
+
+                m_headerLayout->addWidget(m_avatar);
+                m_headerLayout->addWidget(m_senderLabel);
+                m_headerLayout->addWidget(m_timeLabel);
+                m_headerLayout->addStretch(1);
+
+                m_userBubbleCard->hide();
+                m_contentRowLayout->addWidget(m_markdownView, 1);
+
+                m_actionLayout->addWidget(m_copyButton);
+                m_actionLayout->addStretch(1);
             }
         }
+
+        if (isUser) {
+            m_markdownView->setContentMargins(QMarginsF(0, 0, 0, 0));
+            const int availableCardWidth = width() > 100 ? width() : 800;
+            const int maxBubbleWidth = qMax(200, static_cast<int>(availableCardWidth * 0.85));
+            m_userBubbleCard->setMaximumWidth(maxBubbleWidth);
+            m_markdownView->setMaxContentWidth(maxBubbleWidth - 20);
+        }
         else {
+            m_markdownView->setContentMargins(QMarginsF(0, 2, 0, 2));
+            m_markdownView->setMaxContentWidth(0);
             m_headerWidget->setVisible(m_headerVisible);
-
-            m_headerLayout->addWidget(m_avatar);
-            m_headerLayout->addWidget(m_senderLabel);
-            m_headerLayout->addWidget(m_timeLabel);
-            m_headerLayout->addStretch(1);
-
-            m_userBubbleCard->hide();
-            m_contentRowLayout->addWidget(m_markdownView, 1);
-
-            m_actionLayout->addWidget(m_copyButton);
-            m_actionLayout->addStretch(1);
         }
 
         updateActionBarVisibility();

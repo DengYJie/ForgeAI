@@ -220,6 +220,11 @@ void MessageListView::updateVisibleCards()
         else ++it;
     }
 
+    const int oldScroll = verticalScrollBar()->value();
+    const int anchorIndex = findItemAtY(oldScroll);
+    const QUuid anchorId = (anchorIndex >= 0 && anchorIndex < m_items.size()) ? m_items.at(anchorIndex).message.id : QUuid{};
+    const int anchorOffset = anchorIndex >= 0 ? oldScroll - m_items.at(anchorIndex).y : 0;
+
     bool heightsChanged = false;
     const int availableWidth = qMax(1, m_container->width() - 2 * kHorizontalMargin);
     const int width = qMin(kMessageContentMaxWidth, availableWidth);
@@ -227,15 +232,30 @@ void MessageListView::updateVisibleCards()
     for (int index = first; index >= 0 && index <= end; ++index) {
         Item& item = m_items[index];
         MessageCardWidget* card = m_cardMap.value(item.message.id);
+        const bool isNewCard = (card == nullptr);
         if (!card) { card = acquireCard(); m_cardMap.insert(item.message.id, card); }
         // Width must be known before syncMessage() constructs Markdown layouts;
         // otherwise a pooled card can measure at 1px and poison the height cache.
         card->setGeometry(x, item.y, width, qMax(item.height, 1));
-        bindCard(card, item);
-        const int measured = qMax(1, card->sizeHint().height());
+        const bool needsRebind = isNewCard
+            || (card->message() != item.message)
+            || (card->isAvatarVisible() != m_avatarVisible)
+            || (card->isHeaderVisible() != m_headerVisible);
+        if (needsRebind) {
+            bindCard(card, item);
+        }
+        const int measured = qMax(1, card->heightForWidth(width));
         if (measured != item.height) { item.height = measured; m_heightCache.insert(item.message.id, measured); heightsChanged = true; }
     }
-    if (heightsChanged) relayoutItems();
+    if (heightsChanged) {
+        relayoutItems();
+        if (!m_autoScrollToBottom && !anchorId.isNull()) {
+            const int newIndex = itemIndex(anchorId);
+            if (newIndex >= 0) {
+                verticalScrollBar()->setValue(qMax(0, m_items.at(newIndex).y + anchorOffset));
+            }
+        }
+    }
     for (auto it = m_cardMap.cbegin(); it != m_cardMap.cend(); ++it) {
         const int index = itemIndex(it.key());
         if (index < 0) continue;
@@ -255,7 +275,9 @@ void MessageListView::onCardHeightChanged()
     const int index = itemIndex(card->messageId());
     if (index < 0) return;
     Item& item = m_items[index];
-    const int height = qMax(1, card->sizeHint().height());
+    const int availableWidth = qMax(1, m_container->width() - 2 * kHorizontalMargin);
+    const int width = qMin(kMessageContentMaxWidth, availableWidth);
+    const int height = qMax(1, card->heightForWidth(width));
     if (item.height == height) return;
     const bool aboveViewport = item.y + item.height <= verticalScrollBar()->value();
     const int delta = height - item.height;

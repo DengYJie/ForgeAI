@@ -17,6 +17,16 @@ namespace {
 constexpr int kHorizontalMargin = 16;
 constexpr int kMinBoxWidth = 200;
 constexpr int kMaxBoxWidth = 1000;
+
+class TransparentOverlay : public QWidget {
+public:
+    using QWidget::QWidget;
+protected:
+    void mousePressEvent(QMouseEvent* event) override { event->ignore(); }
+    void mouseReleaseEvent(QMouseEvent* event) override { event->ignore(); }
+    void mouseMoveEvent(QMouseEvent* event) override { event->ignore(); }
+    void wheelEvent(QWheelEvent* event) override { event->ignore(); }
+};
 } // namespace
 
 ConversationPane::ConversationPane(QWidget* parent) : QWidget(parent) {
@@ -25,7 +35,7 @@ ConversationPane::ConversationPane(QWidget* parent) : QWidget(parent) {
 
 void ConversationPane::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 16);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
     // 1. Header
@@ -43,11 +53,11 @@ void ConversationPane::setupUi() {
     m_contentRowLayout->addWidget(m_anchorBar, 0);
 
     auto* conversationColumn = new QWidget(contentRow);
-    auto* conversationLayout = new QVBoxLayout(conversationColumn);
-    conversationLayout->setContentsMargins(0, 0, 0, 0);
-    conversationLayout->setSpacing(6);
+    auto* columnStack = new QStackedLayout(conversationColumn);
+    columnStack->setContentsMargins(0, 0, 0, 0);
+    columnStack->setStackingMode(QStackedLayout::StackAll);
 
-    // 2.1 Message Surface
+    // 2.1 Message Surface (Full height from top to bottom)
     auto* messageSurface = new QWidget(conversationColumn);
     auto* messageStack = new QStackedLayout(messageSurface);
     messageStack->setContentsMargins(0, 0, 0, 0);
@@ -66,25 +76,26 @@ void ConversationPane::setupUi() {
     m_emptyStateLabel->hide();
     messageStack->addWidget(m_emptyStateLabel);
 
-    conversationLayout->addWidget(messageSurface, 1);
+    columnStack->addWidget(messageSurface);
 
-    // 2.2 Bottom Input Area inside the same conversation column
-    auto* inputContainer = new QWidget(conversationColumn);
-    auto* inputLayout = new QVBoxLayout(inputContainer);
-    inputLayout->setContentsMargins(0, 0, 0, 0);
+    // 2.2 Bottom Input Area floating at the bottom
+    auto* inputOverlay = new TransparentOverlay(conversationColumn);
+    auto* inputLayout = new QVBoxLayout(inputOverlay);
+    inputLayout->setContentsMargins(0, 0, 0, 16);
     inputLayout->setSpacing(4);
+    inputLayout->addStretch(1);
 
-    m_inputBox = new ChatInputBox(inputContainer);
+    m_inputBox = new ChatInputBox(inputOverlay);
     inputLayout->addWidget(m_inputBox, 0, Qt::AlignHCenter);
 
-    m_statusLabel = new fluent::textfields::Label(inputContainer);
+    m_statusLabel = new fluent::textfields::Label(inputOverlay);
     m_statusLabel->setFluentTypography(Typography::FontRole::Caption);
     m_statusLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
     m_statusLabel->setAlignment(Qt::AlignHCenter);
     m_statusLabel->hide();
     inputLayout->addWidget(m_statusLabel);
 
-    conversationLayout->addWidget(inputContainer, 0);
+    columnStack->addWidget(inputOverlay);
 
     m_contentRowLayout->addWidget(conversationColumn, 1);
     mainLayout->addWidget(contentRow, 1);
