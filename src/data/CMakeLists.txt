@@ -15,4 +15,8 @@ target_sources(ForgeAICore PRIVATE
     repository/JsonlMessageRepository.cpp
     importer/ModelsDevImporter.h
     importer/ModelsDevImporter.cpp
+    repository/SqliteAgentRepository.h
+    repository/SqliteAgentRepository.cpp
+    repository/SqliteAgentCheckpointRepository.h
+    repository/SqliteAgentCheckpointRepository.cpp
 )
