@@ -4,11 +4,33 @@
 #include <QUuid>
 #include <QList>
 #include <memory>
+#include <atomic>
 #include "domain/agent/ToolDefinition.h"
 #include "domain/agent/ToolExecution.h"
 #include "domain/agent/ToolPermission.h"
 
 namespace application::ports {
+
+    /**
+     * @brief 线程安全的取消令牌（支持合作式终止慢速或挂起任务）
+     */
+    class CancellationToken {
+    public:
+        CancellationToken() : m_canceled(std::make_shared<std::atomic<bool>>(false)) {}
+
+        bool isCanceled() const {
+            return m_canceled && m_canceled->load(std::memory_order_relaxed);
+        }
+
+        void cancel() {
+            if (m_canceled) {
+                m_canceled->store(true, std::memory_order_relaxed);
+            }
+        }
+
+    private:
+        std::shared_ptr<std::atomic<bool>> m_canceled;
+    };
 
     /**
      * @brief 工具执行上下文（包含当前会话、项目与工作区根目录等运行期元数据）
@@ -18,6 +40,7 @@ namespace application::ports {
         QString conversationId;
         QUuid projectId;
         int timeoutMs = 30000;
+        CancellationToken cancellationToken;
     };
 
     /**

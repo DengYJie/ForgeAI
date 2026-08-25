@@ -39,6 +39,11 @@ namespace agent::tool::builtin {
         const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
         const QString relativePath = args.value(QStringLiteral("path")).toString();
 
+        if (context.cancellationToken.isCanceled()) {
+            result.content = QStringLiteral("读取文件已被取消");
+            return result;
+        }
+
         if (relativePath.trimmed().isEmpty()) {
             result.content = QStringLiteral("缺少 path 参数");
             return result;

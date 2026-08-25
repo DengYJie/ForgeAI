@@ -61,6 +61,11 @@ namespace agent::tool::builtin {
         QJsonArray hits;
         QDirIterator it(startPath, QDir::Files, QDirIterator::Subdirectories);
         while (it.hasNext() && hits.size() < 100) {
+            if (context.cancellationToken.isCanceled()) {
+                result.content = QStringLiteral("搜索操作已被取消");
+                result.isError = true;
+                return result;
+            }
             const QString filePath = it.next();
             const QString relPath = QDir(context.workspaceRoot).relativeFilePath(filePath);
             if (m_fs->isIgnored(relPath)) continue;

@@ -54,6 +54,11 @@ namespace agent::tool::builtin {
 
         QJsonArray files;
         for (const QFileInfo& entry : dir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries, QDir::DirsFirst | QDir::Name)) {
+            if (context.cancellationToken.isCanceled()) {
+                result.content = QStringLiteral("列出文件已被取消");
+                result.isError = true;
+                return result;
+            }
             const QString relEntry = QDir(context.workspaceRoot).relativeFilePath(entry.absoluteFilePath());
             if (m_fs->isIgnored(relEntry)) continue;
 
