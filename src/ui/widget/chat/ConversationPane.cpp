@@ -116,10 +116,13 @@ void ConversationPane::updateInputBoxWidth() {
     if (!m_inputBox) return;
     const bool anchorVisible = (m_anchorBar && m_anchorBar->isVisible());
     const int sideWidths = anchorVisible ? (2 * (8 + 32 + 8)) : (2 * 8);
-    const int columnWidth = qMax(1, width() - sideWidths);
-    const int cardWidth = qMax(1, columnWidth - 2 * kHorizontalMargin);
+    const int columnWidth = width() - sideWidths;
+    if (columnWidth <= 0) return;
+
+    const int cardWidth = columnWidth - 2 * kHorizontalMargin;
     const int maxAllowedWidth = qMin(columnWidth, kMaxBoxWidth);
-    const int targetWidth = qBound(kMinBoxWidth, cardWidth, maxAllowedWidth);
+    const int minAllowedWidth = qMin(kMinBoxWidth, maxAllowedWidth);
+    const int targetWidth = qBound(minAllowedWidth, cardWidth, maxAllowedWidth);
     if (targetWidth > 0 && m_inputBox->width() != targetWidth) {
         m_inputBox->setFixedWidth(targetWidth);
     }
