@@ -306,6 +306,7 @@ void AgentToolTests::sqliteAgentRepositoryCrud() {
     agent.providerId = QStringLiteral("openai");
     agent.enabledTools = {QStringLiteral("read_file"), QStringLiteral("search_text")};
     agent.enabledSkills = {QStringLiteral("git-helper")};
+    agent.enabledMcpServerIds = {QStringLiteral("db_server"), QStringLiteral("fs_server")};
     agent.createdAt = QDateTime::currentDateTime();
     agent.updatedAt = agent.createdAt;
 
@@ -316,6 +317,8 @@ void AgentToolTests::sqliteAgentRepositoryCrud() {
     QCOMPARE(loadedOpt->name, QStringLiteral("CodeReviewer"));
     QCOMPARE(loadedOpt->enabledTools.size(), 2);
     QCOMPARE(loadedOpt->enabledSkills.size(), 1);
+    QCOMPARE(loadedOpt->enabledMcpServerIds.size(), 2);
+    QVERIFY(loadedOpt->enabledMcpServerIds.contains(QStringLiteral("db_server")));
 
     auto all = repo.getAllAgents();
     QVERIFY(!all.isEmpty());

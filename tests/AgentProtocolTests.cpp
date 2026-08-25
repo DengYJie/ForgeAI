@@ -15,6 +15,44 @@
 #include "domain/llm/ChatRequest.h"
 #include "domain/llm/ChatEvent.h"
 
+#include "llm/mcp/McpClient.h"
+#include "llm/mcp/IMcpTransport.h"
+
+class MockMcpTransport final : public llm::mcp::IMcpTransport {
+    Q_OBJECT
+public:
+    bool start() override { m_connected = true; return true; }
+    void close() override { m_connected = false; emit closed(); }
+    bool isConnected() const override { return m_connected; }
+    void setConnected(bool c) { m_connected = c; }
+
+    bool sendJson(const QJsonObject& json) override {
+        if (!m_connected) return false;
+        m_sentMessages.append(json);
+
+        if (m_autoResponder) {
+            auto resp = m_autoResponder(json);
+            if (!resp.isEmpty()) {
+                QTimer::singleShot(0, this, [this, resp]() {
+                    emit messageReceived(resp);
+                });
+            }
+        }
+        return true;
+    }
+
+    void setAutoResponder(std::function<QJsonObject(const QJsonObject&)> responder) {
+        m_autoResponder = std::move(responder);
+    }
+
+    QList<QJsonObject> sentMessages() const { return m_sentMessages; }
+
+private:
+    bool m_connected = true;
+    QList<QJsonObject> m_sentMessages;
+    std::function<QJsonObject(const QJsonObject&)> m_autoResponder;
+};
+
 class AgentProtocolTests final : public QObject {
     Q_OBJECT
 private slots:
@@ -24,6 +62,10 @@ private slots:
     void anthropicToolMappingAndStream();
     void geminiToolMappingAndStream();
     void openAIResponsesToolStream();
+    void mcpClientInitializeAndHandshake();
+    void mcpClientListTools();
+    void mcpClientCallToolSuccessAndError();
+    void mcpClientTimeoutAndDisconnected();
 };
 
 void AgentProtocolTests::responsesUsesFunctionCallOutput() {
@@ -217,6 +259,134 @@ void AgentProtocolTests::openAIResponsesToolStream() {
     QCOMPARE(std::get<domain::llm::EventToolCallFinished>(events[0]).id, QStringLiteral("call_resp_1"));
 }
 
-QTEST_APPLESS_MAIN(AgentProtocolTests)
+void AgentProtocolTests::mcpClientInitializeAndHandshake() {
+    MockMcpTransport transport;
+    transport.setAutoResponder([](const QJsonObject& req) -> QJsonObject {
+        const QString method = req.value(QStringLiteral("method")).toString();
+        const int id = req.value(QStringLiteral("id")).toInt();
+        if (method == QStringLiteral("initialize")) {
+            return QJsonObject{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), id},
+                {QStringLiteral("result"), QJsonObject{
+                    {QStringLiteral("protocolVersion"), QStringLiteral("2024-11-05")},
+                    {QStringLiteral("capabilities"), QJsonObject{}},
+                    {QStringLiteral("serverInfo"), QJsonObject{{QStringLiteral("name"), QStringLiteral("mock-mcp-server")}}}
+                }}
+            };
+        }
+        return {};
+    });
+
+    llm::mcp::McpClient client(&transport);
+    QVERIFY(client.initialize());
+
+    // 验证握手后自动发出了 initialized 通知
+    const auto sent = transport.sentMessages();
+    QVERIFY(sent.size() >= 2);
+    QCOMPARE(sent.at(0).value(QStringLiteral("method")).toString(), QStringLiteral("initialize"));
+    QCOMPARE(sent.at(1).value(QStringLiteral("method")).toString(), QStringLiteral("notifications/initialized"));
+}
+
+void AgentProtocolTests::mcpClientListTools() {
+    MockMcpTransport transport;
+    transport.setAutoResponder([](const QJsonObject& req) -> QJsonObject {
+        const QString method = req.value(QStringLiteral("method")).toString();
+        const int id = req.value(QStringLiteral("id")).toInt();
+        if (method == QStringLiteral("tools/list")) {
+            QJsonArray tools;
+            tools.append(QJsonObject{
+                {QStringLiteral("name"), QStringLiteral("exec_sql")},
+                {QStringLiteral("description"), QStringLiteral("Execute SQL Query")},
+                {QStringLiteral("inputSchema"), QJsonObject{
+                    {QStringLiteral("type"), QStringLiteral("object")},
+                    {QStringLiteral("properties"), QJsonObject{{QStringLiteral("sql"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}}}
+                }}
+            });
+            return QJsonObject{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), id},
+                {QStringLiteral("result"), QJsonObject{{QStringLiteral("tools"), tools}}}
+            };
+        }
+        return {};
+    });
+
+    llm::mcp::McpClient client(&transport);
+    const auto tools = client.listTools();
+    QCOMPARE(tools.size(), 1);
+    QCOMPARE(tools.first().name, QStringLiteral("exec_sql"));
+    QCOMPARE(tools.first().description, QStringLiteral("Execute SQL Query"));
+    QVERIFY(tools.first().parameters.contains(QStringLiteral("properties")));
+}
+
+void AgentProtocolTests::mcpClientCallToolSuccessAndError() {
+    MockMcpTransport transport;
+    transport.setAutoResponder([](const QJsonObject& req) -> QJsonObject {
+        const QString method = req.value(QStringLiteral("method")).toString();
+        const int id = req.value(QStringLiteral("id")).toInt();
+        if (method == QStringLiteral("tools/call")) {
+            const auto params = req.value(QStringLiteral("params")).toObject();
+            const QString name = params.value(QStringLiteral("name")).toString();
+            if (name == QStringLiteral("fail_tool")) {
+                return QJsonObject{
+                    {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                    {QStringLiteral("id"), id},
+                    {QStringLiteral("error"), QJsonObject{
+                        {QStringLiteral("code"), -32602},
+                        {QStringLiteral("message"), QStringLiteral("工具执行内部异常")}
+                    }}
+                };
+            }
+            QJsonArray contents;
+            contents.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("text")},
+                {QStringLiteral("text"), QStringLiteral("MCP 执行成功输出")}
+            });
+            return QJsonObject{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), id},
+                {QStringLiteral("result"), QJsonObject{
+                    {QStringLiteral("isError"), false},
+                    {QStringLiteral("content"), contents}
+                }}
+            };
+        }
+        return {};
+    });
+
+    llm::mcp::McpClient client(&transport);
+
+    // 成功调用
+    const auto successRes = client.callTool(QStringLiteral("call_1"), QStringLiteral("ok_tool"), QStringLiteral("{}"));
+    QCOMPARE(successRes.toolCallId, QStringLiteral("call_1"));
+    QVERIFY(!successRes.isError);
+    QCOMPARE(successRes.content, QStringLiteral("MCP 执行成功输出"));
+
+    // 失败调用
+    const auto failRes = client.callTool(QStringLiteral("call_2"), QStringLiteral("fail_tool"), QStringLiteral("{}"));
+    QCOMPARE(failRes.toolCallId, QStringLiteral("call_2"));
+    QVERIFY(failRes.isError);
+    QCOMPARE(failRes.content, QStringLiteral("工具执行内部异常"));
+}
+
+void AgentProtocolTests::mcpClientTimeoutAndDisconnected() {
+    MockMcpTransport transport;
+    transport.setConnected(false);
+
+    llm::mcp::McpClient client(&transport);
+    const auto disconnRes = client.callTool(QStringLiteral("call_dis"), QStringLiteral("any_tool"), QStringLiteral("{}"));
+    QVERIFY(disconnRes.isError);
+    QVERIFY(disconnRes.content.contains(QStringLiteral("断开连接")));
+
+    // 超时测试
+    transport.setConnected(true);
+    transport.setAutoResponder(nullptr); // 不产生任何回复
+    const auto timeoutRes = client.callTool(QStringLiteral("call_to"), QStringLiteral("slow_tool"), QStringLiteral("{}"), 50);
+    QVERIFY(timeoutRes.isError);
+    QVERIFY(timeoutRes.content.contains(QStringLiteral("超时")));
+}
+
+QTEST_GUILESS_MAIN(AgentProtocolTests)
 #include "AgentProtocolTests.moc"
 
