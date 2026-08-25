@@ -870,13 +870,13 @@ void CollapsibleSplitView::resizeEvent(QResizeEvent *event) {
         if (currentWidth < st->autoCollapseBreakpoint) {
             if (st->isExpanded && !st->animationOpening) {
                 st->autoCollapsedByBreakpoint = true;
-                setPaneExpanded(i, false, shouldAnimate());
+                setPaneExpanded(i, false, /*animated=*/false);
             }
         } else {
             // 宽度恢复至断点以上：用户显式关闭优先！
             if (!st->isExpanded && st->autoCollapsedByBreakpoint && !st->userExplicitClosed) {
                 st->autoCollapsedByBreakpoint = false;
-                setPaneExpanded(i, true, shouldAnimate());
+                setPaneExpanded(i, true, /*animated=*/false);
             }
         }
     }

@@ -229,12 +229,19 @@ using widget::basic::LeftAlignedButton;
                     this, [this](const QString& id) { m_viewModel->setSessionArchived(id, true); });
         }
 
+        fluent::collections::SplitViewPaneOptions sidebarOptions;
+        sidebarOptions.minimumSize = 200;
+        sidebarOptions.maximumSize = 380;
+        sidebarOptions.preferredSize = 260;
+
         m_splitView->addCollapsiblePane(
             treeHost,
             ui::widget::SplitPaneDisplayMode::Inline,
-            0,
-            true,
-            260);
+            /*compactLength=*/0,
+            /*startExpanded=*/true,
+            /*initialOpenLength=*/260,
+            sidebarOptions);
+        m_splitView->setAutoCollapseBreakpoint(0, 768);
 
         // 2. Right-hand project conversation.  It intentionally follows the
         // same header / message surface / composer hierarchy as ChatPage.
@@ -253,6 +260,12 @@ using widget::basic::LeftAlignedButton;
         connect(m_pane->header(), &ui::widget::chat::ChatHeader::toggleSidebarRequested, this, [this] {
             m_splitView->togglePane(0, true);
             m_pane->header()->setSidebarExpanded(m_splitView->isPaneExpanded(0));
+        });
+        connect(m_splitView, &ui::widget::CollapsibleSplitView::paneOpened, this, [this](int index) {
+            if (index == 0) m_pane->header()->setSidebarExpanded(true);
+        });
+        connect(m_splitView, &ui::widget::CollapsibleSplitView::paneClosed, this, [this](int index) {
+            if (index == 0) m_pane->header()->setSidebarExpanded(false);
         });
         connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::modelButtonClicked, this, &WorkPage::showModelPicker);
         if (m_viewModel) {
