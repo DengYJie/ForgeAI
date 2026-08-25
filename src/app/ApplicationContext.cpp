@@ -12,6 +12,7 @@
 #include "ui/screen/settings/appearance/AppearanceSettingsUIFactory.h"
 #include "ui/screen/settings/logging/LoggingSettingsUIFactory.h"
 #include "ui/screen/settings/model/ModelSettingsPageFactory.h"
+#include "data/sqlite/DatabaseManager.h"
 #include <QSysInfo>
 #include <QUuid>
 
@@ -30,15 +31,24 @@ namespace app {
             {QStringLiteral("arch"), QSysInfo::currentCpuArchitecture()}
         });
 
-        // 1. 仓储与基础组件初始化
+        // 1. 数据库与基础设施初始化
+        dbManager().initialize();
+
+        // 1.1 仓储与基础组件初始化
         m_conversationRepo = std::make_unique<data::repository::SqliteConversationRepository>();
+        m_conversationRepo->initializeDatabase();
         m_messageTranscriptRepo = std::make_unique<data::repository::JsonlMessageRepository>(
             QDir::homePath() + QStringLiteral("/.forgeai/sessions"));
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
+        m_modelRepo->initializeDatabase(QStringLiteral(":/config/api.json"), QStringLiteral(":/config/models.json"));
         m_projectRepo = std::make_unique<data::repository::SqliteProjectRepository>();
+        m_projectRepo->initializeDatabase();
         m_agentRepo = std::make_unique<data::repository::SqliteAgentRepository>();
+        m_agentRepo->initializeDatabase();
         m_agentCheckpointRepo = std::make_unique<data::repository::SqliteAgentCheckpointRepository>();
+        m_agentCheckpointRepo->initializeDatabase();
         m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
+        m_modelRegistry->initialize(QStringLiteral(":/config/api.json"), QStringLiteral(":/config/models.json"));
 
         // 1.5 设置系统持久化与 Providers 初始化
         m_settingsRegistry = std::make_unique<core::settings::SettingsRegistry>();
@@ -307,6 +317,8 @@ namespace app {
         w.conversationService = m_conversationService.get();
         w.conversationRepository = m_conversationRepo.get();
         w.projectRepository = m_projectRepo.get();
+        w.modelService = m_modelService.get();
+        w.getModels = m_getModelsUseCase.get();
         w.switchProject = m_switchProjectUseCase.get();
         return w;
     }

@@ -290,7 +290,7 @@ namespace data::repository {
             "  doc_url TEXT,"
             "  env_var_name TEXT,"
             "  type INTEGER NOT NULL DEFAULT 0,"
-            "  base_url TEXT NOT NULL,"
+            "  base_url TEXT DEFAULT '',"
             "  proxy_url TEXT,"
             "  timeout_ms INTEGER DEFAULT 60000"
             ");"
@@ -483,11 +483,11 @@ namespace data::repository {
             providerQuery.bindValue(3, p.docUrl);
             providerQuery.bindValue(4, p.envVarName);
             providerQuery.bindValue(5, static_cast<int>(p.type));
-            providerQuery.bindValue(6, p.baseUrl);
+            providerQuery.bindValue(6, p.baseUrl.isEmpty() ? QStringLiteral("") : p.baseUrl);
             providerQuery.bindValue(7, p.proxyUrl.has_value() ? QVariant(p.proxyUrl.value()) : QVariant());
             providerQuery.bindValue(8, p.timeoutMs);
             if (!providerQuery.exec())
-                qWarning() << "[seed] provider insert failed:" << providerQuery.lastError().text();
+                qWarning() << "[seed] provider insert failed:" << p.id << providerQuery.lastError().text();
         }
 
         // 4. 批量插入 Preset Provider Models
