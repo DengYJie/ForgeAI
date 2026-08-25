@@ -151,6 +151,82 @@ namespace agent::task {
         }
     }
 
+namespace {
+    class TaskWaitHandle : public application::ports::IWaitHandle {
+    public:
+        TaskWaitHandle(QPointer<QTimer> timer, std::shared_ptr<std::atomic<bool>> fired)
+            : m_timer(timer), m_fired(std::move(fired)) {}
+
+        ~TaskWaitHandle() override {
+            cancel();
+        }
+
+        void cancel() override {
+            if (m_fired && !m_fired->exchange(true)) {
+                if (m_timer) {
+                    m_timer->stop();
+                    m_timer->deleteLater();
+                }
+            }
+        }
+
+        bool isCancelled() const override {
+            return !m_fired || m_fired->load();
+        }
+
+    private:
+        QPointer<QTimer> m_timer;
+        std::shared_ptr<std::atomic<bool>> m_fired;
+    };
+} // namespace
+
+    int ProcessTaskRuntime::cleanupFinishedTasks(qint64 maxAgeMs) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        int count = 0;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto it = m_tasks.begin(); it != m_tasks.end();) {
+            auto snap = it.value()->snapshot();
+            const bool isFinished = (snap.state == domain::agent::task::ProcessTaskState::Completed ||
+                                     snap.state == domain::agent::task::ProcessTaskState::Failed ||
+                                     snap.state == domain::agent::task::ProcessTaskState::TimedOut ||
+                                     snap.state == domain::agent::task::ProcessTaskState::Cancelled ||
+                                     snap.state == domain::agent::task::ProcessTaskState::Crashed);
+            if (isFinished) {
+                const qint64 finishTime = snap.finishedAtMs > 0 ? snap.finishedAtMs : snap.startedAtMs;
+                if (now - finishTime >= maxAgeMs) {
+                    it = m_tasks.erase(it);
+                    ++count;
+                    continue;
+                }
+            }
+            ++it;
+        }
+        return count;
+    }
+
+    int ProcessTaskRuntime::cleanupTasksForRun(const QUuid& runId) {
+        if (runId.isNull()) return 0;
+        int count = 0;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto it = m_tasks.begin(); it != m_tasks.end();) {
+            if (it.value()->spec().runId == runId) {
+                auto snap = it.value()->snapshot();
+                const bool isFinished = (snap.state == domain::agent::task::ProcessTaskState::Completed ||
+                                         snap.state == domain::agent::task::ProcessTaskState::Failed ||
+                                         snap.state == domain::agent::task::ProcessTaskState::TimedOut ||
+                                         snap.state == domain::agent::task::ProcessTaskState::Cancelled ||
+                                         snap.state == domain::agent::task::ProcessTaskState::Crashed);
+                if (isFinished) {
+                    it = m_tasks.erase(it);
+                    ++count;
+                    continue;
+                }
+            }
+            ++it;
+        }
+        return count;
+    }
+
     void ProcessTaskRuntime::shutdown() {
         QList<std::shared_ptr<ProcessTask>> allTasks;
         {
@@ -166,14 +242,18 @@ namespace agent::task {
         }
     }
 
-    void ProcessTaskRuntime::waitForUpdateAsync(
+    std::shared_ptr<application::ports::IWaitHandle> ProcessTaskRuntime::waitForUpdateAsync(
         const QString& taskId,
         quint64 stdoutCursor,
         quint64 stderrCursor,
         int waitMs,
         std::function<void()> callback
     ) {
-        if (!callback) return;
+        auto fired = std::make_shared<std::atomic<bool>>(false);
+        if (!callback) {
+            fired->store(true);
+            return std::make_shared<TaskWaitHandle>(nullptr, fired);
+        }
 
         std::shared_ptr<ProcessTask> task;
         {
@@ -185,8 +265,18 @@ namespace agent::task {
         }
 
         if (!task || waitMs <= 0) {
-            QTimer::singleShot(0, this, [callback]() { callback(); });
-            return;
+            auto timer = new QTimer(this);
+            timer->setSingleShot(true);
+            auto triggerOnce = [fired, timer, callback]() {
+                if (!fired->exchange(true)) {
+                    timer->stop();
+                    timer->deleteLater();
+                    callback();
+                }
+            };
+            connect(timer, &QTimer::timeout, this, triggerOnce);
+            timer->start(0);
+            return std::make_shared<TaskWaitHandle>(timer, fired);
         }
 
         auto snap = task->snapshot();
@@ -196,14 +286,23 @@ namespace agent::task {
                                  snap.state == domain::agent::task::ProcessTaskState::Cancelled ||
                                  snap.state == domain::agent::task::ProcessTaskState::Crashed);
 
-        // 如果已有新数据或已完成，立即触发回调
+        // 如果已有新数据或已完成，异步立即触发回调
         if (isFinished || snap.stdoutTotalBytes > stdoutCursor || snap.stderrTotalBytes > stderrCursor) {
-            QTimer::singleShot(0, this, [callback]() { callback(); });
-            return;
+            auto timer = new QTimer(this);
+            timer->setSingleShot(true);
+            auto triggerOnce = [fired, timer, callback]() {
+                if (!fired->exchange(true)) {
+                    timer->stop();
+                    timer->deleteLater();
+                    callback();
+                }
+            };
+            connect(timer, &QTimer::timeout, this, triggerOnce);
+            timer->start(0);
+            return std::make_shared<TaskWaitHandle>(timer, fired);
         }
 
         // 构造一次性唤醒触发器
-        auto fired = std::make_shared<std::atomic<bool>>(false);
         auto timer = new QTimer(this);
         timer->setSingleShot(true);
 
@@ -225,6 +324,8 @@ namespace agent::task {
 
         int clampedWaitMs = std::clamp(waitMs, 50, 5000);
         timer->start(clampedWaitMs);
+
+        return std::make_shared<TaskWaitHandle>(timer, fired);
     }
 
     std::shared_ptr<ProcessTask> ProcessTaskRuntime::getTask(const QString& taskId) const {

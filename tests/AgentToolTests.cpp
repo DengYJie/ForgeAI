@@ -36,8 +36,10 @@
 #include "core/logging/SensitiveDataFilter.h"
 #include "core/logging/LogCategory.h"
 #include "agent/task/ProcessOutputBuffer.h"
+#include "agent/task/ProcessOutputDecoder.h"
 #include "agent/task/ProcessTaskRuntime.h"
 #include "agent/tool/builtin/CheckTaskTool.h"
+#include "agent/tool/builtin/RunCommandTool.h"
 
 class AgentToolTests final : public QObject {
     Q_OBJECT
@@ -82,6 +84,12 @@ private slots:
     void testCheckTaskIncrementalCursorStreaming();
     void testCheckTaskWaitMsLongPolling();
     void testProcessTaskCancellationAndOwnership();
+    void testProcessOutputDecoderUtf8MultiByteBoundary();
+    void testProcessOutputDecoderGbkAndShiftJis();
+    void testCheckTaskCancelDoesNotUAF();
+    void testForegroundRunCancelDoesNotUAF();
+    void testRunCommandFailedToStartReturnsFailed();
+    void testProcessTaskRuntimeCleanupAndTTL();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -1391,14 +1399,16 @@ void AgentToolTests::testRunCommandToolExecutionAndSandboxing() {
     auto runTool = registry.findTool(QStringLiteral("run_command"));
     QVERIFY(runTool != nullptr);
 
-    // 1. 权限动态识别：高危命令升级为 DestructiveOperation
+    // 1. 权限动态识别：高危命令组合返回 ProcessExecute + DestructiveOperation
     domain::agent::ToolCall callRm{
         QStringLiteral("rc1"),
         QStringLiteral("run_command"),
         QStringLiteral("{\"program\":\"rm\",\"args\":[\"-rf\",\".\"]}")
     };
     const auto permsRm = runTool->permissions(callRm);
-    QCOMPARE(permsRm.first().type, domain::agent::ToolPermissionType::DestructiveOperation);
+    QCOMPARE(permsRm.size(), 2);
+    QCOMPARE(permsRm.at(0).type, domain::agent::ToolPermissionType::ProcessExecute);
+    QCOMPARE(permsRm.at(1).type, domain::agent::ToolPermissionType::DestructiveOperation);
 
     domain::agent::ToolCall callCmake{
         QStringLiteral("rc2"),
@@ -1406,6 +1416,7 @@ void AgentToolTests::testRunCommandToolExecutionAndSandboxing() {
         QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"]}")
     };
     const auto permsCmake = runTool->permissions(callCmake);
+    QCOMPARE(permsCmake.size(), 1);
     QCOMPARE(permsCmake.first().type, domain::agent::ToolPermissionType::ProcessExecute);
 
     // 2. 工作目录越界逃逸防护
@@ -1437,14 +1448,14 @@ void AgentToolTests::testProcessOutputBufferCursorTracking() {
     quint64 nextCursor = 0;
     bool lost = false;
     quint64 avail = 0;
-    QString chunk1 = buffer.readFrom(0, 10, &lost, &avail, &nextCursor);
-    QCOMPARE(chunk1, QStringLiteral("Hello "));
+    QByteArray chunk1 = buffer.readBytesFrom(0, 10, &lost, &avail, &nextCursor);
+    QCOMPARE(chunk1, QByteArray("Hello "));
     QCOMPARE(nextCursor, 6ULL);
     QVERIFY(!lost);
 
     buffer.append("World!");
-    QString chunk2 = buffer.readFrom(nextCursor, 10, &lost, &avail, &nextCursor);
-    QCOMPARE(chunk2, QStringLiteral("World!"));
+    QByteArray chunk2 = buffer.readBytesFrom(nextCursor, 10, &lost, &avail, &nextCursor);
+    QCOMPARE(chunk2, QByteArray("World!"));
     QCOMPARE(nextCursor, 12ULL);
 
     // 测试缓冲区溢出与游标过期
@@ -1455,7 +1466,7 @@ void AgentToolTests::testProcessOutputBufferCursorTracking() {
     QVERIFY(buffer.availableHeadOffset() > 0);
 
     // 读取过期的旧游标 0 应标记 lost
-    QString chunk3 = buffer.readFrom(0, 50, &lost, &avail, &nextCursor);
+    QByteArray chunk3 = buffer.readBytesFrom(0, 50, &lost, &avail, &nextCursor);
     QVERIFY(lost);
     QCOMPARE(avail, buffer.availableHeadOffset());
 }
@@ -1600,6 +1611,159 @@ void AgentToolTests::testProcessTaskCancellationAndOwnership() {
     auto snap = taskRuntime->snapshot(taskId);
     QVERIFY(snap.has_value());
     QCOMPARE(snap->state, domain::agent::task::ProcessTaskState::Cancelled);
+}
+
+void AgentToolTests::testProcessOutputDecoderUtf8MultiByteBoundary() {
+    // 1. 测试 UTF-8 多字节中文 ("你好世界" 每个字 3 字节)
+    const QString fullText = QStringLiteral("你好世界🌟🚀");
+    const QByteArray utf8Bytes = fullText.toUtf8();
+
+    // 假设在第 4 字节处切断（"你" 3字节，"好" 第1字节）
+    const QByteArray chunk1 = utf8Bytes.left(4);
+    auto res1 = agent::task::ProcessOutputDecoder::decodeChunk(chunk1, QStringLiteral("utf-8"), false);
+    QCOMPARE(res1.bytesConsumed, 3); // 自动回退未完成的第4字节
+    QCOMPARE(res1.text, QStringLiteral("你"));
+    QVERIFY(!res1.hasError);
+
+    // 随后从已消费的游标继续解码剩余字节
+    const QByteArray chunk2 = utf8Bytes.mid(res1.bytesConsumed);
+    auto res2 = agent::task::ProcessOutputDecoder::decodeChunk(chunk2, QStringLiteral("utf-8"), true);
+    QCOMPARE(res2.text, QStringLiteral("好世界🌟🚀"));
+    QVERIFY(!res2.hasError);
+}
+
+void AgentToolTests::testProcessOutputDecoderGbkAndShiftJis() {
+    // 1. 规范化编码名称测试
+    QCOMPARE(agent::task::ProcessOutputDecoder::normalizeEncoding(QStringLiteral("GBK")), QStringLiteral("gb18030"));
+    QCOMPARE(agent::task::ProcessOutputDecoder::normalizeEncoding(QStringLiteral("sjis")), QStringLiteral("shift-jis"));
+    QCOMPARE(agent::task::ProcessOutputDecoder::normalizeEncoding(QStringLiteral("system")), QStringLiteral("system"));
+
+    // 2. ASCII 兼容测试
+    const QByteArray ascii = "Hello, world!";
+    auto res = agent::task::ProcessOutputDecoder::decodeChunk(ascii, QStringLiteral("gb18030"), true);
+    QCOMPARE(res.text, QStringLiteral("Hello, world!"));
+    QVERIFY(!res.hasError);
+}
+
+void AgentToolTests::testCheckTaskCancelDoesNotUAF() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::builtin::CheckTaskTool checkTool(taskRuntime);
+
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    domain::agent::task::ProcessTaskSpec spec;
+    spec.program = QStringLiteral("cmake");
+    spec.arguments = {QStringLiteral("-E"), QStringLiteral("sleep"), QStringLiteral("2")};
+    spec.workingDirectory = temp.path();
+    spec.background = true;
+    spec.runId = ctx.runId;
+
+    const QString taskId = taskRuntime->start(spec, ctx);
+
+    domain::agent::ToolCall checkCall{
+        QStringLiteral("chk_uaf"),
+        QStringLiteral("check_task"),
+        QStringLiteral("{\"task_id\":\"%1\",\"wait_ms\":3000}").arg(taskId)
+    };
+
+    // 启动异步等待 Operation，随后立即取消并销毁 Operation 实例
+    auto op = checkTool.execute(checkCall, ctx);
+    QVERIFY(op != nullptr);
+    op->start();
+    op->cancel();
+    op.reset(); // 彻底析构 Operation 对象
+
+    // 模拟等待事件循环推进，确保定时器或异步回调触发时不会发生 UAF 崩溃
+    QTest::qWait(100);
+    taskRuntime->cancel(taskId, ctx.runId);
+}
+
+void AgentToolTests::testForegroundRunCancelDoesNotUAF() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::builtin::RunCommandTool runTool(taskRuntime, fs);
+
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    domain::agent::ToolCall runCall{
+        QStringLiteral("run_uaf"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"-E\",\"sleep\",\"2\"],\"background\":false}")
+    };
+
+    auto op = runTool.execute(runCall, ctx);
+    QVERIFY(op != nullptr);
+    op->start();
+    op->cancel();
+    op.reset(); // 彻底析构
+
+    QTest::qWait(100);
+}
+
+void AgentToolTests::testRunCommandFailedToStartReturnsFailed() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::builtin::RunCommandTool runTool(taskRuntime, fs);
+
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    domain::agent::ToolCall bgCall{
+        QStringLiteral("bg_fail"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"/__non_existent_forge_ai_binary__\",\"background\":true}")
+    };
+    auto res = runOpSync(runTool.execute(bgCall, ctx));
+    auto obj = QJsonDocument::fromJson(res.content.toUtf8()).object();
+    const QString taskId = obj.value(QStringLiteral("task_id")).toString();
+    QVERIFY(!taskId.isEmpty());
+
+    // 等待子进程启动失败信号派发
+    QTest::qWait(100);
+
+    auto snap = taskRuntime->snapshot(taskId);
+    QVERIFY(snap.has_value());
+    QCOMPARE(snap->state, domain::agent::task::ProcessTaskState::Failed);
+}
+
+void AgentToolTests::testProcessTaskRuntimeCleanupAndTTL() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    domain::agent::task::ProcessTaskSpec spec;
+    spec.program = QStringLiteral("cmake");
+    spec.arguments = {QStringLiteral("--version")};
+    spec.workingDirectory = temp.path();
+    spec.background = true;
+    spec.runId = ctx.runId;
+
+    const QString taskId = taskRuntime->start(spec, ctx);
+
+    // 等待执行完成
+    QTest::qWait(300);
+
+    auto snap = taskRuntime->snapshot(taskId);
+    QVERIFY(snap.has_value());
+    QCOMPARE(snap->state, domain::agent::task::ProcessTaskState::Completed);
+
+    // 清理已结束任务 (TTL = 0ms)
+    int cleaned = taskRuntime->cleanupFinishedTasks(0);
+    QCOMPARE(cleaned, 1);
+
+    auto snapAfter = taskRuntime->snapshot(taskId);
+    QVERIFY(!snapAfter.has_value());
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)

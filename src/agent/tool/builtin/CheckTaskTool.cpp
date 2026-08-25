@@ -7,6 +7,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <QPointer>
+#include <algorithm>
 
 namespace agent::tool::builtin {
 
@@ -36,7 +38,12 @@ namespace agent::tool::builtin {
                 m_callerRunId(callerRunId) {
             }
 
-            ~CheckTaskOperation() override = default;
+            ~CheckTaskOperation() override {
+                if (m_waitHandle) {
+                    m_waitHandle->cancel();
+                    m_waitHandle.reset();
+                }
+            }
 
             QString operationId() const override { return m_operationId; }
             application::ports::ToolOperationState state() const override { return m_state; }
@@ -46,8 +53,10 @@ namespace agent::tool::builtin {
                 m_state = application::ports::ToolOperationState::Running;
 
                 if (m_waitMs > 0 && m_runtime) {
-                    m_runtime->waitForUpdateAsync(m_taskId, m_stdoutCursor, m_stderrCursor, m_waitMs, [this]() {
-                        completeSnapshot();
+                    QPointer<CheckTaskOperation> weakThis(this);
+                    m_waitHandle = m_runtime->waitForUpdateAsync(m_taskId, m_stdoutCursor, m_stderrCursor, m_waitMs, [weakThis]() {
+                        if (!weakThis) return;
+                        weakThis->completeSnapshot();
                     });
                 } else {
                     completeSnapshot();
@@ -55,6 +64,11 @@ namespace agent::tool::builtin {
             }
 
             void cancel() override {
+                if (m_waitHandle) {
+                    m_waitHandle->cancel();
+                    m_waitHandle.reset();
+                }
+
                 if (m_state == application::ports::ToolOperationState::Created ||
                     m_state == application::ports::ToolOperationState::Running) {
                     m_state = application::ports::ToolOperationState::Cancelled;
@@ -132,6 +146,8 @@ namespace agent::tool::builtin {
                 rootObj[QStringLiteral("stderr")] = delta.stderrDelta;
                 rootObj[QStringLiteral("stdout_cursor")] = static_cast<qint64>(delta.nextStdoutCursor);
                 rootObj[QStringLiteral("stderr_cursor")] = static_cast<qint64>(delta.nextStderrCursor);
+                rootObj[QStringLiteral("encoding")] = delta.encoding;
+                rootObj[QStringLiteral("decode_error")] = delta.decodeError;
 
                 if (delta.stdoutCursorLost) {
                     rootObj[QStringLiteral("stdout_cursor_lost")] = true;
@@ -152,6 +168,8 @@ namespace agent::tool::builtin {
                 meta[QStringLiteral("finished")] = delta.finished;
                 meta[QStringLiteral("stdout_cursor")] = static_cast<qint64>(delta.nextStdoutCursor);
                 meta[QStringLiteral("stderr_cursor")] = static_cast<qint64>(delta.nextStderrCursor);
+                meta[QStringLiteral("encoding")] = delta.encoding;
+                meta[QStringLiteral("decode_error")] = delta.decodeError;
 
                 const QString jsonText = QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Indented));
 
@@ -173,6 +191,7 @@ namespace agent::tool::builtin {
             int m_waitMs = 0;
             std::shared_ptr<application::ports::IProcessTaskRuntime> m_runtime;
             QUuid m_callerRunId;
+            std::shared_ptr<application::ports::IWaitHandle> m_waitHandle;
 
             application::ports::ToolOperationState m_state = application::ports::ToolOperationState::Created;
             bool m_finishedEmitted = false;
@@ -212,10 +231,10 @@ namespace agent::tool::builtin {
                     }},
                     {QStringLiteral("max_output_bytes"), QJsonObject{
                         {QStringLiteral("type"), QStringLiteral("integer")},
-                        {QStringLiteral("minimum"), 1024},
-                        {QStringLiteral("maximum"), 131072},
+                        {QStringLiteral("minimum"), 1},
+                        {QStringLiteral("maximum"), 1048576},
                         {QStringLiteral("default"), 32768},
-                        {QStringLiteral("description"), QStringLiteral("本次增量读取的最大字节数限制，默认 32768 (32KB)")}
+                        {QStringLiteral("description"), QStringLiteral("本次增量读取的最大字节数限制（1 ~ 1048576），默认 32768 (32KB)")}
                     }},
                     {QStringLiteral("wait_ms"), QJsonObject{
                         {QStringLiteral("type"), QStringLiteral("integer")},
@@ -232,7 +251,7 @@ namespace agent::tool::builtin {
 
     application::ports::ToolExecutionTraits CheckTaskTool::traits() const {
         application::ports::ToolExecutionTraits t;
-        t.threadSafe = true;
+        t.threadSafe = false;
         t.parallelizable = true;
         t.idempotent = true;
         t.concurrencyKey = QString();
@@ -254,8 +273,11 @@ namespace agent::tool::builtin {
         const QString taskId = args.value(QStringLiteral("task_id")).toString().trimmed();
         const quint64 stdoutCursor = static_cast<quint64>(std::max(0LL, static_cast<long long>(args.value(QStringLiteral("stdout_cursor")).toInteger(0))));
         const quint64 stderrCursor = static_cast<quint64>(std::max(0LL, static_cast<long long>(args.value(QStringLiteral("stderr_cursor")).toInteger(0))));
-        const int maxOutputBytes = args.value(QStringLiteral("max_output_bytes")).toInt(32768);
-        const int waitMs = args.value(QStringLiteral("wait_ms")).toInt(0);
+        int maxOutputBytes = args.value(QStringLiteral("max_output_bytes")).toInt(32768);
+        int waitMs = args.value(QStringLiteral("wait_ms")).toInt(0);
+
+        maxOutputBytes = std::clamp(maxOutputBytes, 1, 1048576);
+        waitMs = std::clamp(waitMs, 0, 5000);
 
         if (taskId.isEmpty()) {
             return std::make_unique<application::ports::ImmediateToolOperation>(

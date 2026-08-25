@@ -29,6 +29,8 @@ namespace domain::agent::task {
 
         qint64 durationMs = 0;                      ///< 累计运行时长（毫秒）
         QString exitError;
+        QString encoding = QStringLiteral("utf-8"); ///< 实际使用的解码编码
+        bool decodeError = false;                   ///< 解码过程中是否遇到无法解析的损坏/非法字节
     };
 
 } // namespace domain::agent::task

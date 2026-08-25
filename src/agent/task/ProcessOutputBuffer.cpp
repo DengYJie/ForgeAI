@@ -33,7 +33,7 @@ namespace agent::task {
         return m_hasTruncated;
     }
 
-    QString ProcessOutputBuffer::readFrom(
+    QByteArray ProcessOutputBuffer::readBytesFrom(
         quint64 cursor,
         int maxBytes,
         bool* cursorLost,
@@ -48,7 +48,7 @@ namespace agent::task {
         // 如果请求的游标超前于当前产出的最大值，修正到尾部
         if (cursor >= m_totalProducedBytes) {
             if (nextCursor) *nextCursor = m_totalProducedBytes;
-            return QString();
+            return QByteArray();
         }
 
         // 如果请求的游标已经滑出当前内存窗口，标记游标丢失并从当前最早可用位置读取
@@ -61,7 +61,7 @@ namespace agent::task {
         const int localOffset = static_cast<int>(effectiveCursor - m_headOffset);
         if (localOffset < 0 || localOffset >= m_buffer.size()) {
             if (nextCursor) *nextCursor = m_totalProducedBytes;
-            return QString();
+            return QByteArray();
         }
 
         const int bytesToRead = std::min<int>(maxBytes, static_cast<int>(m_buffer.size() - localOffset));
@@ -71,11 +71,11 @@ namespace agent::task {
             *nextCursor = effectiveCursor + static_cast<quint64>(bytesToRead);
         }
 
-        return QString::fromUtf8(chunk);
+        return chunk;
     }
 
-    QString ProcessOutputBuffer::fullBufferedText() const {
-        return QString::fromUtf8(m_buffer);
+    QByteArray ProcessOutputBuffer::fullBufferedBytes() const {
+        return m_buffer;
     }
 
     void ProcessOutputBuffer::clear() {

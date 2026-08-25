@@ -35,14 +35,14 @@ namespace agent::task {
         bool hasTruncated() const;
 
         /**
-         * @brief 从指定绝对游标位置读取切片数据
+         * @brief 从指定绝对游标位置读取原始字节切片
          * @param cursor 请求的绝对字节游标
          * @param maxBytes 单次最大读取字节数
          * @param cursorLost 输出：请求的游标是否已滑出缓冲区被丢弃
          * @param availableFrom 输出：当前缓冲区最早可读的游标
          * @param nextCursor 输出：下一次读取应使用的游标值
          */
-        QString readFrom(
+        QByteArray readBytesFrom(
             quint64 cursor,
             int maxBytes,
             bool* cursorLost = nullptr,
@@ -51,9 +51,9 @@ namespace agent::task {
         ) const;
 
         /**
-         * @brief 获取当前保留的全部缓冲区文本（如用于快照与前台模式全量回传）
+         * @brief 获取当前保留的全部原始缓冲区字节
          */
-        QString fullBufferedText() const;
+        QByteArray fullBufferedBytes() const;
 
         void clear();
 

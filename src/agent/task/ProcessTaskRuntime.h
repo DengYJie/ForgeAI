@@ -43,9 +43,11 @@ namespace agent::task {
 
         void cancelTasksForRun(const QUuid& runId) override;
         void cancelTasksForProject(const QUuid& projectId) override;
+        int cleanupFinishedTasks(qint64 maxAgeMs = 10 * 60 * 1000) override;
+        int cleanupTasksForRun(const QUuid& runId) override;
         void shutdown() override;
 
-        void waitForUpdateAsync(
+        std::shared_ptr<application::ports::IWaitHandle> waitForUpdateAsync(
             const QString& taskId,
             quint64 stdoutCursor,
             quint64 stderrCursor,

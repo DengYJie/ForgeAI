@@ -12,6 +12,16 @@
 namespace application::ports {
 
     /**
+     * @brief 异步等待句柄（用于主动注销或取消长轮询等待，杜绝 UAF）
+     */
+    class IWaitHandle {
+    public:
+        virtual ~IWaitHandle() = default;
+        virtual void cancel() = 0;
+        virtual bool isCancelled() const = 0;
+    };
+
+    /**
      * @brief 进程任务运行时抽象端口接口
      * @details 负责操作系统进程池的全异步生命周期管理、增量游标缓冲与安全隔离。
      */
@@ -70,6 +80,17 @@ namespace application::ports {
         virtual void cancelTasksForProject(const QUuid& projectId) = 0;
 
         /**
+         * @brief 清理已结束且超过 TTL 的旧任务
+         * @param maxAgeMs 任务结束后的保留时间（毫秒，默认 10 分钟）
+         */
+        virtual int cleanupFinishedTasks(qint64 maxAgeMs = 10 * 60 * 1000) = 0;
+
+        /**
+         * @brief 清理指定 RunId 下的所有已结束任务
+         */
+        virtual int cleanupTasksForRun(const QUuid& runId) = 0;
+
+        /**
          * @brief 应用程序关闭时的优雅资源回收
          */
         virtual void shutdown() = 0;
@@ -81,8 +102,9 @@ namespace application::ports {
          * @param stderrCursor 关注的 stderr 游标
          * @param waitMs 最大等待毫秒数（0~5000ms）
          * @param callback 唤醒回调（在主线程事件循环中触发）
+         * @return 可取消的等待句柄
          */
-        virtual void waitForUpdateAsync(
+        virtual std::shared_ptr<IWaitHandle> waitForUpdateAsync(
             const QString& taskId,
             quint64 stdoutCursor,
             quint64 stderrCursor,

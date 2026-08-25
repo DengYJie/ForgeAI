@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QTimer>
+#include <QPointer>
+#include <algorithm>
 
 namespace agent::tool::builtin {
 
@@ -30,7 +32,12 @@ namespace agent::tool::builtin {
                 m_callerRunId(callerRunId) {
             }
 
-            ~RunCommandForegroundOperation() override = default;
+            ~RunCommandForegroundOperation() override {
+                if (m_waitHandle) {
+                    m_waitHandle->cancel();
+                    m_waitHandle.reset();
+                }
+            }
 
             QString operationId() const override { return m_operationId; }
             application::ports::ToolOperationState state() const override { return m_state; }
@@ -43,6 +50,11 @@ namespace agent::tool::builtin {
             }
 
             void cancel() override {
+                if (m_waitHandle) {
+                    m_waitHandle->cancel();
+                    m_waitHandle.reset();
+                }
+
                 if (m_state == application::ports::ToolOperationState::Created ||
                     m_state == application::ports::ToolOperationState::Running) {
                     m_state = application::ports::ToolOperationState::Cancelled;
@@ -100,6 +112,8 @@ namespace agent::tool::builtin {
                     rootObj[QStringLiteral("stdout")] = delta.stdoutDelta;
                     rootObj[QStringLiteral("stderr")] = delta.stderrDelta;
                     rootObj[QStringLiteral("duration_ms")] = delta.durationMs;
+                    rootObj[QStringLiteral("encoding")] = delta.encoding;
+                    rootObj[QStringLiteral("decode_error")] = delta.decodeError;
                     if (!delta.exitError.isEmpty()) {
                         rootObj[QStringLiteral("error_message")] = delta.exitError;
                     }
@@ -109,6 +123,8 @@ namespace agent::tool::builtin {
                     meta[QStringLiteral("duration_ms")] = delta.durationMs;
                     meta[QStringLiteral("stdout_bytes")] = static_cast<qint64>(snap.stdoutTotalBytes);
                     meta[QStringLiteral("stderr_bytes")] = static_cast<qint64>(snap.stderrTotalBytes);
+                    meta[QStringLiteral("encoding")] = delta.encoding;
+                    meta[QStringLiteral("decode_error")] = delta.decodeError;
 
                     const QString jsonText = QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Indented));
 
@@ -124,9 +140,11 @@ namespace agent::tool::builtin {
                     return;
                 }
 
-                // 尚未完成，使用非阻塞异步等待
-                m_runtime->waitForUpdateAsync(m_taskId, snap.stdoutTotalBytes, snap.stderrTotalBytes, 500, [this]() {
-                    checkOrPoll();
+                // 尚未完成，使用弱引用与 WaitHandle 防护 UAF
+                QPointer<RunCommandForegroundOperation> weakThis(this);
+                m_waitHandle = m_runtime->waitForUpdateAsync(m_taskId, snap.stdoutTotalBytes, snap.stderrTotalBytes, 500, [weakThis]() {
+                    if (!weakThis) return;
+                    weakThis->checkOrPoll();
                 });
             }
 
@@ -141,6 +159,7 @@ namespace agent::tool::builtin {
             QString m_taskId;
             std::shared_ptr<application::ports::IProcessTaskRuntime> m_runtime;
             QUuid m_callerRunId;
+            std::shared_ptr<application::ports::IWaitHandle> m_waitHandle;
             application::ports::ToolOperationState m_state = application::ports::ToolOperationState::Created;
             bool m_finishedEmitted = false;
         };
@@ -167,7 +186,7 @@ namespace agent::tool::builtin {
     domain::agent::ToolDefinition RunCommandTool::definition() const {
         return {
             QStringLiteral("run_command"),
-            QStringLiteral("在当前项目工作区内执行外部程序或命令行工具（如 cmake, ctest, git, python 等）。支持前台同步等待与 background=true 后台常驻模式（配合 check_task 查询增量日志）。"),
+            QStringLiteral("在当前项目工作区路径下启动外部进程（如 cmake, ctest, git, python 等）。注意：工作目录被限制在工作区根路径下，进程自身拥有 ForgeAI 操作系统用户的权限。支持前台等待与 background=true 后台常驻模式（配合 check_task 增量观测）。"),
             QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("object")},
                 {QStringLiteral("properties"), QJsonObject{
@@ -192,11 +211,16 @@ namespace agent::tool::builtin {
                         {QStringLiteral("default"), false},
                         {QStringLiteral("description"), QStringLiteral("是否作为后台常驻任务启动（设为 true 将立即返回 task_id，后续通过 check_task 查询日志）")}
                     }},
+                    {QStringLiteral("output_encoding"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("string")},
+                        {QStringLiteral("default"), QStringLiteral("utf-8")},
+                        {QStringLiteral("description"), QStringLiteral("标准输出/错误流解码编码，如 'utf-8', 'system', 'gb18030', 'shift-jis', 'windows-1252'")}
+                    }},
                     {QStringLiteral("timeout_ms"), QJsonObject{
                         {QStringLiteral("type"), QStringLiteral("integer")},
                         {QStringLiteral("minimum"), 1000},
                         {QStringLiteral("maximum"), 3600000},
-                        {QStringLiteral("description"), QStringLiteral("执行超时毫秒数，前台默认 30000，后台默认 600000")}
+                        {QStringLiteral("description"), QStringLiteral("执行超时毫秒数（1000 ~ 3600000），前台默认 30000，后台默认 600000")}
                     }}
                 }},
                 {QStringLiteral("required"), QJsonArray{QStringLiteral("program")}}
@@ -224,6 +248,13 @@ namespace agent::tool::builtin {
         }
         const QString fullCommand = program + QLatin1Char(' ') + argList.join(QLatin1Char(' '));
 
+        QList<domain::agent::ToolPermission> perms;
+        perms.append(domain::agent::ToolPermission{
+            domain::agent::ToolPermissionType::ProcessExecute,
+            QStringLiteral("执行外部程序命令: %1").arg(program)
+        });
+
+        // 危险命令启发式风险提示（作为 risk hint，与 ProcessExecute 组合返回）
         bool isDestructive = false;
         if (program == QStringLiteral("rm") || program == QStringLiteral("del") ||
             program == QStringLiteral("rmdir") || program == QStringLiteral("format") ||
@@ -239,16 +270,13 @@ namespace agent::tool::builtin {
         }
 
         if (isDestructive) {
-            return {{
+            perms.append(domain::agent::ToolPermission{
                 domain::agent::ToolPermissionType::DestructiveOperation,
-                QStringLiteral("执行高危/破坏性进程命令: %1").arg(program)
-            }};
+                QStringLiteral("高危/破坏性操作风险提示: %1").arg(program)
+            });
         }
 
-        return {{
-            domain::agent::ToolPermissionType::ProcessExecute,
-            QStringLiteral("执行外部程序命令: %1").arg(program)
-        }};
+        return perms;
     }
 
     std::unique_ptr<application::ports::IToolOperation> RunCommandTool::execute(
@@ -265,9 +293,10 @@ namespace agent::tool::builtin {
 
         const QString relWorkingDir = args.value(QStringLiteral("working_directory")).toString(QStringLiteral("."));
         const bool isBackground = args.value(QStringLiteral("background")).toBool(false);
+        const QString outputEncoding = args.value(QStringLiteral("output_encoding")).toString(QStringLiteral("utf-8"));
         const int defaultTimeout = isBackground ? 600000 : (context.timeoutMs > 0 ? context.timeoutMs : 30000);
         int timeoutMs = args.value(QStringLiteral("timeout_ms")).toInt(defaultTimeout);
-        if (timeoutMs < 1000) timeoutMs = 1000;
+        timeoutMs = std::clamp(timeoutMs, 1000, 3600000);
 
         if (program.isEmpty()) {
             return std::make_unique<application::ports::ImmediateToolOperation>(
@@ -320,28 +349,36 @@ namespace agent::tool::builtin {
         spec.workingDirectory = workingPath;
         spec.timeoutMs = timeoutMs;
         spec.background = isBackground;
+        spec.outputEncoding = outputEncoding;
         spec.runId = context.runId;
         spec.projectId = context.projectId;
         spec.workspaceRoot = context.workspaceRoot;
 
         const QString taskId = m_taskRuntime->start(spec, context);
 
-        // 后台模式：立即返回 task_id、状态与 pid
+        // 后台模式：立即返回真实快照状态 (starting / running / failed 等)、task_id 与 pid
         if (isBackground) {
             auto snapOpt = m_taskRuntime->snapshot(taskId);
             const qint64 pid = snapOpt.has_value() ? snapOpt->pid : 0;
+            const QString stateStr = snapOpt.has_value() ?
+                (snapOpt->state == domain::agent::task::ProcessTaskState::Running ? QStringLiteral("running") :
+                (snapOpt->state == domain::agent::task::ProcessTaskState::Completed ? QStringLiteral("completed") :
+                (snapOpt->state == domain::agent::task::ProcessTaskState::Failed ? QStringLiteral("failed") : QStringLiteral("starting"))))
+                : QStringLiteral("starting");
 
             QJsonObject rootObj;
             rootObj[QStringLiteral("task_id")] = taskId;
-            rootObj[QStringLiteral("status")] = QStringLiteral("running");
+            rootObj[QStringLiteral("status")] = stateStr;
             rootObj[QStringLiteral("pid")] = pid;
             rootObj[QStringLiteral("program")] = program;
             rootObj[QStringLiteral("working_directory")] = workingPath;
+            rootObj[QStringLiteral("encoding")] = spec.outputEncoding;
 
             QJsonObject meta;
             meta[QStringLiteral("task_id")] = taskId;
             meta[QStringLiteral("pid")] = pid;
             meta[QStringLiteral("background")] = true;
+            meta[QStringLiteral("encoding")] = spec.outputEncoding;
 
             const QString jsonText = QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Indented));
 

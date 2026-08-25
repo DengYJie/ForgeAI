@@ -15,6 +15,7 @@ namespace domain::agent::task {
         QString workingDirectory;           ///< 工作目录绝对路径
         int timeoutMs = 600000;             ///< 执行超时上限（毫秒，默认 10 分钟）
         bool background = false;            ///< 是否作为后台常驻任务启动
+        QString outputEncoding = QStringLiteral("utf-8"); ///< 标准输出/错误文本解码编码 (utf-8 / system / gb18030 / shift-jis 等)
 
         // 属主与上下文元数据（用于安全隔离与级联清理）
         QUuid runId;                        ///< 所属 Agent Run 会话 ID

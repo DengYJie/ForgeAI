@@ -28,6 +28,8 @@ target_sources(ForgeAICore PRIVATE
     tool/builtin/RunCommandTool.cpp
     task/ProcessOutputBuffer.h
     task/ProcessOutputBuffer.cpp
+    task/ProcessOutputDecoder.h
+    task/ProcessOutputDecoder.cpp
     task/ProcessTask.h
     task/ProcessTask.cpp
     task/ProcessTaskRuntime.h

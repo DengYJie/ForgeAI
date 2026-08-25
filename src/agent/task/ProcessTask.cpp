@@ -1,4 +1,5 @@
 #include "ProcessTask.h"
+#include "ProcessOutputDecoder.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
 
@@ -198,6 +199,7 @@ namespace agent::task {
         snap.program = m_spec.program;
         snap.arguments = m_spec.arguments;
         snap.workingDirectory = m_spec.workingDirectory;
+        snap.outputEncoding = m_spec.outputEncoding;
         snap.pid = m_pid;
         snap.exitCode = m_exitCode;
         snap.startedAtMs = m_startedAtMs;
@@ -229,22 +231,35 @@ namespace agent::task {
         delta.exitCode = m_exitCode;
         delta.exitError = m_exitError;
         delta.durationMs = m_elapsed.isValid() ? m_elapsed.elapsed() : 0;
+        delta.encoding = ProcessOutputDecoder::normalizeEncoding(m_spec.outputEncoding);
 
-        delta.stdoutDelta = m_stdoutBuffer.readFrom(
+        quint64 rawNextStdout = 0;
+        const QByteArray rawStdout = m_stdoutBuffer.readBytesFrom(
             stdoutCursor,
             maxOutputBytes,
             &delta.stdoutCursorLost,
             &delta.stdoutAvailableFrom,
-            &delta.nextStdoutCursor
+            &rawNextStdout
         );
+        const auto stdoutDecoded = ProcessOutputDecoder::decodeChunk(rawStdout, m_spec.outputEncoding, delta.finished);
+        delta.stdoutDelta = stdoutDecoded.text;
+        const quint64 effectiveStdoutBase = delta.stdoutCursorLost ? delta.stdoutAvailableFrom : std::min(stdoutCursor, m_stdoutBuffer.totalProducedBytes());
+        delta.nextStdoutCursor = effectiveStdoutBase + static_cast<quint64>(stdoutDecoded.bytesConsumed);
 
-        delta.stderrDelta = m_stderrBuffer.readFrom(
+        quint64 rawNextStderr = 0;
+        const QByteArray rawStderr = m_stderrBuffer.readBytesFrom(
             stderrCursor,
             maxOutputBytes,
             &delta.stderrCursorLost,
             &delta.stderrAvailableFrom,
-            &delta.nextStderrCursor
+            &rawNextStderr
         );
+        const auto stderrDecoded = ProcessOutputDecoder::decodeChunk(rawStderr, m_spec.outputEncoding, delta.finished);
+        delta.stderrDelta = stderrDecoded.text;
+        const quint64 effectiveStderrBase = delta.stderrCursorLost ? delta.stderrAvailableFrom : std::min(stderrCursor, m_stderrBuffer.totalProducedBytes());
+        delta.nextStderrCursor = effectiveStderrBase + static_cast<quint64>(stderrDecoded.bytesConsumed);
+
+        delta.decodeError = stdoutDecoded.hasError || stderrDecoded.hasError;
 
         return delta;
     }

@@ -17,6 +17,7 @@ namespace domain::agent::task {
         QString program;
         QStringList arguments;
         QString workingDirectory;
+        QString outputEncoding = QStringLiteral("utf-8");
 
         qint64 pid = 0;                             ///< 操作系统进程 PID（仅作元数据参考）
         std::optional<int> exitCode;                ///< 进程退出码（运行中为 nullopt）
