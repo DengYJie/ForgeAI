@@ -7,7 +7,6 @@
 #include "data/repository/SqliteConversationRepository.h"
 #include "data/repository/JsonlMessageRepository.h"
 #include "services/conversation/ConversationService.h"
-#include "services/agent/AgentToolService.h"
 #include "services/project/ProjectContextService.h"
 
 // Note: This is a placeholder test file for the integration scenarios.

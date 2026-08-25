@@ -84,7 +84,7 @@ add_library(ForgeAICore)
 # Each first-level source module owns its explicit target source list.
 # Keep this explicit rather than using file(GLOB), so adding/removing a
 # source remains visible to CMake and to code review.
-foreach(module IN ITEMS core network llm ui domain data services application app)
+foreach(module IN ITEMS core network llm ui domain data services application agent app)
     add_subdirectory("src/${module}")
 endforeach()
 target_compile_features(ForgeAICore PUBLIC cxx_std_23)
@@ -140,8 +140,18 @@ if (BUILD_TESTING)
     set_tests_properties(MarkdownCoreTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_FONTDIR=C:/Windows/Fonts")
 
     qt_add_executable(AgentToolTests tests/AgentToolTests.cpp)
-    target_link_libraries(AgentToolTests PRIVATE ForgeAICore Qt::Test)
+    target_link_libraries(AgentToolTests PRIVATE ForgeAICore Qt::Test Qt::Sql)
     deploy_qt_application(AgentToolTests)
+    find_file(QT_QSQLITE_DLL NAMES qsqlited.dll qsqlite.dll HINTS "${QT_DIR}/plugins/sqldrivers" "${Qt6_DIR}/../../../plugins/sqldrivers" "${CMAKE_PREFIX_PATH}/plugins/sqldrivers")
+    if (WIN32 AND QT_QSQLITE_DLL)
+        add_custom_command(TARGET AgentToolTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:AgentToolTests>/sqldrivers"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${QT_QSQLITE_DLL}"
+                "$<TARGET_FILE_DIR:AgentToolTests>/sqldrivers/qsqlite.dll"
+            COMMENT "Deploying Qt sqlite plugin for AgentToolTests..."
+        )
+    endif()
     add_test(NAME AgentToolTests COMMAND AgentToolTests)
 
     qt_add_executable(AgentProtocolTests tests/AgentProtocolTests.cpp)
