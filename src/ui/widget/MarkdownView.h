@@ -11,8 +11,9 @@
 #include <FluentQt/Foundation.h>
 #include <FluentQt/TextFields.h>
 #include "MarkdownStyle.h"
-#include "ui/markdown/MarkdownDocument.h"
-#include "ui/markdown/MarkdownLayout.h"
+#include "MarkdownDocumentController.h"
+#include "MarkdownDocumentLayout.h"
+#include "MarkdownViewEventFilter.h"
 #include "ui/markdown/MarkdownRenderer.h"
 #include "ui/markdown/MarkdownTheme.h"
 #include "ui/markdown/resource/MarkdownImageResourceManager.h"
@@ -36,11 +37,6 @@ struct MarkdownViewMetrics {
     qreal documentHeight = 0;
 };
 
-/**
- * @brief Self-painted CommonMark/GFM viewer.
- * Parsing, layout and painting are deliberately separated; this class only owns
- * input, scrolling, viewport dispatch and interaction state.
- */
 class MarkdownView : public QAbstractScrollArea, public fluent::FluentElement
 {
     Q_OBJECT
@@ -49,14 +45,12 @@ public:
     explicit MarkdownView(QWidget *parent = nullptr);
     ~MarkdownView() override;
 
-    // Document loading
     void setMarkdown(const QString &markdown);
     QString markdown() const;
     void clear();
     void setHtml(const QString &html);
     QString html() const;
 
-    // Incremental streaming
     void beginStream();
     void appendMarkdown(const QString &chunk);
     void appendStreamingText(const QString &chunk);
@@ -66,12 +60,10 @@ public:
     bool isStreaming() const;
     MarkdownViewMetrics metrics() const noexcept;
 
-    // Base URL & Anchor navigation
     void setBaseUrl(const QUrl &url);
     QUrl baseUrl() const;
     void scrollToAnchor(const QString &name);
 
-    // Styling & Theme
     void setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet);
     MarkdownStyleSheet markdownStyleSheet() const;
     void resetMarkdownStyleSheetToTheme();
@@ -91,18 +83,15 @@ public:
     bool scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool smooth = true);
     void onThemeUpdated() override;
 
-    // Resource & Security Pipeline
     void setAllowNetworkAccess(bool allow);
     bool allowNetworkAccess() const;
     void clearResourceCache();
     void setImageLoadingEnabled(bool enabled);
     bool imageLoadingEnabled() const;
 
-    // HTML / Extension Configuration
     void setAllowHtml(bool allow);
     bool allowHtml() const;
 
-    // Text Selection, Clipboard & Search
     QString selectedText() const;
     QString selectedHtml() const;
     void copy();
@@ -149,21 +138,26 @@ protected:
     void focusOutEvent(QFocusEvent *event) override;
 
 private:
-    void rebuildDocument();
-    void relayout();
+    void onLayoutReady(const ui::markdown::DocumentLayout& layout);
+    void onTaskToggleRequested(int blockIndex);
+    void onRepaintRequested();
+    void updateContentWidth();
     void updateScrollBars();
-    void requestImageResources();
     void updateAutoFitHeight();
     void paintViewport(QPaintEvent *event);
     QPointF toDocument(const QPointF &viewportPosition) const;
     QString documentPlainText() const;
-    void setSelectionPosition(int position, bool extend);
-    void showCopiedFeedback(int blockIndex);
-    void toggleTask(const ui::markdown::BlockLayout& block);
-    qsizetype stableStreamingBoundary() const;
+    void requestImageResources();
+    bool handleBlockWheel(QWheelEvent* event);
 
-    QString m_markdown;
-    QString m_streamTail;
+    MarkdownDocumentController* m_controller;
+    MarkdownDocumentLayout* m_layoutCache;
+    MarkdownViewEventFilter* m_eventFilter;
+    ui::markdown::MarkdownRenderer m_renderer;
+    ui::markdown::MarkdownTheme m_theme;
+    ui::markdown::MarkdownImageResourceManager m_resources;
+    ui::markdown::DocumentLayout m_documentLayout;
+
     QUrl m_baseUrl;
     MarkdownStyleSheet m_styleSheet;
     bool m_usesThemeStyleSheet = true;
@@ -171,34 +165,13 @@ private:
     bool m_autoFitHeight = false;
     int m_autoFitContentHeight = 1;
     qreal m_maxContentWidth = 0;
-    bool m_streaming = false;
-    bool m_allowNetworkAccess = true;
-    bool m_allowHtml = true;
     qreal m_zoomFactor = 1.0;
-    ui::markdown::MarkdownParser m_parser;
-    ui::markdown::MarkdownDocument m_document;
-    ui::markdown::MarkdownDocument m_activeTailDocument;
-    ui::markdown::MarkdownLayoutEngine m_layoutEngine;
-    ui::markdown::DocumentLayout m_documentLayout;
-    ui::markdown::DocumentLayout m_stableStreamLayout;
-    ui::markdown::MarkdownRenderer m_renderer;
-    ui::markdown::MarkdownTheme m_theme;
-    ui::markdown::MarkdownImageResourceManager m_resources;
-    ui::markdown::TextSelection m_selection;
-    int m_selectionAnchor = -1;
-    int m_hoveredBlock = -1;
-    int m_hoveredCopyBlock = -1;
-    int m_copiedBlock = -1;
+    bool m_allowNetworkAccess = true;
+
     QHash<int, ui::markdown::BlockScrollOffset> m_blockScrollOffsets;
     QHash<int, ui::markdown::BlockScrollOffset> m_blockTargetScrollOffsets;
     QHash<int, QVariantAnimation*> m_blockScrollAnimations;
-    bool m_selecting = false;
-    bool m_selectable = true;
-    bool m_taskListInteractive = false;
-    bool m_layoutDirty = true;
-    bool m_stableStreamLayoutDirty = true;
-    qreal m_stableStreamLayoutWidth = -1;
-    quint64 m_stableStreamThemeVersion = 0;
+
     QSizeF m_lastDocumentSize;
     MarkdownViewMetrics m_metrics;
 };

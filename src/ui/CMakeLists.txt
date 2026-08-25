@@ -15,6 +15,12 @@ target_sources(ForgeAICore PRIVATE
     widget/MarkdownStyle.cpp
     widget/MarkdownView.h
     widget/MarkdownView.cpp
+    widget/MarkdownDocumentController.h
+    widget/MarkdownDocumentController.cpp
+    widget/MarkdownDocumentLayout.h
+    widget/MarkdownDocumentLayout.cpp
+    widget/MarkdownViewEventFilter.h
+    widget/MarkdownViewEventFilter.cpp
     markdown/MarkdownDocument.h
     markdown/MarkdownDocument.cpp
     markdown/MarkdownTheme.h

@@ -1,19 +1,16 @@
 #include "MarkdownView.h"
 
 #include <QClipboard>
-#include <QContextMenuEvent>
-#include <QApplication>
+#include <QElapsedTimer>
+#include <QEasingCurve>
 #include <QGuiApplication>
 #include <QKeyEvent>
-#include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
-#include <QMenu>
-#include <QElapsedTimer>
-#include <QRegularExpression>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QVariantAnimation>
-#include <QEasingCurve>
+#include <QWheelEvent>
 #include <FluentQt/Design.h>
 
 namespace ui::widget {
@@ -25,138 +22,83 @@ MarkdownView::MarkdownView(QWidget *parent)
           : ui::markdown::MarkdownTheme::light(font()))
     , m_resources(this)
 {
+    m_controller = new MarkdownDocumentController(this);
+    m_layoutCache = new MarkdownDocumentLayout(m_controller, this);
+    m_eventFilter = new MarkdownViewEventFilter(viewport(), this);
+
     setFrameShape(QFrame::NoFrame);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // A message list should not hand initial keyboard focus to the first
-    // rendered Markdown block.  Click still enables selection/copy focus.
     setFocusPolicy(Qt::ClickFocus);
     viewport()->setMouseTracking(true);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    m_layoutCache->setTheme(m_theme);
+
+    connect(m_controller, &MarkdownDocumentController::streamingChanged, this, &MarkdownView::streamingChanged);
+    connect(m_controller, &MarkdownDocumentController::streamingFinished, this, &MarkdownView::streamingFinished);
+    connect(m_controller, &MarkdownDocumentController::taskToggled, this, &MarkdownView::taskToggled);
+
+    connect(m_layoutCache, &MarkdownDocumentLayout::layoutReady, this, &MarkdownView::onLayoutReady);
+
+    connect(m_eventFilter, &MarkdownViewEventFilter::repaintRequested, this, &MarkdownView::onRepaintRequested);
+    connect(m_eventFilter, &MarkdownViewEventFilter::linkActivated, this, &MarkdownView::linkActivated);
+    connect(m_eventFilter, &MarkdownViewEventFilter::linkHighlighted, this, &MarkdownView::linkHighlighted);
+    connect(m_eventFilter, &MarkdownViewEventFilter::selectionChanged, this, &MarkdownView::selectionChanged);
+    connect(m_eventFilter, &MarkdownViewEventFilter::imageActivated, this, &MarkdownView::imageActivated);
+    connect(m_eventFilter, &MarkdownViewEventFilter::contextMenuRequested, this, &MarkdownView::contextMenuRequested);
+    connect(m_eventFilter, &MarkdownViewEventFilter::taskToggleRequested, this, &MarkdownView::onTaskToggleRequested);
+    connect(m_eventFilter, &MarkdownViewEventFilter::cursorChanged, this, [this](Qt::CursorShape shape) {
+        viewport()->setCursor(shape);
+    });
+    connect(m_eventFilter, &MarkdownViewEventFilter::blockScrollRequested, this, [this](int idx, qreal dx, qreal dy, bool smooth) {
+        scrollBlock(idx, dx, dy, smooth);
+    });
+
     connect(&m_resources, &ui::markdown::MarkdownImageResourceManager::imageUpdated, this, [this] {
         viewport()->update();
     });
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    m_eventFilter->setDocumentLayout(&m_documentLayout);
+    m_eventFilter->setScrollOffsets(&m_blockScrollOffsets);
+    m_eventFilter->setScrollBarValueGetter([this] { return verticalScrollBar()->value(); });
 }
 
 MarkdownView::~MarkdownView() = default;
 
 void MarkdownView::setMarkdown(const QString &markdown)
 {
-    if (m_markdown == markdown) return;
-    // Message cards commonly receive content before their first show event.
-    // Resolve the inherited Fluent mode at the content-binding boundary too.
     if (m_usesThemeStyleSheet) onThemeUpdated();
-    m_markdown = markdown;
-    rebuildDocument();
+    m_controller->setMarkdown(markdown);
 }
 
-QString MarkdownView::markdown() const
-{
-    return m_markdown;
-}
+QString MarkdownView::markdown() const { return m_controller->markdown(); }
 
-void MarkdownView::clear()
-{
-    setMarkdown({});
-}
+void MarkdownView::clear() { setMarkdown({}); }
 
-void MarkdownView::setHtml(const QString &html)
-{
-    m_markdown = html;
-    rebuildDocument();
-}
+void MarkdownView::setHtml(const QString &html) { m_controller->setMarkdown(html); }
 
-QString MarkdownView::html() const
-{
-    return m_markdown;
-}
+QString MarkdownView::html() const { return m_controller->markdown(); }
 
 void MarkdownView::beginStream()
 {
-    m_streaming = true;
-    m_markdown.clear();
-    m_streamTail.clear();
-    m_document = ui::markdown::MarkdownDocument{};
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_stableStreamLayout = {};
-    m_stableStreamLayoutDirty = true;
     m_metrics = {};
-    relayout();
-    emit streamingChanged(true);
+    m_controller->beginStream();
     updateAutoFitHeight();
 }
 
-void MarkdownView::appendMarkdown(const QString &chunk)
-{
-    if (chunk.isEmpty()) return;
-    m_markdown += chunk;
-    m_streamTail += chunk;
-    const qsizetype boundary = stableStreamingBoundary();
-    if (boundary > 0) {
-        QElapsedTimer parseTimer; parseTimer.start();
-        m_document.append(m_parser.parse(m_streamTail.left(boundary)));
-        m_metrics.lastParseMs = parseTimer.elapsed();
-        ++m_metrics.stableParseCount;
-        m_streamTail.remove(0, boundary);
-        m_stableStreamLayoutDirty = true;
-    }
-    // Only the active tail is re-parsed per token; stable blocks retain their AST.
-    QElapsedTimer tailParseTimer; tailParseTimer.start();
-    m_activeTailDocument = m_parser.parse(m_streamTail);
-    m_metrics.lastParseMs = tailParseTimer.elapsed();
-    ++m_metrics.tailParseCount;
-    relayout();
-}
+void MarkdownView::appendMarkdown(const QString &chunk) { m_controller->appendMarkdown(chunk); }
+void MarkdownView::appendStreamingText(const QString &chunk) { m_controller->appendMarkdown(chunk); }
+void MarkdownView::appendHtml(const QString &htmlFragment) { m_controller->appendMarkdown(htmlFragment); }
+void MarkdownView::finishStream() { m_controller->finishStream(); }
+void MarkdownView::finishStreaming() { m_controller->finishStream(); }
+bool MarkdownView::isStreaming() const { return m_controller->isStreaming(); }
 
-void MarkdownView::appendStreamingText(const QString& chunk)
-{
-    appendMarkdown(chunk);
-}
+MarkdownViewMetrics MarkdownView::metrics() const noexcept { return m_metrics; }
 
-void MarkdownView::appendHtml(const QString &htmlFragment)
-{
-    appendMarkdown(htmlFragment);
-}
-
-void MarkdownView::finishStream()
-{
-    m_streaming = false;
-    emit streamingChanged(false);
-    emit streamingFinished();
-    m_streamTail.clear();
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    rebuildDocument();
-}
-
-void MarkdownView::finishStreaming()
-{
-    finishStream();
-}
-
-bool MarkdownView::isStreaming() const
-{
-    return m_streaming;
-}
-
-MarkdownViewMetrics MarkdownView::metrics() const noexcept
-{
-    return m_metrics;
-}
-
-void MarkdownView::setBaseUrl(const QUrl &url)
-{
-    m_baseUrl = url;
-}
-
-QUrl MarkdownView::baseUrl() const
-{
-    return m_baseUrl;
-}
-
-void MarkdownView::scrollToAnchor(const QString &name)
-{
-    Q_UNUSED(name)
-}
+void MarkdownView::setBaseUrl(const QUrl &url) { m_baseUrl = url; }
+QUrl MarkdownView::baseUrl() const { return m_baseUrl; }
+void MarkdownView::scrollToAnchor(const QString &name) { Q_UNUSED(name) }
 
 void MarkdownView::setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet)
 {
@@ -168,13 +110,12 @@ void MarkdownView::setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet)
     if (styleSheet.colors.text.isValid()) m_theme.text = styleSheet.colors.text;
     if (styleSheet.colors.link.isValid()) m_theme.link = styleSheet.colors.link;
     if (styleSheet.colors.codeBackground.isValid()) m_theme.codeBackground = styleSheet.colors.codeBackground;
-    ++m_theme.version; relayout();
+    ++m_theme.version;
+    m_layoutCache->setTheme(m_theme);
+    updateContentWidth();
 }
 
-MarkdownStyleSheet MarkdownView::markdownStyleSheet() const
-{
-    return m_styleSheet;
-}
+MarkdownStyleSheet MarkdownView::markdownStyleSheet() const { return m_styleSheet; }
 
 void MarkdownView::resetMarkdownStyleSheetToTheme()
 {
@@ -186,13 +127,11 @@ void MarkdownView::setTheme(const ui::markdown::MarkdownTheme& theme)
 {
     m_theme = theme;
     m_usesThemeStyleSheet = false;
-    relayout();
+    m_layoutCache->setTheme(m_theme);
+    updateContentWidth();
 }
 
-ui::markdown::MarkdownTheme MarkdownView::theme() const
-{
-    return m_theme;
-}
+ui::markdown::MarkdownTheme MarkdownView::theme() const { return m_theme; }
 
 void MarkdownView::setBaseFont(const QFont& font)
 {
@@ -200,7 +139,8 @@ void MarkdownView::setBaseFont(const QFont& font)
     m_theme.bodyFont = font;
     m_theme.codeFont.setPointSizeF(font.pointSizeF() * .93);
     ++m_theme.version;
-    relayout();
+    m_layoutCache->setTheme(m_theme);
+    updateContentWidth();
 }
 
 void MarkdownView::setContentMargins(const QMarginsF& margins)
@@ -208,7 +148,8 @@ void MarkdownView::setContentMargins(const QMarginsF& margins)
     if (m_theme.contentMargins == margins) return;
     m_theme.contentMargins = margins;
     ++m_theme.version;
-    relayout();
+    m_layoutCache->setTheme(m_theme);
+    updateContentWidth();
 }
 
 void MarkdownView::setTransparentBackground(bool transparent)
@@ -217,387 +158,26 @@ void MarkdownView::setTransparentBackground(bool transparent)
     viewport()->update();
 }
 
-bool MarkdownView::isTransparentBackground() const
-{
-    return m_transparentBackground;
-}
+bool MarkdownView::isTransparentBackground() const { return m_transparentBackground; }
 
 void MarkdownView::setAutoFitHeight(bool enable)
 {
     if (m_autoFitHeight == enable) return;
     m_autoFitHeight = enable;
-    // Auto-fit Markdown must not absorb spare vertical layout space in a
-    // message card; otherwise the action bar is pushed far below short text.
     setSizePolicy(QSizePolicy::Expanding, enable ? QSizePolicy::Fixed : QSizePolicy::Preferred);
     updateAutoFitHeight();
 }
 
-bool MarkdownView::isAutoFitHeight() const
-{
-    return m_autoFitHeight;
-}
+bool MarkdownView::isAutoFitHeight() const { return m_autoFitHeight; }
 
 void MarkdownView::setMaxContentWidth(qreal maxWidth)
 {
     if (qAbs(m_maxContentWidth - maxWidth) < 0.5) return;
     m_maxContentWidth = maxWidth;
-    relayout();
+    updateContentWidth();
 }
 
-qreal MarkdownView::maxContentWidth() const
-{
-    return m_maxContentWidth;
-}
-
-void MarkdownView::onThemeUpdated()
-{
-    if (m_usesThemeStyleSheet) {
-        // Do not infer mode from QWidget palette or one surface color: both
-        // can be overridden/transparent. FluentElement resolves the exact
-        // inherited Light/Dark mode for this subtree.
-        m_theme = fluent::FluentElement::currentTheme() == fluent::FluentElement::Dark
-            ? ui::markdown::MarkdownTheme::dark(font())
-            : ui::markdown::MarkdownTheme::light(font());
-    }
-    relayout();
-}
-
-void MarkdownView::showEvent(QShowEvent* event)
-{
-    QAbstractScrollArea::showEvent(event);
-    // FluentElement callbacks are not guaranteed during a child widget's
-    // constructor. Resolve after it has entered the themed parent tree.
-    onThemeUpdated();
-}
-
-void MarkdownView::setAllowNetworkAccess(bool allow)
-{
-    m_allowNetworkAccess = allow;
-    m_resources.setNetworkAccessEnabled(allow);
-}
-
-bool MarkdownView::allowNetworkAccess() const
-{
-    return m_allowNetworkAccess;
-}
-
-void MarkdownView::clearResourceCache()
-{
-    m_resources.clear();
-    requestImageResources();
-}
-
-void MarkdownView::setImageLoadingEnabled(bool enabled)
-{
-    setAllowNetworkAccess(enabled);
-}
-
-bool MarkdownView::imageLoadingEnabled() const
-{
-    return allowNetworkAccess();
-}
-
-void MarkdownView::setAllowHtml(bool allow)
-{
-    m_allowHtml = allow;
-}
-
-bool MarkdownView::allowHtml() const
-{
-    return m_allowHtml;
-}
-
-QString MarkdownView::selectedText() const
-{
-    const QString text = documentPlainText();
-    if (!m_selection.isValid()) return {};
-    const int begin = qBound(0, qMin(m_selection.anchor, m_selection.position), text.size());
-    const int end = qBound(0, qMax(m_selection.anchor, m_selection.position), text.size());
-    return text.mid(begin, end - begin);
-}
-
-QString MarkdownView::selectedHtml() const
-{
-    return selectedText().toHtmlEscaped();
-}
-
-void MarkdownView::copy()
-{
-    const QString text = selectedText();
-    if (!text.isEmpty()) QGuiApplication::clipboard()->setText(text);
-}
-
-void MarkdownView::selectAll()
-{
-    if (!m_selectable) return;
-    m_selection = {0, static_cast<int>(documentPlainText().size())};
-    m_selectionAnchor = 0;
-    emit selectionChanged(m_selection.isValid());
-    viewport()->update();
-}
-
-void MarkdownView::setSelectable(bool selectable)
-{
-    if (m_selectable == selectable) return;
-    m_selectable = selectable;
-    if (!m_selectable) {
-        m_selection = {};
-        m_selectionAnchor = -1;
-        emit selectionChanged(false);
-        viewport()->update();
-    }
-}
-
-bool MarkdownView::isSelectable() const
-{
-    return m_selectable;
-}
-
-void MarkdownView::setTaskListInteractive(bool interactive)
-{
-    m_taskListInteractive = interactive;
-}
-
-bool MarkdownView::isTaskListInteractive() const
-{
-    return m_taskListInteractive;
-}
-
-void MarkdownView::setZoomFactor(qreal factor)
-{
-    m_zoomFactor = factor;
-    m_theme.bodyFont.setPointSizeF(font().pointSizeF() * qBound<qreal>(0.5, factor, 3.0));
-    m_theme.codeFont.setPointSizeF(m_theme.bodyFont.pointSizeF() * .93);
-    ++m_theme.version; relayout();
-}
-
-qreal MarkdownView::zoomFactor() const
-{
-    return m_zoomFactor;
-}
-
-bool MarkdownView::findText(const QString &text,
-                            QTextDocument::FindFlags flags,
-                            bool incremental,
-                            bool *wrapped)
-{
-    const QString haystack = documentPlainText();
-    const Qt::CaseSensitivity caseSensitivity = flags.testFlag(QTextDocument::FindCaseSensitively) ? Qt::CaseSensitive : Qt::CaseInsensitive;
-    int from = incremental && m_selection.position >= 0 ? m_selection.position : 0;
-    int found = haystack.indexOf(text, from, caseSensitivity);
-    bool didWrap = false;
-    if (found < 0 && from > 0) { found = haystack.indexOf(text, 0, caseSensitivity); didWrap = found >= 0; }
-    if (wrapped) *wrapped = didWrap;
-    if (found < 0) return false;
-    m_selection = {found, found + static_cast<int>(text.size())}; m_selectionAnchor = found; viewport()->update(); return true;
-}
-
-void MarkdownView::updateAutoFitHeight()
-{
-    const int h = qMax(16, qCeil(m_documentLayout.size.height()));
-    if (h != m_autoFitContentHeight) {
-        m_autoFitContentHeight = h;
-        updateGeometry();
-        emit autoFitHeightChanged(h);
-    }
-}
-
-bool MarkdownView::hasHeightForWidth() const
-{
-    return m_autoFitHeight;
-}
-
-int MarkdownView::heightForWidth(int width) const
-{
-    if (!m_autoFitHeight || width <= 0) {
-        return sizeHint().height();
-    }
-    const qreal contentWidth = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
-    if (qAbs(m_documentLayout.width - contentWidth) < 1.0 && m_autoFitContentHeight > 0) {
-        return m_autoFitContentHeight;
-    }
-    const auto docLayout = m_layoutEngine.layout(m_document, contentWidth, m_theme);
-    return qMax(16, qCeil(docLayout.size.height()));
-}
-
-QSize MarkdownView::sizeHint() const
-{
-    int h = m_autoFitContentHeight > 0 ? m_autoFitContentHeight : 16;
-    if (h <= 0) h = 16;
-    int w = m_documentLayout.size.width() > 0 ? qCeil(m_documentLayout.size.width()) : 256;
-    return QSize(qMax(20, w), h);
-}
-
-QSize MarkdownView::minimumSizeHint() const
-{
-    return QSize(20, m_autoFitHeight ? sizeHint().height() : 24);
-}
-
-void MarkdownView::wheelEvent(QWheelEvent *event)
-{
-    QAbstractScrollArea::wheelEvent(event);
-}
-
-void MarkdownView::resizeEvent(QResizeEvent *event)
-{
-    QAbstractScrollArea::resizeEvent(event);
-    relayout();
-}
-
-void MarkdownView::rebuildDocument()
-{
-    QElapsedTimer parseTimer; parseTimer.start();
-    m_document = m_parser.parse(m_markdown);
-    m_metrics.lastParseMs = parseTimer.elapsed();
-    ++m_metrics.fullParseCount;
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_stableStreamLayout = {};
-    m_stableStreamLayoutDirty = true;
-    relayout();
-}
-
-void MarkdownView::relayout()
-{
-    qreal contentWidth = 0;
-    if (m_maxContentWidth > 0) {
-        contentWidth = m_maxContentWidth;
-    } else if (viewport() && viewport()->width() > 1) {
-        contentWidth = viewport()->width();
-    } else if (width() > 1) {
-        contentWidth = width();
-    } else if (parentWidget() && parentWidget()->width() > 50) {
-        contentWidth = parentWidget()->width();
-    } else if (window() && window()->width() > 100) {
-        contentWidth = qMin<qreal>(1000, window()->width() * 0.85);
-    } else {
-        contentWidth = 800;
-    }
-    if (!m_streaming) {
-        m_documentLayout = m_layoutEngine.layout(m_document, contentWidth, m_theme);
-    } else {
-        if (m_stableStreamLayoutDirty || m_stableStreamLayoutWidth != contentWidth || m_stableStreamThemeVersion != m_theme.version) {
-            QElapsedTimer stableTimer; stableTimer.start();
-            m_stableStreamLayout = m_layoutEngine.layout(m_document, contentWidth, m_theme);
-            m_metrics.lastStableLayoutMs = stableTimer.elapsed();
-            ++m_metrics.stableLayoutCount;
-            m_stableStreamLayoutDirty = false;
-            m_stableStreamLayoutWidth = contentWidth;
-            m_stableStreamThemeVersion = m_theme.version;
-        }
-        QElapsedTimer tailTimer; tailTimer.start();
-        const ui::markdown::DocumentLayout tail = m_layoutEngine.layout(m_activeTailDocument, contentWidth, m_theme);
-        m_metrics.lastTailLayoutMs = tailTimer.elapsed();
-        ++m_metrics.tailLayoutCount;
-        m_documentLayout = m_stableStreamLayout;
-        const qreal yOffset = m_stableStreamLayout.size.height() - m_theme.contentMargins.bottom() - m_theme.contentMargins.top();
-        const int textOffset = m_stableStreamLayout.textLength();
-        for (ui::markdown::BlockLayout block : tail.blocks) {
-            block.rect.translate(0, yOffset);
-            block.copyButtonRect.translate(0, yOffset);
-            block.documentTextOffset += textOffset;
-            m_documentLayout.blocks.push_back(std::move(block));
-        }
-        m_documentLayout.size = QSizeF(contentWidth, yOffset + tail.size.height());
-        m_documentLayout.width = contentWidth;
-        m_documentLayout.themeVersion = m_theme.version;
-    }
-    updateScrollBars(); updateAutoFitHeight(); viewport()->update();
-    m_metrics.blockCount = m_documentLayout.blocks.size();
-    m_metrics.documentHeight = m_documentLayout.size.height();
-    requestImageResources();
-    if (m_lastDocumentSize != m_documentLayout.size) {
-        m_lastDocumentSize = m_documentLayout.size;
-        emit documentSizeChanged(m_lastDocumentSize);
-    }
-}
-
-void MarkdownView::requestImageResources()
-{
-    for (const ui::markdown::BlockLayout& block : m_documentLayout.blocks) {
-        if (block.kind == ui::markdown::BlockKind::Image)
-            m_resources.request(block.imageUrl, m_baseUrl);
-    }
-}
-
-void MarkdownView::updateScrollBars()
-{
-    const int height = qCeil(m_documentLayout.size.height());
-    verticalScrollBar()->setPageStep(viewport()->height());
-    verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
-    setVerticalScrollBarPolicy(m_autoFitHeight ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
-}
-
-QPointF MarkdownView::toDocument(const QPointF& viewportPosition) const { return viewportPosition + QPointF(0, verticalScrollBar()->value()); }
-
-QString MarkdownView::documentPlainText() const
-{
-    QString text;
-    for (const auto& block : m_documentLayout.blocks) {
-        if (block.inlineLayout) text += block.inlineLayout->text;
-        else if (block.kind == ui::markdown::BlockKind::CodeBlock) text += block.code;
-        text += u'\n';
-    }
-    return text;
-}
-
-void MarkdownView::setSelectionPosition(int position, bool extend)
-{
-    if (position < 0) return;
-    if (!extend || m_selectionAnchor < 0) m_selectionAnchor = position;
-    m_selection = {m_selectionAnchor, position};
-    emit selectionChanged(m_selection.isValid());
-    viewport()->update();
-}
-
-void MarkdownView::showCopiedFeedback(int blockIndex)
-{
-    m_copiedBlock = blockIndex;
-    viewport()->update();
-    QTimer::singleShot(1200, this, [this, blockIndex] {
-        if (m_copiedBlock != blockIndex) return;
-        m_copiedBlock = -1;
-        viewport()->update();
-    });
-}
-
-void MarkdownView::toggleTask(const ui::markdown::BlockLayout& block)
-{
-    if (block.taskSourceLine <= 0) return;
-    int start = 0;
-    for (int line = 1; line < block.taskSourceLine; ++line) {
-        start = m_markdown.indexOf(u'\n', start);
-        if (start < 0) return;
-        ++start;
-    }
-    const int end = m_markdown.indexOf(u'\n', start);
-    const int length = (end < 0 ? m_markdown.size() : end) - start;
-    const QString line = m_markdown.mid(start, length);
-    const QRegularExpression checkbox(QStringLiteral("\\[([ xX])\\]"));
-    const QRegularExpressionMatch match = checkbox.match(line);
-    if (!match.hasMatch()) return;
-    const bool checked = !block.taskChecked;
-    m_markdown.replace(start + match.capturedStart(1), 1, checked ? QStringLiteral("x") : QStringLiteral(" "));
-    emit taskToggled(block.taskSourceLine, checked);
-    rebuildDocument();
-}
-
-qsizetype MarkdownView::stableStreamingBoundary() const
-{
-    bool inFence = false;
-    qsizetype lastBoundary = 0;
-    qsizetype start = 0;
-    while (start <= m_streamTail.size()) {
-        const qsizetype end = m_streamTail.indexOf(u'\n', start);
-        const qsizetype lineEnd = end < 0 ? m_streamTail.size() : end;
-        const QStringView line{m_streamTail.constData() + start, lineEnd - start};
-        const QStringView trimmed = line.trimmed();
-        if (trimmed.startsWith(u"```") || trimmed.startsWith(u"~~~")) inFence = !inFence;
-        if (!inFence && trimmed.isEmpty()) lastBoundary = end < 0 ? lineEnd : end + 1;
-        if (end < 0) break;
-        start = end + 1;
-    }
-    return lastBoundary;
-}
+qreal MarkdownView::maxContentWidth() const { return m_maxContentWidth; }
 
 ui::markdown::BlockScrollOffset MarkdownView::blockScrollOffset(int blockIndex) const
 {
@@ -606,9 +186,7 @@ ui::markdown::BlockScrollOffset MarkdownView::blockScrollOffset(int blockIndex) 
 
 void MarkdownView::setBlockScrollOffset(int blockIndex, const ui::markdown::BlockScrollOffset& offset)
 {
-    if (auto* anim = m_blockScrollAnimations.value(blockIndex)) {
-        anim->stop();
-    }
+    if (auto* anim = m_blockScrollAnimations.value(blockIndex)) anim->stop();
     m_blockTargetScrollOffsets.insert(blockIndex, offset);
     m_blockScrollOffsets.insert(blockIndex, offset);
     viewport()->update();
@@ -623,25 +201,20 @@ bool MarkdownView::scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool 
     const auto current = m_blockScrollOffsets.value(blockIndex);
     auto target = m_blockTargetScrollOffsets.value(blockIndex, current);
 
-    if (block.scrollInfo.hasHorizontalScroll()) {
+    if (block.scrollInfo.hasHorizontalScroll())
         target.x = qBound<qreal>(0, target.x + deltaX, block.scrollInfo.maxScrollX());
-    }
-    if (block.scrollInfo.hasVerticalScroll()) {
+    if (block.scrollInfo.hasVerticalScroll())
         target.y = qBound<qreal>(0, target.y + deltaY, block.scrollInfo.maxScrollY());
-    }
 
     const auto prevTarget = m_blockTargetScrollOffsets.value(blockIndex, current);
     if (qFuzzyCompare(target.x, current.x) && qFuzzyCompare(target.y, current.y) &&
-        qFuzzyCompare(target.x, prevTarget.x) && qFuzzyCompare(target.y, prevTarget.y)) {
+        qFuzzyCompare(target.x, prevTarget.x) && qFuzzyCompare(target.y, prevTarget.y))
         return false;
-    }
 
     m_blockTargetScrollOffsets.insert(blockIndex, target);
 
     if (!smooth) {
-        if (auto* anim = m_blockScrollAnimations.value(blockIndex)) {
-            anim->stop();
-        }
+        if (auto* anim = m_blockScrollAnimations.value(blockIndex)) anim->stop();
         m_blockScrollOffsets.insert(blockIndex, target);
         viewport()->update();
         return true;
@@ -668,112 +241,137 @@ bool MarkdownView::scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool 
     return true;
 }
 
-void MarkdownView::paintViewport(QPaintEvent* event)
+void MarkdownView::onThemeUpdated()
 {
-    QElapsedTimer paintTimer; paintTimer.start();
-    QPainter painter(viewport());
-    if (!m_transparentBackground) painter.fillRect(event->rect(), m_theme.background.isValid() ? m_theme.background : palette().color(QPalette::Base));
-    painter.save();
-    painter.translate(0, -verticalScrollBar()->value());
-    m_metrics.visibleBlockCount = m_renderer.paint(painter, m_documentLayout, m_theme, QRectF(event->rect()).translated(0, verticalScrollBar()->value()), m_selection, m_hoveredBlock, m_hoveredCopyBlock, m_blockScrollOffsets, m_resources.images(), m_copiedBlock);
-    painter.restore();
-    m_metrics.lastPaintMs = paintTimer.elapsed();
+    if (m_usesThemeStyleSheet) {
+        m_theme = fluent::FluentElement::currentTheme() == fluent::FluentElement::Dark
+            ? ui::markdown::MarkdownTheme::dark(font())
+            : ui::markdown::MarkdownTheme::light(font());
+    }
+    m_layoutCache->setTheme(m_theme);
+    updateContentWidth();
 }
 
-bool MarkdownView::viewportEvent(QEvent* event)
+void MarkdownView::setAllowNetworkAccess(bool allow)
 {
-    if (event->type() == QEvent::Paint) { paintViewport(static_cast<QPaintEvent*>(event)); return true; }
-    if (event->type() == QEvent::Leave) {
-        m_hoveredBlock = -1;
-        m_hoveredCopyBlock = -1;
-        viewport()->setCursor(Qt::ArrowCursor);
-        viewport()->update();
-        return true;
-    }
-    if (event->type() == QEvent::Wheel) {
-        auto* wheel = static_cast<QWheelEvent*>(event);
-        const QPointF docPos = toDocument(wheel->position());
-        const auto hit = m_renderer.hitTest(m_documentLayout, docPos, m_blockScrollOffsets);
-        if (hit.blockIndex >= 0 && hit.blockIndex < m_documentLayout.blocks.size()) {
-            const auto& block = m_documentLayout.blocks.at(hit.blockIndex);
-            if (block.scrollInfo.hasHorizontalScroll() || block.scrollInfo.hasVerticalScroll()) {
-                const QPoint numPixels = wheel->pixelDelta();
-                const QPoint numDegrees = wheel->angleDelta() / 8;
-                qreal dx = 0;
-                qreal dy = 0;
-                bool isPixel = false;
-                if (!numPixels.isNull()) {
-                    dx = -numPixels.x();
-                    dy = -numPixels.y();
-                    isPixel = true;
-                } else if (!numDegrees.isNull()) {
-                    dx = -numDegrees.x();
-                    dy = -numDegrees.y();
-                }
-                if (wheel->modifiers().testFlag(Qt::ShiftModifier) && dx == 0) {
-                    dx = dy;
-                    dy = 0;
-                } else if (block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll() && dx == 0) {
-                    dx = dy;
-                    dy = 0;
-                }
-                if (scrollBlock(hit.blockIndex, dx, dy, !isPixel)) {
-                    wheel->accept();
-                    return true;
-                }
-            }
-        }
-    }
-    if (event->type() == QEvent::MouseMove) {
-        auto* mouse = static_cast<QMouseEvent*>(event);
-        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()), m_blockScrollOffsets);
-        m_hoveredBlock = hit.blockIndex;
-        m_hoveredCopyBlock = (hit.kind == ui::markdown::HitKind::CodeCopy) ? hit.blockIndex : -1;
-        Qt::CursorShape cursor = Qt::ArrowCursor;
-        if (hit.kind == ui::markdown::HitKind::Link || hit.kind == ui::markdown::HitKind::CodeCopy) {
-            cursor = Qt::PointingHandCursor;
-        } else if (hit.kind == ui::markdown::HitKind::TaskCheckbox && m_taskListInteractive) {
-            cursor = Qt::PointingHandCursor;
-        } else if (hit.kind == ui::markdown::HitKind::Text) {
-            cursor = m_selectable ? Qt::IBeamCursor : Qt::ArrowCursor;
-        }
-        viewport()->setCursor(cursor);
-        if (m_selecting && hit.textOffset >= 0) setSelectionPosition(hit.textOffset, true);
-        if (hit.kind == ui::markdown::HitKind::Link) emit linkHighlighted(QUrl(hit.value));
-        viewport()->update();
-        return true;
-    }
-    if (event->type() == QEvent::MouseButtonPress) {
-        auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()), m_blockScrollOffsets); m_selecting = m_selectable && (hit.kind == ui::markdown::HitKind::Text || hit.kind == ui::markdown::HitKind::Link); if (m_selecting) setSelectionPosition(hit.textOffset, mouse->modifiers().testFlag(Qt::ShiftModifier)); return true; }
-    }
-    if (event->type() == QEvent::MouseButtonRelease) {
-        auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()), m_blockScrollOffsets); if (m_selecting && m_selection.anchor == m_selection.position && hit.kind == ui::markdown::HitKind::Link) emit linkActivated(QUrl(hit.value)); if (hit.kind == ui::markdown::HitKind::Image) emit imageActivated(QUrl(hit.value)); if (hit.kind == ui::markdown::HitKind::CodeCopy) { QGuiApplication::clipboard()->setText(hit.value); showCopiedFeedback(hit.blockIndex); } if (hit.kind == ui::markdown::HitKind::TaskCheckbox && m_taskListInteractive && hit.blockIndex >= 0) toggleTask(m_documentLayout.blocks.at(hit.blockIndex)); m_selecting = false; return true; }
-    }
-    if (event->type() == QEvent::ContextMenu) {
-        auto* context = static_cast<QContextMenuEvent*>(event);
-        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(context->pos()), m_blockScrollOffsets);
-        emit contextMenuRequested(context->pos(), hit.kind == ui::markdown::HitKind::Link ? QUrl(hit.value) : QUrl{}, hit.kind == ui::markdown::HitKind::Image ? QUrl(hit.value) : QUrl{});
-        QMenu menu(this);
-        if (hit.kind == ui::markdown::HitKind::Link) {
-            QAction* open = menu.addAction(tr("打开链接"));
-            connect(open, &QAction::triggered, this, [this, url = QUrl(hit.value)] { emit linkActivated(url); });
-            QAction* copyLink = menu.addAction(tr("复制链接"));
-            connect(copyLink, &QAction::triggered, this, [url = hit.value] { QGuiApplication::clipboard()->setText(url); });
-        } else if (hit.kind == ui::markdown::HitKind::CodeCopy || (hit.blockIndex >= 0 && m_documentLayout.blocks.at(hit.blockIndex).kind == ui::markdown::BlockKind::CodeBlock)) {
-            const QString code = hit.kind == ui::markdown::HitKind::CodeCopy ? hit.value : m_documentLayout.blocks.at(hit.blockIndex).code;
-            QAction* copyCode = menu.addAction(tr("复制代码"));
-            connect(copyCode, &QAction::triggered, this, [this, code, index = hit.blockIndex] { QGuiApplication::clipboard()->setText(code); showCopiedFeedback(index); });
-        } else {
-            QAction* copyText = menu.addAction(tr("复制"));
-            copyText->setEnabled(m_selection.isValid());
-            connect(copyText, &QAction::triggered, this, &MarkdownView::copy);
-            QAction* selectAll = menu.addAction(tr("全选"));
-            connect(selectAll, &QAction::triggered, this, [this] { m_selection = {0, static_cast<int>(documentPlainText().size())}; m_selectionAnchor = 0; emit selectionChanged(true); viewport()->update(); });
-        }
-        menu.exec(context->globalPos());
-        return true;
-    }
-    return QAbstractScrollArea::viewportEvent(event);
+    m_allowNetworkAccess = allow;
+    m_resources.setNetworkAccessEnabled(allow);
+}
+
+bool MarkdownView::allowNetworkAccess() const { return m_allowNetworkAccess; }
+
+void MarkdownView::clearResourceCache()
+{
+    m_resources.clear();
+    requestImageResources();
+}
+
+void MarkdownView::setImageLoadingEnabled(bool enabled) { setAllowNetworkAccess(enabled); }
+bool MarkdownView::imageLoadingEnabled() const { return allowNetworkAccess(); }
+
+void MarkdownView::setAllowHtml(bool allow) { m_controller->setAllowHtml(allow); }
+bool MarkdownView::allowHtml() const { return m_controller->allowHtml(); }
+
+QString MarkdownView::selectedText() const
+{
+    const QString text = documentPlainText();
+    if (!m_eventFilter->selection().isValid()) return {};
+    const auto sel = m_eventFilter->selection();
+    const int begin = qBound(0, qMin(sel.anchor, sel.position), text.size());
+    const int end = qBound(0, qMax(sel.anchor, sel.position), text.size());
+    return text.mid(begin, end - begin);
+}
+
+QString MarkdownView::selectedHtml() const { return selectedText().toHtmlEscaped(); }
+
+void MarkdownView::copy()
+{
+    const QString text = selectedText();
+    if (!text.isEmpty()) QGuiApplication::clipboard()->setText(text);
+}
+
+void MarkdownView::selectAll()
+{
+    if (!isSelectable()) return;
+    const int len = static_cast<int>(documentPlainText().size());
+    m_eventFilter->setSelection({0, len});
+    emit selectionChanged(true);
+    viewport()->update();
+}
+
+void MarkdownView::setSelectable(bool selectable) { m_eventFilter->setSelectable(selectable); }
+bool MarkdownView::isSelectable() const { return m_eventFilter->selection().isValid() || true; }
+
+void MarkdownView::setTaskListInteractive(bool interactive) { m_eventFilter->setTaskListInteractive(interactive); }
+bool MarkdownView::isTaskListInteractive() const { return false; }
+
+void MarkdownView::setZoomFactor(qreal factor)
+{
+    m_zoomFactor = factor;
+    m_theme.bodyFont.setPointSizeF(font().pointSizeF() * qBound<qreal>(0.5, factor, 3.0));
+    m_theme.codeFont.setPointSizeF(m_theme.bodyFont.pointSizeF() * .93);
+    ++m_theme.version;
+    m_layoutCache->setTheme(m_theme);
+    updateContentWidth();
+}
+
+qreal MarkdownView::zoomFactor() const { return m_zoomFactor; }
+
+bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags, bool incremental, bool *wrapped)
+{
+    const QString haystack = documentPlainText();
+    const Qt::CaseSensitivity cs = flags.testFlag(QTextDocument::FindCaseSensitively) ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    const auto sel = m_eventFilter->selection();
+    int from = incremental && sel.position >= 0 ? sel.position : 0;
+    int found = haystack.indexOf(text, from, cs);
+    bool didWrap = false;
+    if (found < 0 && from > 0) { found = haystack.indexOf(text, 0, cs); didWrap = found >= 0; }
+    if (wrapped) *wrapped = didWrap;
+    if (found < 0) return false;
+    m_eventFilter->setSelection({found, found + static_cast<int>(text.size())});
+    viewport()->update();
+    return true;
+}
+
+bool MarkdownView::hasHeightForWidth() const { return m_autoFitHeight; }
+
+int MarkdownView::heightForWidth(int width) const
+{
+    if (!m_autoFitHeight || width <= 0) return sizeHint().height();
+    const qreal cw = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
+    if (qAbs(m_documentLayout.width - cw) < 1.0 && m_autoFitContentHeight > 0) return m_autoFitContentHeight;
+    ui::markdown::MarkdownLayoutEngine tmp;
+    const auto docLayout = tmp.layout(m_controller->stableDocument(), cw, m_theme);
+    return qMax(16, qCeil(docLayout.size.height()));
+}
+
+QSize MarkdownView::sizeHint() const
+{
+    int h = m_autoFitContentHeight > 0 ? m_autoFitContentHeight : 16;
+    int w = m_documentLayout.size.width() > 0 ? qCeil(m_documentLayout.size.width()) : 256;
+    return QSize(qMax(20, w), qMax(16, h));
+}
+
+QSize MarkdownView::minimumSizeHint() const
+{
+    return QSize(20, m_autoFitHeight ? sizeHint().height() : 24);
+}
+
+void MarkdownView::showEvent(QShowEvent* event)
+{
+    QAbstractScrollArea::showEvent(event);
+    onThemeUpdated();
+}
+
+void MarkdownView::wheelEvent(QWheelEvent *event)
+{
+    QAbstractScrollArea::wheelEvent(event);
+}
+
+void MarkdownView::resizeEvent(QResizeEvent *event)
+{
+    QAbstractScrollArea::resizeEvent(event);
+    updateContentWidth();
 }
 
 void MarkdownView::keyPressEvent(QKeyEvent* event)
@@ -786,11 +384,149 @@ void MarkdownView::keyPressEvent(QKeyEvent* event)
 void MarkdownView::focusOutEvent(QFocusEvent* event)
 {
     QAbstractScrollArea::focusOutEvent(event);
-    if (!m_selection.isValid()) return;
-    m_selection = {};
-    m_selectionAnchor = -1;
-    emit selectionChanged(false);
+    if (!m_eventFilter->selection().isValid()) return;
+    m_eventFilter->clearSelection();
+}
+
+void MarkdownView::onLayoutReady(const ui::markdown::DocumentLayout& layout)
+{
+    m_documentLayout = layout;
+    m_metrics.blockCount = m_documentLayout.blocks.size();
+    m_metrics.documentHeight = m_documentLayout.size.height();
+    const auto lm = m_layoutCache->metrics();
+    m_metrics.stableLayoutCount = lm.stableLayoutCount;
+    m_metrics.tailLayoutCount = lm.tailLayoutCount;
+    m_metrics.lastStableLayoutMs = lm.lastStableLayoutMs;
+    m_metrics.lastTailLayoutMs = lm.lastTailLayoutMs;
+    updateScrollBars();
+    updateAutoFitHeight();
+    requestImageResources();
+    if (m_lastDocumentSize != m_documentLayout.size) {
+        m_lastDocumentSize = m_documentLayout.size;
+        emit documentSizeChanged(m_lastDocumentSize);
+    }
     viewport()->update();
+}
+
+void MarkdownView::onTaskToggleRequested(int blockIndex)
+{
+    if (blockIndex == -2) {
+        selectAll();
+        return;
+    }
+    if (blockIndex < 0 || blockIndex >= m_documentLayout.blocks.size()) return;
+    const auto& block = m_documentLayout.blocks.at(blockIndex);
+    m_controller->toggleTaskAtLine(block.taskSourceLine, block.taskChecked);
+}
+
+void MarkdownView::onRepaintRequested()
+{
+    viewport()->update();
+}
+
+void MarkdownView::updateContentWidth()
+{
+    qreal w = 0;
+    if (m_maxContentWidth > 0) w = m_maxContentWidth;
+    else if (viewport() && viewport()->width() > 1) w = viewport()->width();
+    else if (width() > 1) w = width();
+    else if (parentWidget() && parentWidget()->width() > 50) w = parentWidget()->width();
+    else if (window() && window()->width() > 100) w = qMin<qreal>(1000, window()->width() * 0.85);
+    else w = 800;
+    m_layoutCache->setWidth(w);
+}
+
+void MarkdownView::updateScrollBars()
+{
+    const int height = qCeil(m_documentLayout.size.height());
+    verticalScrollBar()->setPageStep(viewport()->height());
+    verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
+    setVerticalScrollBarPolicy(m_autoFitHeight ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
+}
+
+void MarkdownView::updateAutoFitHeight()
+{
+    const int h = qMax(16, qCeil(m_documentLayout.size.height()));
+    if (h != m_autoFitContentHeight) {
+        m_autoFitContentHeight = h;
+        updateGeometry();
+        emit autoFitHeightChanged(h);
+    }
+}
+
+void MarkdownView::paintViewport(QPaintEvent* event)
+{
+    QElapsedTimer paintTimer; paintTimer.start();
+    QPainter painter(viewport());
+    if (!m_transparentBackground) painter.fillRect(event->rect(), m_theme.background.isValid() ? m_theme.background : palette().color(QPalette::Base));
+    painter.save();
+    painter.translate(0, -verticalScrollBar()->value());
+    const QRectF exposed = QRectF(event->rect()).translated(0, verticalScrollBar()->value());
+    m_metrics.visibleBlockCount = m_renderer.paint(painter, m_documentLayout, m_theme, exposed,
+                                                    m_eventFilter->selection(),
+                                                    m_eventFilter->hoveredBlock(),
+                                                    m_eventFilter->hoveredCopyBlock(),
+                                                    m_blockScrollOffsets,
+                                                    m_resources.images(),
+                                                    m_eventFilter->copiedBlock());
+    painter.restore();
+    m_metrics.lastPaintMs = paintTimer.elapsed();
+}
+
+bool MarkdownView::handleBlockWheel(QWheelEvent* event)
+{
+    const QPointF docPos = toDocument(event->position());
+    const auto hit = m_renderer.hitTest(m_documentLayout, docPos, m_blockScrollOffsets);
+    if (hit.blockIndex < 0 || hit.blockIndex >= m_documentLayout.blocks.size()) return false;
+    const auto& block = m_documentLayout.blocks.at(hit.blockIndex);
+    if (!block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll()) return false;
+
+    const QPoint numPixels = event->pixelDelta();
+    const QPoint numDegrees = event->angleDelta() / 8;
+    qreal dx = 0, dy = 0;
+    bool isPixel = false;
+    if (!numPixels.isNull()) { dx = -numPixels.x(); dy = -numPixels.y(); isPixel = true; }
+    else if (!numDegrees.isNull()) { dx = -numDegrees.x(); dy = -numDegrees.y(); }
+
+    if (event->modifiers().testFlag(Qt::ShiftModifier) && dx == 0) { dx = dy; dy = 0; }
+    else if (block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll() && dx == 0) { dx = dy; dy = 0; }
+
+    if (scrollBlock(hit.blockIndex, dx, dy, !isPixel)) { event->accept(); return true; }
+    return false;
+}
+
+bool MarkdownView::viewportEvent(QEvent* event)
+{
+    if (event->type() == QEvent::Paint) { paintViewport(static_cast<QPaintEvent*>(event)); return true; }
+    if (event->type() == QEvent::Wheel) {
+        if (handleBlockWheel(static_cast<QWheelEvent*>(event))) return true;
+    }
+    if (m_eventFilter->handleViewportEvent(event)) return true;
+    return QAbstractScrollArea::viewportEvent(event);
+}
+
+QPointF MarkdownView::toDocument(const QPointF& viewportPosition) const
+{
+    return viewportPosition + QPointF(0, verticalScrollBar()->value());
+}
+
+QString MarkdownView::documentPlainText() const
+{
+    QString text;
+    for (const auto& block : m_documentLayout.blocks) {
+        if (block.inlineLayout) text += block.inlineLayout->text;
+        else if (block.kind == ui::markdown::BlockKind::CodeBlock) text += block.code;
+        text += u'\n';
+    }
+    return text;
+}
+
+void MarkdownView::requestImageResources()
+{
+    for (const auto& block : m_documentLayout.blocks) {
+        if (block.kind == ui::markdown::BlockKind::Image)
+            m_resources.request(block.imageUrl, m_baseUrl);
+    }
 }
 
 } // namespace ui::widget
