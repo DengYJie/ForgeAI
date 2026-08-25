@@ -17,6 +17,7 @@ namespace application::ports {
         QString workspaceRoot;
         QString conversationId;
         QUuid projectId;
+        int timeoutMs = 30000;
     };
 
     /**
@@ -36,6 +37,14 @@ namespace application::ports {
          */
         virtual QList<domain::agent::ToolPermission> permissions() const {
             return {};
+        }
+
+        /**
+         * @brief 该工具是否支持并发多线程执行
+         * @details 内置纯文件IO与计算工具返回 true；依赖主线程 QObject / IPC 子进程的工具返回 false
+         */
+        virtual bool isThreadSafe() const {
+            return true;
         }
 
         /**

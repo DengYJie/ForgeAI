@@ -39,8 +39,9 @@ namespace llm::mcp {
             };
         }
 
-        // 统一转发给底层客户端时使用 MCP 服务的原始工具名
-        return m_session->client()->callTool(call.id, m_originalToolName, call.arguments);
+        // 统一转发给底层客户端时使用 MCP 服务的原始工具名，并透传超时控制
+        const int timeoutMs = context.timeoutMs > 0 ? context.timeoutMs : 30000;
+        return m_session->client()->callTool(call.id, m_originalToolName, call.arguments, timeoutMs);
     }
 
 } // namespace llm::mcp

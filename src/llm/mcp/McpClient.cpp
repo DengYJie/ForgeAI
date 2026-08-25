@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QThread>
 
 namespace llm::mcp {
 
@@ -136,6 +137,14 @@ namespace llm::mcp {
         const QString& argumentsJson,
         int timeoutMs
     ) {
+        if (thread() && QThread::currentThread() != thread()) {
+            domain::agent::ToolResult crossThreadRes{toolCallId, QStringLiteral("跨线程调用失败"), true};
+            QMetaObject::invokeMethod(this, [this, toolCallId, name, argumentsJson, timeoutMs, &crossThreadRes]() {
+                crossThreadRes = this->callTool(toolCallId, name, argumentsJson, timeoutMs);
+            }, Qt::BlockingQueuedConnection);
+            return crossThreadRes;
+        }
+
         domain::agent::ToolResult result{toolCallId, {}, true};
         const QJsonObject argsObj = QJsonDocument::fromJson(argumentsJson.toUtf8()).object();
 

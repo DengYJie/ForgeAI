@@ -22,6 +22,9 @@ namespace llm::mcp {
         QList<domain::agent::ToolPermission> permissions() const override {
             return {{domain::agent::ToolPermissionType::ExternalService, QStringLiteral("调用外部 MCP 服务: %1").arg(m_serverName)}};
         }
+        bool isThreadSafe() const override {
+            return false;
+        }
         domain::agent::ToolResult execute(
             const domain::agent::ToolCall& call,
             const application::ports::ToolExecutionContext& context
