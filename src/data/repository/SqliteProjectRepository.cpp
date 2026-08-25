@@ -3,9 +3,19 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
-#include "data/sqlite/SqlHelper.h"
 
 namespace data::repository {
+namespace {
+bool hasColumn(const QSqlDatabase& db, const QString& table, const QString& column) {
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) return false;
+    while (query.next()) {
+        if (query.value(1).toString() == column) return true;
+    }
+    return false;
+}
+}
+
 SqliteProjectRepository::SqliteProjectRepository(const QString& connectionName) : m_connectionName(connectionName) {}
 bool SqliteProjectRepository::initializeDatabase() {
     auto db = QSqlDatabase::database(m_connectionName);
@@ -14,7 +24,7 @@ bool SqliteProjectRepository::initializeDatabase() {
     
     // Migration: add is_pinned column to existing project table if it doesn't exist
     if (ok) {
-        if (!data::sqlite::SqlHelper::checkColumnExists("project", "is_pinned", db)) {
+        if (!hasColumn(db, QStringLiteral("project"), QStringLiteral("is_pinned"))) {
             q.exec("ALTER TABLE project ADD COLUMN is_pinned INTEGER DEFAULT 0");
         }
     }

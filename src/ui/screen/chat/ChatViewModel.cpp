@@ -1,5 +1,6 @@
 #include "ChatViewModel.h"
 #include <QDateTime>
+#include <QTimer>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QFile>

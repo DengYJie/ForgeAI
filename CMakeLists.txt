@@ -1,13 +1,10 @@
-cmake_minimum_required(VERSION 3.16)
-project(ForgeAI LANGUAGES C CXX)
-
-set(CMAKE_UNITY_BUILD ON)
-set(CMAKE_UNITY_BUILD_BATCH_SIZE 16)
+cmake_minimum_required(VERSION 3.21)
+project(ForgeAI VERSION 1.7.1 LANGUAGES C CXX)
 
 include(qt.cmake)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+option(FORGEAI_UPDATE_MODELS "Refresh models.dev metadata while configuring" OFF)
 
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR}
@@ -21,30 +18,25 @@ find_package(Qt${QT_VERSION_MAJOR}
 )
 
 include(FetchContent)
-find_package(Git REQUIRED)
-FetchContent_Declare(fluentqt GIT_REPOSITORY https://github.com/L-1124/Fluent-Qt.git GIT_TAG my)
-FetchContent_GetProperties(fluentqt)
-if (NOT fluentqt_POPULATED)
-    FetchContent_Populate(fluentqt)
-    add_subdirectory(${fluentqt_SOURCE_DIR} ${fluentqt_BINARY_DIR})
-endif ()
-
-FetchContent_Declare(qwindowkit GIT_REPOSITORY https://github.com/stdware/qwindowkit.git GIT_TAG 1.5.0)
-FetchContent_GetProperties(qwindowkit)
-if (NOT qwindowkit_POPULATED)
-    FetchContent_Populate(qwindowkit)
-    add_subdirectory(${qwindowkit_SOURCE_DIR} ${qwindowkit_BINARY_DIR})
-endif ()
-
 set(CMARK_TESTS OFF CACHE BOOL "" FORCE)
 set(CMARK_SHARED OFF CACHE BOOL "" FORCE)
 set(CMARK_STATIC ON CACHE BOOL "" FORCE)
-FetchContent_Declare(cmark-gfm GIT_REPOSITORY https://github.com/github/cmark-gfm.git GIT_TAG 0.29.0.gfm.13)
-FetchContent_GetProperties(cmark-gfm)
-if (NOT cmark-gfm_POPULATED)
-    FetchContent_Populate(cmark-gfm)
-    add_subdirectory(${cmark-gfm_SOURCE_DIR} ${cmark-gfm_BINARY_DIR})
-endif ()
+FetchContent_Declare(fluentqt
+    GIT_REPOSITORY https://github.com/L-1124/Fluent-Qt.git
+    GIT_TAG ff2ee27081458ad1ff9fe83a71c651acef056824
+)
+FetchContent_Declare(qwindowkit
+    GIT_REPOSITORY https://github.com/stdware/qwindowkit.git
+    GIT_TAG 35e88f3655720ed0537c7dd1dde243bf4a70c94c
+)
+FetchContent_Declare(cmark-gfm
+    GIT_REPOSITORY https://github.com/github/cmark-gfm.git
+    GIT_TAG 587a12bb54d95ac37241377e6ddc93ea0e45439b
+)
+# Declare every dependency before making any available, so this top-level
+# project owns their versions. FETCHCONTENT_SOURCE_DIR_<NAME> remains the
+# supported developer/CI escape hatch for an offline local checkout.
+FetchContent_MakeAvailable(fluentqt qwindowkit cmark-gfm)
 
 if (MSVC)
     if (TARGET libcmark-gfm_static)
@@ -481,6 +473,7 @@ set(CORE_SOURCES
 )
 
 add_library(ForgeAICore STATIC ${CORE_SOURCES})
+target_compile_features(ForgeAICore PUBLIC cxx_std_23)
 target_compile_definitions(ForgeAICore PUBLIC CMARK_GFM_STATIC_DEFINE CMARK_GFM_EXTENSIONS_STATIC_DEFINE)
 target_include_directories(ForgeAICore PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
