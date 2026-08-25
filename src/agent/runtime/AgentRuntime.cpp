@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QUuid>
 #include <QTimer>
+#include <future>
 #include "domain/conversation/MessageBlock.h"
 
 namespace agent::runtime {
@@ -18,6 +19,9 @@ namespace agent::runtime {
         m_conversationService(conversationService),
         m_toolRegistry(toolRegistry),
         m_checkpointRepo(checkpointRepo) {
+        m_timeoutTimer = new QTimer(this);
+        m_timeoutTimer->setSingleShot(true);
+        connect(m_timeoutTimer, &QTimer::timeout, this, &AgentRuntime::onTimeout);
     }
 
     AgentRuntime::~AgentRuntime() {
@@ -49,11 +53,26 @@ namespace agent::runtime {
     }
 
     void AgentRuntime::cleanupCurrentOp() {
+        if (m_timeoutTimer) {
+            m_timeoutTimer->stop();
+        }
         if (m_currentOp) {
             m_currentOp->disconnect(this);
             m_currentOp->deleteLater();
             m_currentOp = nullptr;
         }
+    }
+
+    void AgentRuntime::onTimeout() {
+        if (!isRunning()) return;
+        cleanupCurrentOp();
+        domain::llm::ChatError err;
+        err.category = domain::llm::ChatErrorCategory::Network;
+        err.code = QStringLiteral("RequestTimeout");
+        err.userMessage = QStringLiteral("Agent 操作执行超时（%1 ms）。").arg(m_context.policy.timeoutMs);
+        setState(domain::agent::AgentRunStatus::Failed, err.userMessage);
+        saveCheckpoint();
+        emit runFailed(m_context.sessionId, err);
     }
 
     void AgentRuntime::saveCheckpoint() {
@@ -140,8 +159,15 @@ namespace agent::runtime {
         const auto request = buildChatRequest(history);
 
         cleanupCurrentOp();
+        if (m_context.policy.timeoutMs > 0 && m_timeoutTimer) {
+            m_timeoutTimer->start(m_context.policy.timeoutMs);
+        }
+
         m_currentOp = m_chatGateway->sendRequest(m_context.provider, request);
         if (!m_currentOp) {
+            if (m_timeoutTimer) {
+                m_timeoutTimer->stop();
+            }
             domain::llm::ChatError err;
             err.category = domain::llm::ChatErrorCategory::Provider;
             err.code = QStringLiteral("RequestStartFailed");
@@ -167,7 +193,20 @@ namespace agent::runtime {
         request.reasoningEffort = m_context.reasoningEffort;
 
         if (m_toolRegistry) {
-            request.tools = m_toolRegistry->definitions();
+            const auto allDefs = m_toolRegistry->definitions();
+            QList<domain::agent::ToolDefinition> defs;
+            if (!m_context.enabledTools.isEmpty()) {
+                for (const auto& def : allDefs) {
+                    if (m_context.enabledTools.contains(def.name)) {
+                        defs.append(def);
+                    }
+                }
+            } else {
+                defs = allDefs;
+            }
+            if (!defs.isEmpty()) {
+                request.tools = defs;
+            }
         }
 
         if (!m_context.systemPrompt.trimmed().isEmpty()) {
@@ -341,6 +380,10 @@ namespace agent::runtime {
     }
 
     void AgentRuntime::processExecutableToolCalls() {
+        if (m_timeoutTimer) {
+            m_timeoutTimer->stop();
+        }
+
         application::ports::ToolExecutionContext execContext{
             m_context.workspaceRoot,
             m_context.sessionId,
@@ -348,6 +391,7 @@ namespace agent::runtime {
         };
 
         bool hasPendingPermission = false;
+        QList<domain::agent::ToolCall> allowedCalls;
 
         for (const auto& call : m_activeToolCalls) {
             // 如果该工具调用已存在执行结果，跳过避免重复执行
@@ -359,6 +403,19 @@ namespace agent::runtime {
                 }
             }
             if (alreadyExecuted) continue;
+
+            // 1. 校验 enabledTools
+            if (!m_context.enabledTools.isEmpty() && !m_context.enabledTools.contains(call.name)) {
+                domain::agent::ToolResult result{
+                    call.id,
+                    QStringLiteral("安全策略拒绝执行操作：工具 '%1' 未在当前智能体启用列表中。").arg(call.name),
+                    true
+                };
+                m_pendingToolResults.append(result);
+                m_state.results = m_pendingToolResults;
+                emit toolResultReady(m_context.sessionId, result);
+                continue;
+            }
 
             domain::agent::ToolPermission requiredPerm;
             domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
@@ -394,15 +451,39 @@ namespace agent::runtime {
                 hasPendingPermission = true;
                 emit permissionRequested(m_context.sessionId, call, requiredPerm);
             } else {
-                domain::agent::ToolResult result;
-                if (m_toolRegistry) {
-                    result = m_toolRegistry->execute(call, execContext);
-                } else {
-                    result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                allowedCalls.append(call);
+            }
+        }
+
+        if (!allowedCalls.isEmpty()) {
+            if (m_context.policy.allowParallelToolExecution && allowedCalls.size() > 1) {
+                std::vector<std::future<domain::agent::ToolResult>> futures;
+                for (const auto& call : allowedCalls) {
+                    futures.push_back(std::async(std::launch::async, [this, call, execContext]() {
+                        if (m_toolRegistry) {
+                            return m_toolRegistry->execute(call, execContext);
+                        }
+                        return domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                    }));
                 }
-                m_pendingToolResults.append(result);
-                m_state.results = m_pendingToolResults;
-                emit toolResultReady(m_context.sessionId, result);
+                for (auto& fut : futures) {
+                    auto result = fut.get();
+                    m_pendingToolResults.append(result);
+                    m_state.results = m_pendingToolResults;
+                    emit toolResultReady(m_context.sessionId, result);
+                }
+            } else {
+                for (const auto& call : allowedCalls) {
+                    domain::agent::ToolResult result;
+                    if (m_toolRegistry) {
+                        result = m_toolRegistry->execute(call, execContext);
+                    } else {
+                        result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                    }
+                    m_pendingToolResults.append(result);
+                    m_state.results = m_pendingToolResults;
+                    emit toolResultReady(m_context.sessionId, result);
+                }
             }
         }
 
@@ -480,6 +561,9 @@ namespace agent::runtime {
                     emit stateChanged(m_state);
                 }
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
+                if (m_timeoutTimer) {
+                    m_timeoutTimer->stop();
+                }
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_context.sessionId, assistantMsg);
@@ -494,6 +578,9 @@ namespace agent::runtime {
                     emit runCompleted(m_context.sessionId);
                 }
             } else if constexpr (std::is_same_v<T, domain::llm::EventError>) {
+                if (m_timeoutTimer) {
+                    m_timeoutTimer->stop();
+                }
                 const bool isCancelled = (arg.error.category == domain::llm::ChatErrorCategory::Cancelled);
                 if (isCancelled) {
                     setState(domain::agent::AgentRunStatus::Cancelled);

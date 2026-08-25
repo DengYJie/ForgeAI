@@ -38,6 +38,7 @@ namespace agent::runtime {
 
     private Q_SLOTS:
         void onChatEventReceived(const domain::llm::ChatEvent& event);
+        void onTimeout();
 
     private:
         void setState(domain::agent::AgentRunStatus status, const QString& errorMessage = {});
@@ -58,6 +59,7 @@ namespace agent::runtime {
         AgentRunContext m_context;
         domain::agent::AgentRunState m_state;
         application::ports::IChatOperation* m_currentOp = nullptr;
+        class QTimer* m_timeoutTimer = nullptr;
 
         QString m_replyBuffer;
         QString m_thoughtBuffer;

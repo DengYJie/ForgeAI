@@ -24,6 +24,8 @@ namespace agent::runtime {
         bool useDeepThinking = false;
         QString reasoningEffort;
 
+        QStringList enabledTools;
+
         domain::agent::AgentPolicy policy;
     };
 

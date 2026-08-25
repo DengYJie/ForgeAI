@@ -180,6 +180,9 @@ namespace application::usecase::agent {
         context.useWebSearch = useWebSearch;
         context.useDeepThinking = useDeepThinking;
         context.reasoningEffort = reasoningEffort;
+        if (agentConfig.has_value()) {
+            context.enabledTools = agentConfig->enabledTools;
+        }
 
         if (!effSystemPrompt.trimmed().isEmpty()) {
             context.systemPrompt = effSystemPrompt;
@@ -197,10 +200,16 @@ namespace application::usecase::agent {
 
             QList<domain::agent::Skill> filteredSkills;
             for (const auto& sk : projCtx.skills) {
+                const QString skId = sk.id.isEmpty() ? sk.name : sk.id;
                 if (!enabledSkills.isEmpty() && !enabledSkills.contains(sk.id) && !enabledSkills.contains(sk.name)) {
                     continue;
                 }
-                if (m_skillRegistry && !m_skillRegistry->hasSkill(sk.id.isEmpty() ? sk.name : sk.id)) {
+                if (m_skillRegistry) {
+                    auto regSkill = m_skillRegistry->findSkill(skId);
+                    if (!regSkill.has_value() || !regSkill->isEnabled) {
+                        continue;
+                    }
+                } else if (!sk.isEnabled) {
                     continue;
                 }
                 filteredSkills.append(sk);
