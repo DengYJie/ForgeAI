@@ -11,12 +11,16 @@ namespace application::usecase::agent {
         domain::service::IModelService* modelService,
         domain::service::IProjectContextService* projectContextService,
         llm::mcp::McpManager* mcpManager,
+        domain::repository::IAgentRepository* agentRepository,
+        ::agent::skill::SkillRegistry* skillRegistry,
         QObject* parent
     ) : QObject(parent),
         m_runtime(runtime),
         m_modelService(modelService),
         m_projectContextService(projectContextService),
-        m_mcpManager(mcpManager) {
+        m_mcpManager(mcpManager),
+        m_agentRepository(agentRepository),
+        m_skillRegistry(skillRegistry) {
 
         if (m_runtime) {
             connect(m_runtime, &ports::IAgentRuntime::userMessageCreated, this, &RunAgentUseCase::userMessageCreated);
@@ -63,7 +67,8 @@ namespace application::usecase::agent {
         bool useWebSearch,
         bool useDeepThinking,
         const QString& reasoningEffort,
-        const QString& customSystemPrompt
+        const QString& customSystemPrompt,
+        const QUuid& agentId
     ) {
         if (!m_runtime) {
             domain::llm::ChatError err;
@@ -83,6 +88,42 @@ namespace application::usecase::agent {
             return;
         }
 
+        // 查找关联的 Agent 配置（如指定 agentId 或项目默认配置）
+        std::optional<domain::agent::Agent> agentConfig;
+        if (m_agentRepository) {
+            if (!agentId.isNull()) {
+                agentConfig = m_agentRepository->getAgent(agentId);
+            } else if (!projectId.isNull()) {
+                const auto agents = m_agentRepository->getAllAgents();
+                for (const auto& a : agents) {
+                    if (a.projectId.has_value() && a.projectId.value() == projectId) {
+                        agentConfig = a;
+                        break;
+                    }
+                }
+            }
+        }
+
+        QString effProviderId = providerId;
+        QString effModelId = modelId;
+        QString effSystemPrompt = customSystemPrompt;
+        QStringList enabledMcpServers;
+        QStringList enabledSkills;
+
+        if (agentConfig.has_value()) {
+            if (effProviderId.isEmpty() && !agentConfig->providerId.isEmpty()) {
+                effProviderId = agentConfig->providerId;
+            }
+            if (effModelId.isEmpty() && !agentConfig->modelId.isEmpty()) {
+                effModelId = agentConfig->modelId;
+            }
+            if (effSystemPrompt.isEmpty() && !agentConfig->systemPrompt.isEmpty()) {
+                effSystemPrompt = agentConfig->systemPrompt;
+            }
+            enabledMcpServers = agentConfig->enabledMcpServerIds;
+            enabledSkills = agentConfig->enabledSkills;
+        }
+
         const auto models = m_modelService->getEnabledResolvedModels();
         if (models.isEmpty()) {
             domain::llm::ChatError err;
@@ -95,8 +136,8 @@ namespace application::usecase::agent {
         }
 
         const auto selected = std::find_if(models.cbegin(), models.cend(), [&](const domain::model::ResolvedModel& model) {
-            return (providerId.isEmpty() || model.provider.id == providerId)
-                && (modelId.isEmpty() || model.requestModelId() == modelId);
+            return (effProviderId.isEmpty() || model.provider.id == effProviderId)
+                && (effModelId.isEmpty() || model.requestModelId() == effModelId);
         });
 
         if (selected == models.cend()) {
@@ -118,6 +159,9 @@ namespace application::usecase::agent {
                 if (QFile::exists(cfgPath)) {
                     const auto serverConfigs = m_mcpManager->parseConfigFile(cfgPath);
                     for (auto sCfg : serverConfigs) {
+                        if (!enabledMcpServers.isEmpty() && !enabledMcpServers.contains(sCfg.name)) {
+                            continue;
+                        }
                         if (sCfg.cwd.isEmpty()) sCfg.cwd = workspaceRoot;
                         m_mcpManager->registerServer(sCfg);
                         m_mcpManager->startServer(sCfg.name);
@@ -137,15 +181,32 @@ namespace application::usecase::agent {
         context.useDeepThinking = useDeepThinking;
         context.reasoningEffort = reasoningEffort;
 
-        if (!customSystemPrompt.trimmed().isEmpty()) {
-            context.systemPrompt = customSystemPrompt;
-        } else if (m_projectContextService && !workspaceRoot.isEmpty()) {
-            const auto projCtx = m_projectContextService->load(workspaceRoot);
-            context.systemPrompt = m_contextBuilder.buildSystemPrompt(context, projCtx);
+        if (!effSystemPrompt.trimmed().isEmpty()) {
+            context.systemPrompt = effSystemPrompt;
         } else {
-            domain::project::ProjectContext emptyProjCtx;
-            emptyProjCtx.rootPath = workspaceRoot;
-            context.systemPrompt = m_contextBuilder.buildSystemPrompt(context, emptyProjCtx);
+            domain::project::ProjectContext projCtx;
+            if (m_projectContextService && !workspaceRoot.isEmpty()) {
+                projCtx = m_projectContextService->load(workspaceRoot);
+            } else {
+                projCtx.rootPath = workspaceRoot;
+            }
+
+            if (m_skillRegistry) {
+                m_skillRegistry->registerSkills(projCtx.skills);
+            }
+
+            QList<domain::agent::Skill> filteredSkills;
+            for (const auto& sk : projCtx.skills) {
+                if (!enabledSkills.isEmpty() && !enabledSkills.contains(sk.id) && !enabledSkills.contains(sk.name)) {
+                    continue;
+                }
+                if (m_skillRegistry && !m_skillRegistry->hasSkill(sk.id.isEmpty() ? sk.name : sk.id)) {
+                    continue;
+                }
+                filteredSkills.append(sk);
+            }
+
+            context.systemPrompt = m_contextBuilder.buildSystemPrompt(context, projCtx, filteredSkills);
         }
 
         m_runtime->startRun(context, prompt);

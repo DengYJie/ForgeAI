@@ -22,6 +22,7 @@ namespace domain::agent {
 
         QStringList enabledTools;     ///< 已启用的工具列表
         QStringList enabledSkills;    ///< 已启用的 Skill 标识符列表
+        QStringList enabledMcpServerIds; ///< 已启用的 MCP 服务标识列表
 
         std::optional<QUuid> projectId; ///< 关联的项目 ID（可选）
 

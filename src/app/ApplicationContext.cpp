@@ -86,6 +86,7 @@ namespace app {
         m_toolRegistry = std::make_unique<agent::tool::ToolRegistry>();
         m_toolRegistry->registerProvider(m_builtinToolProvider);
         m_toolRegistry->registerProvider(m_mcpManager->toolProvider());
+        m_skillRegistry = std::make_unique<agent::skill::SkillRegistry>();
 
         m_conversationService = std::make_unique<services::conversation::ConversationService>(
             m_conversationRepo.get(), m_messageTranscriptRepo.get());
@@ -104,7 +105,9 @@ namespace app {
             m_agentRuntime.get(),
             m_modelService.get(),
             m_projectContextService.get(),
-            m_mcpManager.get()
+            m_mcpManager.get(),
+            m_agentRepo.get(),
+            m_skillRegistry.get()
         );
         m_cancelAgentRunUseCase = std::make_unique<application::usecase::agent::CancelAgentRunUseCase>(
             m_agentRuntime.get()
@@ -262,6 +265,10 @@ namespace app {
 
     agent::tool::ToolRegistry *ApplicationContext::toolRegistry() const {
         return m_toolRegistry.get();
+    }
+
+    agent::skill::SkillRegistry *ApplicationContext::skillRegistry() const {
+        return m_skillRegistry.get();
     }
 
     application::ports::IAgentRuntime *ApplicationContext::agentRuntime() const {

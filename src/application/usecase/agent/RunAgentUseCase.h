@@ -6,6 +6,8 @@
 #include "application/ports/IAgentRuntime.h"
 #include "domain/service/IModelService.h"
 #include "domain/service/IProjectContextService.h"
+#include "domain/repository/IAgentRepository.h"
+#include "agent/skill/SkillRegistry.h"
 #include "agent/runtime/AgentContextBuilder.h"
 #include "llm/mcp/McpManager.h"
 
@@ -22,6 +24,8 @@ namespace application::usecase::agent {
             domain::service::IModelService* modelService,
             domain::service::IProjectContextService* projectContextService = nullptr,
             llm::mcp::McpManager* mcpManager = nullptr,
+            domain::repository::IAgentRepository* agentRepository = nullptr,
+            ::agent::skill::SkillRegistry* skillRegistry = nullptr,
             QObject* parent = nullptr
         );
         ~RunAgentUseCase() override = default;
@@ -36,7 +40,8 @@ namespace application::usecase::agent {
             bool useWebSearch = false,
             bool useDeepThinking = false,
             const QString& reasoningEffort = {},
-            const QString& customSystemPrompt = {}
+            const QString& customSystemPrompt = {},
+            const QUuid& agentId = {}
         );
 
         void cancelCurrent();
@@ -62,6 +67,8 @@ namespace application::usecase::agent {
         domain::service::IModelService* m_modelService = nullptr;
         domain::service::IProjectContextService* m_projectContextService = nullptr;
         llm::mcp::McpManager* m_mcpManager = nullptr;
+        domain::repository::IAgentRepository* m_agentRepository = nullptr;
+        ::agent::skill::SkillRegistry* m_skillRegistry = nullptr;
         ::agent::runtime::AgentContextBuilder m_contextBuilder;
     };
 

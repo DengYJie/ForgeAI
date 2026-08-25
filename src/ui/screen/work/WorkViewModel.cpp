@@ -215,6 +215,7 @@ void WorkViewModel::startTask(const QString& task) {
     if (trimmed.isEmpty() || m_currentProjectId.isNull() || m_agentSessionId.isEmpty()) return;
     updateState([trimmed](WorkState& state) { state.currentTask = taskTitle(trimmed); state.statusMessage.clear(); });
     if (m_useCases.runAgent) {
+        // 调用 RunAgentUseCase 启动智能体编排任务
         m_useCases.runAgent->execute(
             m_agentSessionId,
             trimmed,

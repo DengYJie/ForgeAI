@@ -27,6 +27,7 @@ namespace data::repository {
             "provider_id TEXT, "
             "enabled_tools TEXT, "
             "enabled_skills TEXT, "
+            "enabled_mcp_servers TEXT, "
             "project_id TEXT, "
             "created_at INTEGER, "
             "updated_at INTEGER"
@@ -39,7 +40,7 @@ namespace data::repository {
         QList<domain::agent::Agent> list;
         const auto db = QSqlDatabase::database(m_connectionName);
         QSqlQuery q(db);
-        if (!q.exec(QStringLiteral("SELECT id, name, description, avatar, system_prompt, model_id, provider_id, enabled_tools, enabled_skills, project_id, created_at, updated_at FROM agent ORDER BY updated_at DESC"))) {
+        if (!q.exec(QStringLiteral("SELECT id, name, description, avatar, system_prompt, model_id, provider_id, enabled_tools, enabled_skills, enabled_mcp_servers, project_id, created_at, updated_at FROM agent ORDER BY updated_at DESC"))) {
             return list;
         }
 
@@ -63,13 +64,18 @@ namespace data::repository {
                 a.enabledSkills.append(val.toString());
             }
 
-            const QString projIdStr = q.value(9).toString();
+            const auto mcpDoc = QJsonDocument::fromJson(q.value(9).toString().toUtf8());
+            for (const auto& val : mcpDoc.array()) {
+                a.enabledMcpServerIds.append(val.toString());
+            }
+
+            const QString projIdStr = q.value(10).toString();
             if (!projIdStr.isEmpty()) {
                 a.projectId = QUuid::fromString(projIdStr);
             }
 
-            a.createdAt = QDateTime::fromMSecsSinceEpoch(q.value(10).toLongLong());
-            a.updatedAt = QDateTime::fromMSecsSinceEpoch(q.value(11).toLongLong());
+            a.createdAt = QDateTime::fromMSecsSinceEpoch(q.value(11).toLongLong());
+            a.updatedAt = QDateTime::fromMSecsSinceEpoch(q.value(12).toLongLong());
             list.append(a);
         }
 
@@ -96,10 +102,14 @@ namespace data::repository {
         for (const auto& s : agent.enabledSkills) skillsArr.append(s);
         const QString skillsJson = QString::fromUtf8(QJsonDocument(skillsArr).toJson(QJsonDocument::Compact));
 
+        QJsonArray mcpArr;
+        for (const auto& m : agent.enabledMcpServerIds) mcpArr.append(m);
+        const QString mcpJson = QString::fromUtf8(QJsonDocument(mcpArr).toJson(QJsonDocument::Compact));
+
         const QString sql = QStringLiteral(
             "INSERT OR REPLACE INTO agent ("
-            "id, name, description, avatar, system_prompt, model_id, provider_id, enabled_tools, enabled_skills, project_id, created_at, updated_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "id, name, description, avatar, system_prompt, model_id, provider_id, enabled_tools, enabled_skills, enabled_mcp_servers, project_id, created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
 
         const QVariantList args = {
@@ -112,6 +122,7 @@ namespace data::repository {
             agent.providerId,
             toolsJson,
             skillsJson,
+            mcpJson,
             agent.projectId.has_value() ? agent.projectId->toString() : QString(),
             agent.createdAt.toMSecsSinceEpoch(),
             agent.updatedAt.toMSecsSinceEpoch()
