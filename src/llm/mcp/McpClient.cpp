@@ -52,7 +52,7 @@ namespace llm::mcp {
             });
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
-                {QStringLiteral("message"), QStringLiteral("MCP 传输通道未就绪或已断开连接")}
+                {QStringLiteral("message"), QStringLiteral("MCP 服务未连接或已断开连接")}
             }}};
         }
 
@@ -95,7 +95,7 @@ namespace llm::mcp {
             });
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
-                {QStringLiteral("message"), QStringLiteral("向 MCP 写入请求数据失败")}
+                {QStringLiteral("message"), QStringLiteral("发送 MCP 请求失败")}
             }}};
         }
 
@@ -130,7 +130,7 @@ namespace llm::mcp {
 
         return QJsonObject{{QStringLiteral("error"), QJsonObject{
             {QStringLiteral("code"), -32000},
-            {QStringLiteral("message"), QStringLiteral("MCP 请求超时 (%1 ms)").arg(timeoutMs)}
+            {QStringLiteral("message"), QStringLiteral("服务响应超时，请稍后重试。")}
         }}};
     }
 

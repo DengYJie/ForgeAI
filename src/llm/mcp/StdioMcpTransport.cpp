@@ -97,8 +97,12 @@ namespace llm::mcp {
             if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
                 emit messageReceived(doc.object());
             } else {
-                emit errorOccurred(QStringLiteral("JSON 解析错误: %1. 原始行: %2")
-                                   .arg(parseError.errorString(), QString::fromUtf8(line)));
+                core::logging::LoggingService::instance().warn(core::logging::Category::McpTransport, QStringLiteral("MCP 响应 JSON 解析失败"), {
+                    {QStringLiteral("error"), parseError.errorString()},
+                    {QStringLiteral("offset"), QString::number(parseError.offset)},
+                    {QStringLiteral("length"), QString::number(line.length())}
+                });
+                emit errorOccurred(QStringLiteral("MCP 响应格式解析失败: %1").arg(parseError.errorString()));
             }
         }
     }

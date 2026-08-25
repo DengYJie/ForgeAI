@@ -47,7 +47,7 @@ namespace llm::workspace {
         const QString canonicalRoot = QDir(workspaceRoot).canonicalPath();
         if (canonicalRoot.isEmpty()) {
             core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("工作区根目录不存在"), {
-                {QStringLiteral("workspaceRoot"), workspaceRoot}
+                {QStringLiteral("status"), QStringLiteral("InvalidRoot")}
             });
             if (error) *error = QStringLiteral("工作区根目录不存在");
             return {};
@@ -93,7 +93,7 @@ namespace llm::workspace {
         const QString canonicalRoot = QDir(workspaceRoot).canonicalPath();
         if (canonicalRoot.isEmpty()) {
             core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("工作区根目录不存在"), {
-                {QStringLiteral("workspaceRoot"), workspaceRoot}
+                {QStringLiteral("status"), QStringLiteral("InvalidRoot")}
             });
             if (error) *error = QStringLiteral("工作区根目录不存在");
             return {};

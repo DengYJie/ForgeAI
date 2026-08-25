@@ -2,6 +2,7 @@
 #include "StdioMcpTransport.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
+#include "core/logging/SensitiveDataFilter.h"
 
 namespace llm::mcp {
 
@@ -126,11 +127,12 @@ namespace llm::mcp {
     }
 
     void McpSession::onTransportError(const QString& error) {
+        const QString cleanError = core::logging::SensitiveDataFilter::redactText(error);
         core::logging::LoggingService::instance().warn(core::logging::Category::McpSession, QStringLiteral("传输通道发生异常"), {
             {QStringLiteral("serverId"), m_config.id},
-            {QStringLiteral("error"), error}
+            {QStringLiteral("error"), cleanError}
         });
-        m_lastError = error;
+        m_lastError = cleanError;
         setState(domain::mcp::McpConnectionState::Failed);
         emit errorOccurred(m_lastError);
     }

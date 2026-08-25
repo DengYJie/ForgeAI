@@ -381,7 +381,7 @@ void AgentProtocolTests::mcpClientTimeoutAndDisconnected() {
     llm::mcp::McpClient client(&transport);
     const auto disconnRes = client.callTool(QStringLiteral("call_dis"), QStringLiteral("any_tool"), QStringLiteral("{}"));
     QVERIFY(disconnRes.isError);
-    QVERIFY(disconnRes.content.contains(QStringLiteral("断开连接")));
+    QVERIFY(disconnRes.content.contains(QStringLiteral("未连接")) || disconnRes.content.contains(QStringLiteral("断开连接")));
 
     // 超时测试
     transport.setConnected(true);
