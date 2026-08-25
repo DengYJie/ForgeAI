@@ -33,6 +33,22 @@ struct TableLayoutData {
     QVector<bool> headerRows;
 };
 
+struct BlockScrollOffset {
+    qreal x = 0;
+    qreal y = 0;
+};
+
+struct BlockScrollInfo {
+    QSizeF contentSize;
+    QRectF viewportRect;
+    QRectF hScrollBarRect;
+    QRectF vScrollBarRect;
+    bool hasHorizontalScroll() const { return contentSize.width() > viewportRect.width() + 1.0; }
+    bool hasVerticalScroll() const { return contentSize.height() > viewportRect.height() + 1.0; }
+    qreal maxScrollX() const { return qMax<qreal>(0, contentSize.width() - viewportRect.width()); }
+    qreal maxScrollY() const { return qMax<qreal>(0, contentSize.height() - viewportRect.height()); }
+};
+
 struct BlockLayout {
     BlockKind kind = BlockKind::Paragraph;
     QRectF rect;
@@ -52,6 +68,7 @@ struct BlockLayout {
     QVector<std::shared_ptr<InlineLayout>> codeLines;
     QVector<int> codeLineOffsets;
     std::shared_ptr<TableLayoutData> table;
+    BlockScrollInfo scrollInfo;
     int documentTextOffset = 0;
 };
 

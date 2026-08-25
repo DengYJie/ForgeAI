@@ -12,6 +12,8 @@
 #include <QElapsedTimer>
 #include <QRegularExpression>
 #include <QScrollBar>
+#include <QVariantAnimation>
+#include <QEasingCurve>
 #include <FluentQt/Design.h>
 
 namespace ui::widget {
@@ -597,6 +599,75 @@ qsizetype MarkdownView::stableStreamingBoundary() const
     return lastBoundary;
 }
 
+ui::markdown::BlockScrollOffset MarkdownView::blockScrollOffset(int blockIndex) const
+{
+    return m_blockScrollOffsets.value(blockIndex);
+}
+
+void MarkdownView::setBlockScrollOffset(int blockIndex, const ui::markdown::BlockScrollOffset& offset)
+{
+    if (auto* anim = m_blockScrollAnimations.value(blockIndex)) {
+        anim->stop();
+    }
+    m_blockTargetScrollOffsets.insert(blockIndex, offset);
+    m_blockScrollOffsets.insert(blockIndex, offset);
+    viewport()->update();
+}
+
+bool MarkdownView::scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool smooth)
+{
+    if (blockIndex < 0 || blockIndex >= m_documentLayout.blocks.size()) return false;
+    const auto& block = m_documentLayout.blocks.at(blockIndex);
+    if (!block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll()) return false;
+
+    const auto current = m_blockScrollOffsets.value(blockIndex);
+    auto target = m_blockTargetScrollOffsets.value(blockIndex, current);
+
+    if (block.scrollInfo.hasHorizontalScroll()) {
+        target.x = qBound<qreal>(0, target.x + deltaX, block.scrollInfo.maxScrollX());
+    }
+    if (block.scrollInfo.hasVerticalScroll()) {
+        target.y = qBound<qreal>(0, target.y + deltaY, block.scrollInfo.maxScrollY());
+    }
+
+    const auto prevTarget = m_blockTargetScrollOffsets.value(blockIndex, current);
+    if (qFuzzyCompare(target.x, current.x) && qFuzzyCompare(target.y, current.y) &&
+        qFuzzyCompare(target.x, prevTarget.x) && qFuzzyCompare(target.y, prevTarget.y)) {
+        return false;
+    }
+
+    m_blockTargetScrollOffsets.insert(blockIndex, target);
+
+    if (!smooth) {
+        if (auto* anim = m_blockScrollAnimations.value(blockIndex)) {
+            anim->stop();
+        }
+        m_blockScrollOffsets.insert(blockIndex, target);
+        viewport()->update();
+        return true;
+    }
+
+    auto* anim = m_blockScrollAnimations.value(blockIndex);
+    if (!anim) {
+        anim = new QVariantAnimation(this);
+        anim->setDuration(160);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        connect(anim, &QVariantAnimation::valueChanged, this, [this, blockIndex](const QVariant& val) {
+            const QPointF pt = val.toPointF();
+            m_blockScrollOffsets.insert(blockIndex, {pt.x(), pt.y()});
+            viewport()->update();
+        });
+        m_blockScrollAnimations.insert(blockIndex, anim);
+    } else {
+        anim->stop();
+    }
+
+    anim->setStartValue(QPointF(current.x, current.y));
+    anim->setEndValue(QPointF(target.x, target.y));
+    anim->start();
+    return true;
+}
+
 void MarkdownView::paintViewport(QPaintEvent* event)
 {
     QElapsedTimer paintTimer; paintTimer.start();
@@ -604,7 +675,7 @@ void MarkdownView::paintViewport(QPaintEvent* event)
     if (!m_transparentBackground) painter.fillRect(event->rect(), m_theme.background.isValid() ? m_theme.background : palette().color(QPalette::Base));
     painter.save();
     painter.translate(0, -verticalScrollBar()->value());
-    m_metrics.visibleBlockCount = m_renderer.paint(painter, m_documentLayout, m_theme, QRectF(event->rect()).translated(0, verticalScrollBar()->value()), m_selection, m_hoveredBlock, m_resources.images(), m_copiedBlock);
+    m_metrics.visibleBlockCount = m_renderer.paint(painter, m_documentLayout, m_theme, QRectF(event->rect()).translated(0, verticalScrollBar()->value()), m_selection, m_hoveredBlock, m_hoveredCopyBlock, m_blockScrollOffsets, m_resources.images(), m_copiedBlock);
     painter.restore();
     m_metrics.lastPaintMs = paintTimer.elapsed();
 }
@@ -612,10 +683,52 @@ void MarkdownView::paintViewport(QPaintEvent* event)
 bool MarkdownView::viewportEvent(QEvent* event)
 {
     if (event->type() == QEvent::Paint) { paintViewport(static_cast<QPaintEvent*>(event)); return true; }
+    if (event->type() == QEvent::Leave) {
+        m_hoveredBlock = -1;
+        m_hoveredCopyBlock = -1;
+        viewport()->setCursor(Qt::ArrowCursor);
+        viewport()->update();
+        return true;
+    }
+    if (event->type() == QEvent::Wheel) {
+        auto* wheel = static_cast<QWheelEvent*>(event);
+        const QPointF docPos = toDocument(wheel->position());
+        const auto hit = m_renderer.hitTest(m_documentLayout, docPos, m_blockScrollOffsets);
+        if (hit.blockIndex >= 0 && hit.blockIndex < m_documentLayout.blocks.size()) {
+            const auto& block = m_documentLayout.blocks.at(hit.blockIndex);
+            if (block.scrollInfo.hasHorizontalScroll() || block.scrollInfo.hasVerticalScroll()) {
+                const QPoint numPixels = wheel->pixelDelta();
+                const QPoint numDegrees = wheel->angleDelta() / 8;
+                qreal dx = 0;
+                qreal dy = 0;
+                bool isPixel = false;
+                if (!numPixels.isNull()) {
+                    dx = -numPixels.x();
+                    dy = -numPixels.y();
+                    isPixel = true;
+                } else if (!numDegrees.isNull()) {
+                    dx = -numDegrees.x();
+                    dy = -numDegrees.y();
+                }
+                if (wheel->modifiers().testFlag(Qt::ShiftModifier) && dx == 0) {
+                    dx = dy;
+                    dy = 0;
+                } else if (block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll() && dx == 0) {
+                    dx = dy;
+                    dy = 0;
+                }
+                if (scrollBlock(hit.blockIndex, dx, dy, !isPixel)) {
+                    wheel->accept();
+                    return true;
+                }
+            }
+        }
+    }
     if (event->type() == QEvent::MouseMove) {
         auto* mouse = static_cast<QMouseEvent*>(event);
-        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()));
+        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()), m_blockScrollOffsets);
         m_hoveredBlock = hit.blockIndex;
+        m_hoveredCopyBlock = (hit.kind == ui::markdown::HitKind::CodeCopy) ? hit.blockIndex : -1;
         Qt::CursorShape cursor = Qt::ArrowCursor;
         if (hit.kind == ui::markdown::HitKind::Link || hit.kind == ui::markdown::HitKind::CodeCopy) {
             cursor = Qt::PointingHandCursor;
@@ -625,20 +738,20 @@ bool MarkdownView::viewportEvent(QEvent* event)
             cursor = m_selectable ? Qt::IBeamCursor : Qt::ArrowCursor;
         }
         viewport()->setCursor(cursor);
-        if (m_selecting) setSelectionPosition(hit.textOffset, true);
+        if (m_selecting && hit.textOffset >= 0) setSelectionPosition(hit.textOffset, true);
         if (hit.kind == ui::markdown::HitKind::Link) emit linkHighlighted(QUrl(hit.value));
         viewport()->update();
         return true;
     }
     if (event->type() == QEvent::MouseButtonPress) {
-        auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position())); m_selecting = m_selectable && (hit.kind == ui::markdown::HitKind::Text || hit.kind == ui::markdown::HitKind::Link); if (m_selecting) setSelectionPosition(hit.textOffset, mouse->modifiers().testFlag(Qt::ShiftModifier)); return true; }
+        auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()), m_blockScrollOffsets); m_selecting = m_selectable && (hit.kind == ui::markdown::HitKind::Text || hit.kind == ui::markdown::HitKind::Link); if (m_selecting) setSelectionPosition(hit.textOffset, mouse->modifiers().testFlag(Qt::ShiftModifier)); return true; }
     }
     if (event->type() == QEvent::MouseButtonRelease) {
-        auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position())); if (m_selecting && m_selection.anchor == m_selection.position && hit.kind == ui::markdown::HitKind::Link) emit linkActivated(QUrl(hit.value)); if (hit.kind == ui::markdown::HitKind::Image) emit imageActivated(QUrl(hit.value)); if (hit.kind == ui::markdown::HitKind::CodeCopy) { QGuiApplication::clipboard()->setText(hit.value); showCopiedFeedback(hit.blockIndex); } if (hit.kind == ui::markdown::HitKind::TaskCheckbox && m_taskListInteractive && hit.blockIndex >= 0) toggleTask(m_documentLayout.blocks.at(hit.blockIndex)); m_selecting = false; return true; }
+        auto* mouse = static_cast<QMouseEvent*>(event); if (mouse->button() == Qt::LeftButton) { const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(mouse->position()), m_blockScrollOffsets); if (m_selecting && m_selection.anchor == m_selection.position && hit.kind == ui::markdown::HitKind::Link) emit linkActivated(QUrl(hit.value)); if (hit.kind == ui::markdown::HitKind::Image) emit imageActivated(QUrl(hit.value)); if (hit.kind == ui::markdown::HitKind::CodeCopy) { QGuiApplication::clipboard()->setText(hit.value); showCopiedFeedback(hit.blockIndex); } if (hit.kind == ui::markdown::HitKind::TaskCheckbox && m_taskListInteractive && hit.blockIndex >= 0) toggleTask(m_documentLayout.blocks.at(hit.blockIndex)); m_selecting = false; return true; }
     }
     if (event->type() == QEvent::ContextMenu) {
         auto* context = static_cast<QContextMenuEvent*>(event);
-        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(context->pos()));
+        const auto hit = m_renderer.hitTest(m_documentLayout, toDocument(context->pos()), m_blockScrollOffsets);
         emit contextMenuRequested(context->pos(), hit.kind == ui::markdown::HitKind::Link ? QUrl(hit.value) : QUrl{}, hit.kind == ui::markdown::HitKind::Image ? QUrl(hit.value) : QUrl{});
         QMenu menu(this);
         if (hit.kind == ui::markdown::HitKind::Link) {

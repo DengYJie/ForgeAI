@@ -23,6 +23,7 @@ void MarkdownRenderer::paintInline(QPainter& painter, const InlineLayout& inline
 
 int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, const MarkdownTheme& theme,
                             const QRectF& exposedDocumentRect, const TextSelection& selection, int hoveredBlock,
+                            int hoveredCopyBlock, const QHash<int, BlockScrollOffset>& scrollOffsets,
                             const QHash<QString, QImage>& images, int copiedBlock) const
 {
     const int first = document.firstVisibleBlock(exposedDocumentRect.top() - 80);
@@ -46,33 +47,63 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
             painter.setPen(QPen(theme.divider, 1)); painter.drawLine(block.rect.left(), block.rect.center().y(), block.rect.right(), block.rect.center().y()); break;
         case BlockKind::CodeBlock: {
             painter.setPen(QPen(theme.codeBorder, 1)); painter.setBrush(theme.codeBackground); painter.drawRoundedRect(block.rect, theme.codeRadius, theme.codeRadius);
-            painter.setPen(theme.secondaryText); painter.setFont(theme.codeFont); painter.drawText(QRectF(block.rect.left() + 12, block.rect.top() + 5, 200, 24), Qt::AlignVCenter, block.language.isEmpty() ? QStringLiteral("text") : block.language);
-            const bool hovered = hoveredBlock == i;
-            if (hovered || copiedBlock == i) {
-                painter.setPen(QPen(theme.link, 1)); painter.setBrush(theme.inlineCodeBackground);
-                painter.drawRoundedRect(block.copyButtonRect, 4, 4);
+            painter.setPen(theme.secondaryText); painter.setFont(theme.codeFont); painter.drawText(QRectF(block.rect.left() + 12, block.rect.top(), 200, 30), Qt::AlignVCenter, block.language.isEmpty() ? QStringLiteral("text") : block.language);
+            painter.setPen(QPen(theme.divider, 1));
+            painter.drawLine(QPointF(block.rect.left() + 12, block.rect.top() + 30), QPointF(block.rect.right() - 12, block.rect.top() + 30));
+            const bool blockHovered = (hoveredBlock == i);
+            const bool copyHovered = (hoveredCopyBlock == i);
+            const bool isCopied = (copiedBlock == i);
+            if (blockHovered || isCopied) {
+                if (copyHovered || isCopied) {
+                    painter.setPen(Qt::NoPen);
+                    painter.setBrush(theme.inlineCodeBackground);
+                    painter.drawRoundedRect(block.copyButtonRect, 4, 4);
+                }
+                if (isCopied) {
+                    QPen checkPen(theme.link, 1.8);
+                    checkPen.setCapStyle(Qt::RoundCap);
+                    checkPen.setJoinStyle(Qt::RoundJoin);
+                    painter.setPen(checkPen);
+                    painter.setBrush(Qt::NoBrush);
+                    const QPointF c = block.copyButtonRect.center();
+                    QPainterPath checkPath;
+                    checkPath.moveTo(c.x() - 4.5, c.y() + 0.5);
+                    checkPath.lineTo(c.x() - 1.0, c.y() + 4.0);
+                    checkPath.lineTo(c.x() + 5.0, c.y() - 3.5);
+                    painter.drawPath(checkPath);
+                } else {
+                    const QPointF c = block.copyButtonRect.center();
+                    QPen iconPen(copyHovered ? theme.text : theme.secondaryText, 1.2);
+                    iconPen.setCapStyle(Qt::RoundCap);
+                    iconPen.setJoinStyle(Qt::RoundJoin);
+                    painter.setPen(iconPen);
+                    painter.setBrush(Qt::NoBrush);
+
+                    QPainterPath backPath;
+                    backPath.moveTo(c.x() - 2.5, c.y() - 5.5);
+                    backPath.lineTo(c.x() + 3.5, c.y() - 5.5);
+                    backPath.arcTo(QRectF(c.x() + 2.5, c.y() - 5.5, 3.0, 3.0), 90, -90);
+                    backPath.lineTo(c.x() + 5.5, c.y() + 1.5);
+                    painter.drawPath(backPath);
+
+                    const QRectF frontRect(c.x() - 5.5, c.y() - 2.5, 8.5, 9.5);
+                    painter.setBrush(copyHovered ? theme.inlineCodeBackground : theme.codeBackground);
+                    painter.drawRoundedRect(frontRect, 1.5, 1.5);
+                }
             }
-            painter.setPen(QPen(hovered || copiedBlock == i ? theme.link : theme.secondaryText, 1.2));
-            if (copiedBlock == i) {
-                const QPointF a = block.copyButtonRect.center() + QPointF(-6, 0);
-                painter.drawLine(a, a + QPointF(4, 4));
-                painter.drawLine(a + QPointF(4, 4), a + QPointF(11, -5));
-            } else {
-                const QPointF center = block.copyButtonRect.center();
-                const QRectF back(center.x() - 6, center.y() - 7, 10, 12);
-                const QRectF front(center.x() - 3, center.y() - 4, 10, 12);
-                painter.drawRoundedRect(back, 1.5, 1.5);
-                painter.setBrush(theme.codeBackground);
-                painter.drawRoundedRect(front, 1.5, 1.5);
-            }
-            qreal lineY = block.rect.top() + 34;
-            painter.save(); painter.setClipRect(QRectF(block.rect.left() + 8, lineY, block.rect.width() - 16, block.rect.height() - 42));
+            const BlockScrollOffset scroll = scrollOffsets.value(i);
+            qreal lineY = block.rect.top() + 42;
+            painter.save(); painter.setClipRect(block.scrollInfo.viewportRect.isValid() ? block.scrollInfo.viewportRect : QRectF(block.rect.left() + 8, block.rect.top() + 30, block.rect.width() - 16, block.rect.height() - 34));
             for (int lineIndex = 0; lineIndex < block.codeLines.size(); ++lineIndex) {
                 const auto& line = block.codeLines.at(lineIndex);
-                paintInline(painter, *line, QPointF(block.contentX, lineY), theme, block.documentTextOffset + block.codeLineOffsets.value(lineIndex), selection);
+                paintInline(painter, *line, QPointF(block.contentX - scroll.x, lineY - scroll.y), theme, block.documentTextOffset + block.codeLineOffsets.value(lineIndex), selection);
                 lineY += line->height;
             }
-            painter.restore(); break;
+            painter.restore();
+            if (blockHovered) {
+                paintScrollBars(painter, block.scrollInfo, scroll, theme);
+            }
+            break;
         }
         case BlockKind::Table: {
             qreal y = block.rect.top();
@@ -144,7 +175,34 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
     return paintedBlocks;
 }
 
-HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QPointF& position) const
+void MarkdownRenderer::paintScrollBars(QPainter& painter, const BlockScrollInfo& info, const BlockScrollOffset& offset,
+                                       const MarkdownTheme& theme) const
+{
+    if (info.hasHorizontalScroll() && info.hScrollBarRect.isValid()) {
+        painter.setPen(Qt::NoPen);
+        QColor trackColor = theme.inlineCodeBackground;
+        trackColor.setAlpha(90);
+        painter.setBrush(trackColor);
+        painter.drawRoundedRect(info.hScrollBarRect, info.hScrollBarRect.height() / 2, info.hScrollBarRect.height() / 2);
+
+        const qreal viewW = info.viewportRect.width();
+        const qreal contentW = info.contentSize.width();
+        const qreal trackW = info.hScrollBarRect.width();
+        const qreal thumbW = qBound<qreal>(24.0, trackW * (viewW / qMax<qreal>(1.0, contentW)), trackW * 0.8);
+        const qreal maxScroll = info.maxScrollX();
+        const qreal progress = (maxScroll > 0) ? qBound<qreal>(0, offset.x / maxScroll, 1.0) : 0;
+        const qreal thumbX = info.hScrollBarRect.left() + (trackW - thumbW) * progress;
+        const QRectF thumbRect(thumbX, info.hScrollBarRect.top(), thumbW, info.hScrollBarRect.height());
+
+        QColor thumbColor = theme.secondaryText;
+        thumbColor.setAlpha(160);
+        painter.setBrush(thumbColor);
+        painter.drawRoundedRect(thumbRect, thumbRect.height() / 2, thumbRect.height() / 2);
+    }
+}
+
+HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QPointF& position,
+                                        const QHash<int, BlockScrollOffset>& scrollOffsets) const
 {
     const int index = document.firstVisibleBlock(position.y());
     for (int i = index; i < document.blocks.size() && document.blocks[i].rect.top() <= position.y(); ++i) {
@@ -161,11 +219,12 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
             }
         }
         if (block.kind == BlockKind::CodeBlock) {
-            qreal lineY = block.rect.top() + 34;
+            const BlockScrollOffset scroll = scrollOffsets.value(i);
+            qreal lineY = block.rect.top() + 42;
             for (int lineIndex = 0; lineIndex < block.codeLines.size(); ++lineIndex) {
                 const auto& line = block.codeLines.at(lineIndex);
                 if (position.y() >= lineY && position.y() <= lineY + line->height) {
-                    const int cursor = line->cursorAt(position.x() - block.contentX, position.y() - lineY);
+                    const int cursor = line->cursorAt(position.x() - (block.contentX - scroll.x), position.y() - lineY);
                     if (cursor >= 0) return {HitKind::Text, i, block.documentTextOffset + block.codeLineOffsets.value(lineIndex) + cursor, {}};
                 }
                 lineY += line->height;

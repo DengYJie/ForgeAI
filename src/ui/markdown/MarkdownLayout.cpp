@@ -89,7 +89,12 @@ int InlineLayout::cursorAt(qreal x, qreal y) const
 {
     for (int i = 0; i < layout.lineCount(); ++i) {
         const QTextLine line = layout.lineAt(i);
-        if (y >= line.y() && y <= line.y() + line.height()) return line.xToCursor(x);
+        if (y >= line.y() && y <= line.y() + line.height()) {
+            if (x >= -4 && x <= line.naturalTextWidth() + 12) {
+                return line.xToCursor(x);
+            }
+            return -1;
+        }
     }
     return -1;
 }
@@ -206,21 +211,31 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
             y += theme.blockGap + 1; continue;
         }
         if (node.type == MarkdownNodeType::CodeBlock) {
-            BlockLayout block; block.kind = BlockKind::CodeBlock; block.code = node.literal; block.language = languageName(node.attributes.fenceInfo);
+            QString codeText = node.literal;
+            if (codeText.endsWith(u'\n')) codeText.chop(1);
+            BlockLayout block; block.kind = BlockKind::CodeBlock; block.code = codeText; block.language = languageName(node.attributes.fenceInfo);
             block.quoteIndent = quoteDepth * 18; block.contentX = indent + 12;
-            const QStringList lines = node.literal.split(u'\n'); qreal h = 34;
+            const QStringList lines = codeText.split(u'\n'); qreal codeHeight = 0;
             const qreal available = qMax<qreal>(1, right - block.contentX - 12);
             int codeOffset = 0;
+            qreal maxLineWidth = 0;
             for (const QString& line : lines) {
                 QTextCharFormat base; base.setForeground(theme.text);
                 QVector<QTextLayout::FormatRange> formats{{0, static_cast<int>(line.size()), base}};
                 formats += m_syntaxHighlighter.highlightLine(line, block.language, theme);
-                auto l = std::make_shared<InlineLayout>(line, theme.codeFont, formats, QVector<LinkRange>{}, available, false);
-                h += l->height; block.codeLines.push_back(l); block.codeLineOffsets.push_back(codeOffset);
+                auto l = std::make_shared<InlineLayout>(line, theme.codeFont, formats, QVector<LinkRange>{}, 4096, false);
+                maxLineWidth = qMax(maxLineWidth, l->width);
+                codeHeight += l->height; block.codeLines.push_back(l); block.codeLineOffsets.push_back(codeOffset);
                 codeOffset += static_cast<int>(line.size()) + 1;
             }
-            block.rect = QRectF(indent, y, right - indent, h + 12); block.copyButtonRect = QRectF(right - 40, y + 7, 30, 22);
-            block.documentTextOffset = textOffset; textOffset += static_cast<int>(node.literal.size()) + 1; result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + theme.blockGap; continue;
+            block.rect = QRectF(indent, y, right - indent, 30 + 12 + codeHeight + 12);
+            block.copyButtonRect = QRectF(right - 34, y + 4, 24, 22);
+            block.scrollInfo.viewportRect = QRectF(block.rect.left() + 8, block.rect.top() + 30, block.rect.width() - 16, block.rect.height() - 34);
+            block.scrollInfo.contentSize = QSizeF(maxLineWidth, codeHeight);
+            if (block.scrollInfo.hasHorizontalScroll()) {
+                block.scrollInfo.hScrollBarRect = QRectF(block.scrollInfo.viewportRect.left() + 4, block.rect.bottom() - 7, block.scrollInfo.viewportRect.width() - 8, 4);
+            }
+            block.documentTextOffset = textOffset; textOffset += static_cast<int>(codeText.size()) + 1; result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + theme.blockGap; continue;
         }
         if (node.type == MarkdownNodeType::Table) {
             auto data = std::make_shared<TableLayoutData>(); int columns = 0;

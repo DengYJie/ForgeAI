@@ -17,6 +17,8 @@
 #include "ui/markdown/MarkdownTheme.h"
 #include "ui/markdown/resource/MarkdownImageResourceManager.h"
 
+class QVariantAnimation;
+
 namespace ui::widget {
 
 struct MarkdownViewMetrics {
@@ -83,6 +85,10 @@ public:
     bool isAutoFitHeight() const;
     void setMaxContentWidth(qreal maxWidth);
     qreal maxContentWidth() const;
+
+    ui::markdown::BlockScrollOffset blockScrollOffset(int blockIndex) const;
+    void setBlockScrollOffset(int blockIndex, const ui::markdown::BlockScrollOffset& offset);
+    bool scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool smooth = true);
     void onThemeUpdated() override;
 
     // Resource & Security Pipeline
@@ -181,7 +187,11 @@ private:
     ui::markdown::TextSelection m_selection;
     int m_selectionAnchor = -1;
     int m_hoveredBlock = -1;
+    int m_hoveredCopyBlock = -1;
     int m_copiedBlock = -1;
+    QHash<int, ui::markdown::BlockScrollOffset> m_blockScrollOffsets;
+    QHash<int, ui::markdown::BlockScrollOffset> m_blockTargetScrollOffsets;
+    QHash<int, QVariantAnimation*> m_blockScrollAnimations;
     bool m_selecting = false;
     bool m_selectable = true;
     bool m_taskListInteractive = false;
