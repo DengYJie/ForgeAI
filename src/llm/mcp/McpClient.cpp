@@ -1,4 +1,7 @@
 #include "McpClient.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
+#include "core/logging/SensitiveDataFilter.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -34,6 +37,9 @@ namespace llm::mcp {
         application::ports::CancellationToken cancellationToken
     ) {
         if (cancellationToken.isCanceled()) {
+            core::logging::LoggingService::instance().info(core::logging::Category::McpProtocol, QStringLiteral("MCP 请求在调用前已被取消"), {
+                {QStringLiteral("method"), method}
+            });
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
                 {QStringLiteral("message"), QStringLiteral("操作已在调用前取消")}
@@ -41,6 +47,9 @@ namespace llm::mcp {
         }
 
         if (!m_transport || !m_transport->isConnected()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 传输通道未就绪或已断开连接"), {
+                {QStringLiteral("method"), method}
+            });
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
                 {QStringLiteral("message"), QStringLiteral("MCP 传输通道未就绪或已断开连接")}
@@ -56,6 +65,11 @@ namespace llm::mcp {
         if (!params.isEmpty()) {
             req.insert(QStringLiteral("params"), params);
         }
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpProtocol, QStringLiteral("发送 MCP 同步请求"), {
+            {QStringLiteral("method"), method},
+            {QStringLiteral("requestId"), QString::number(requestId)}
+        });
 
         QEventLoop loop;
         m_activeLoops.insert(requestId, &loop);
@@ -75,6 +89,10 @@ namespace llm::mcp {
 
         if (!m_transport->sendJson(req)) {
             m_activeLoops.remove(requestId);
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("向 MCP 写入请求数据失败"), {
+                {QStringLiteral("method"), method},
+                {QStringLiteral("requestId"), QString::number(requestId)}
+            });
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
                 {QStringLiteral("message"), QStringLiteral("向 MCP 写入请求数据失败")}
@@ -90,6 +108,10 @@ namespace llm::mcp {
         m_activeLoops.remove(requestId);
 
         if (cancellationToken.isCanceled()) {
+            core::logging::LoggingService::instance().info(core::logging::Category::McpProtocol, QStringLiteral("MCP 请求已取消"), {
+                {QStringLiteral("method"), method},
+                {QStringLiteral("requestId"), QString::number(requestId)}
+            });
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
                 {QStringLiteral("message"), QStringLiteral("MCP 请求已取消")}
@@ -99,6 +121,12 @@ namespace llm::mcp {
         if (m_pendingResponses.contains(requestId)) {
             return m_pendingResponses.take(requestId);
         }
+
+        core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 请求超时"), {
+            {QStringLiteral("method"), method},
+            {QStringLiteral("requestId"), QString::number(requestId)},
+            {QStringLiteral("timeoutMs"), QString::number(timeoutMs)}
+        });
 
         return QJsonObject{{QStringLiteral("error"), QJsonObject{
             {QStringLiteral("code"), -32000},
@@ -331,6 +359,12 @@ namespace llm::mcp {
         int timeoutMs,
         application::ports::CancellationToken cancellationToken
     ) {
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpProtocol, QStringLiteral("调用 MCP 工具"), {
+            {QStringLiteral("toolName"), name},
+            {QStringLiteral("callId"), toolCallId},
+            {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(argumentsJson)}
+        });
+
         QJsonObject argsObj;
         if (!argumentsJson.trimmed().isEmpty()) {
             QJsonParseError err;
@@ -350,6 +384,13 @@ namespace llm::mcp {
         if (resp.contains(QStringLiteral("error"))) {
             const auto errObj = resp.value(QStringLiteral("error")).toObject();
             const QString errMsg = errObj.value(QStringLiteral("message")).toString();
+
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 工具调用返回错误"), {
+                {QStringLiteral("toolName"), name},
+                {QStringLiteral("callId"), toolCallId},
+                {QStringLiteral("error"), errMsg}
+            });
+
             return domain::agent::ToolResult{
                 toolCallId,
                 errMsg,
@@ -358,6 +399,11 @@ namespace llm::mcp {
         }
 
         if (!resp.contains(QStringLiteral("result"))) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpProtocol, QStringLiteral("MCP 工具未返回有效结果"), {
+                {QStringLiteral("toolName"), name},
+                {QStringLiteral("callId"), toolCallId}
+            });
+
             return domain::agent::ToolResult{
                 toolCallId,
                 QStringLiteral("MCP 服务未返回有效结果"),
@@ -390,6 +436,13 @@ namespace llm::mcp {
         if (finalContent.isEmpty()) {
             finalContent = QString::fromUtf8(QJsonDocument(resultObj).toJson(QJsonDocument::Compact));
         }
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpProtocol, QStringLiteral("MCP 工具调用完成"), {
+            {QStringLiteral("toolName"), name},
+            {QStringLiteral("callId"), toolCallId},
+            {QStringLiteral("isError"), isError ? QStringLiteral("true") : QStringLiteral("false")},
+            {QStringLiteral("contentLength"), QString::number(finalContent.length())}
+        });
 
         return domain::agent::ToolResult{
             toolCallId,

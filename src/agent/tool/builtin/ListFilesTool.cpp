@@ -1,7 +1,10 @@
 #include "ListFilesTool.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QDir>
 #include <QFileInfo>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -35,6 +38,9 @@ namespace agent::tool::builtin {
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {
+        QElapsedTimer timer;
+        timer.start();
+
         domain::agent::ToolResult result{call.id, {}, true};
         const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
         const QString relativePath = args.value(QStringLiteral("path")).toString(QStringLiteral("."));
@@ -42,12 +48,20 @@ namespace agent::tool::builtin {
         QString error;
         const QString path = m_fs->resolveReadablePath(context.workspaceRoot, relativePath, &error);
         if (path.isEmpty()) {
-            result.content = error.isEmpty() ? QStringLiteral("路径不合法或超出工作区") : error;
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("list_files 路径校验失败"), {
+                {QStringLiteral("path"), relativePath},
+                {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+            });
+            result.content = error.isEmpty() ? QStringLiteral("出于安全原因，无法访问项目外的路径。") : error;
             return result;
         }
 
         const QDir dir(path);
         if (!dir.exists()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("list_files 目录不存在"), {
+                {QStringLiteral("path"), relativePath},
+                {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+            });
             result.content = QStringLiteral("目录不存在: ") + relativePath;
             return result;
         }
@@ -67,6 +81,13 @@ namespace agent::tool::builtin {
 
         result.content = QString::fromUtf8(QJsonDocument(files).toJson(QJsonDocument::Compact));
         result.isError = false;
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::AgentTool, QStringLiteral("list_files 执行完成"), {
+            {QStringLiteral("path"), relativePath},
+            {QStringLiteral("count"), QString::number(files.size())},
+            {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+        });
+
         return result;
     }
 

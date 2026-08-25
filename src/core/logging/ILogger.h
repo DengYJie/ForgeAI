@@ -43,6 +43,10 @@ namespace core::logging {
             if (isEnabled(LogLevel::Warning)) log(LogLevel::Warning, category, message, fields, std::move(context));
         }
 
+        inline void warn(const QString &category, const QString &message, const QMap<QString, QString> &fields = {}, std::shared_ptr<const LogContext> context = nullptr) {
+            if (isEnabled(LogLevel::Warning)) log(LogLevel::Warning, category, message, fields, std::move(context));
+        }
+
         inline void error(const QString &category, const QString &message, const QMap<QString, QString> &fields = {}, std::shared_ptr<const LogContext> context = nullptr) {
             if (isEnabled(LogLevel::Error)) log(LogLevel::Error, category, message, fields, std::move(context));
         }

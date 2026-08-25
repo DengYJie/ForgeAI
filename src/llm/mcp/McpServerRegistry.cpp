@@ -1,4 +1,6 @@
 #include "McpServerRegistry.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 namespace llm::mcp {
 
@@ -11,6 +13,11 @@ namespace llm::mcp {
 
         bool isUpdate = m_servers.contains(key);
         m_servers.insert(key, config);
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpRegistry, QStringLiteral("注册 MCP 服务"), {
+            {QStringLiteral("serverId"), key},
+            {QStringLiteral("isUpdate"), isUpdate ? QStringLiteral("true") : QStringLiteral("false")}
+        });
 
         emit serverRegistered(config);
         emit registryChanged();
@@ -26,12 +33,18 @@ namespace llm::mcp {
             changed = true;
         }
         if (changed) {
+            core::logging::LoggingService::instance().debug(core::logging::Category::McpRegistry, QStringLiteral("批量注册 MCP 服务"), {
+                {QStringLiteral("count"), QString::number(configs.size())}
+            });
             emit registryChanged();
         }
     }
 
     void McpServerRegistry::unregisterServer(const QString& id) {
         if (m_servers.remove(id) > 0) {
+            core::logging::LoggingService::instance().debug(core::logging::Category::McpRegistry, QStringLiteral("注销 MCP 服务"), {
+                {QStringLiteral("serverId"), id}
+            });
             emit serverUnregistered(id);
             emit registryChanged();
         }

@@ -1,7 +1,10 @@
 #include "SearchTextTool.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QDir>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QDirIterator>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -41,6 +44,9 @@ namespace agent::tool::builtin {
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {
+        QElapsedTimer timer;
+        timer.start();
+
         domain::agent::ToolResult result{call.id, {}, true};
         const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
         const QString query = args.value(QStringLiteral("query")).toString();
@@ -54,7 +60,11 @@ namespace agent::tool::builtin {
         QString error;
         const QString startPath = m_fs->resolveReadablePath(context.workspaceRoot, relativeStart, &error);
         if (startPath.isEmpty()) {
-            result.content = error.isEmpty() ? QStringLiteral("路径不合法或超出工作区") : error;
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("search_text 路径校验失败"), {
+                {QStringLiteral("path"), relativeStart},
+                {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+            });
+            result.content = error.isEmpty() ? QStringLiteral("出于安全原因，无法访问项目外的路径。") : error;
             return result;
         }
 
@@ -88,6 +98,14 @@ namespace agent::tool::builtin {
 
         result.content = QString::fromUtf8(QJsonDocument(hits).toJson(QJsonDocument::Compact));
         result.isError = false;
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::AgentTool, QStringLiteral("search_text 执行完成"), {
+            {QStringLiteral("startPath"), relativeStart},
+            {QStringLiteral("queryLength"), QString::number(query.length())},
+            {QStringLiteral("hitsCount"), QString::number(hits.size())},
+            {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+        });
+
         return result;
     }
 

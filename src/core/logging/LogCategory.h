@@ -34,6 +34,22 @@ namespace core::logging {
         inline const QString Ui = QStringLiteral("ui");
         inline const QString UiChat = QStringLiteral("ui.chat");
         inline const QString UiNavigation = QStringLiteral("ui.navigation");
+
+        // Agent
+        inline const QString AgentRuntime = QStringLiteral("agent.runtime");
+        inline const QString AgentTool = QStringLiteral("agent.tool");
+        inline const QString AgentSkill = QStringLiteral("agent.skill");
+
+        // Workspace
+        inline const QString Workspace = QStringLiteral("workspace");
+
+        // MCP
+        inline const QString McpConfig = QStringLiteral("mcp.config");
+        inline const QString McpRegistry = QStringLiteral("mcp.registry");
+        inline const QString McpSession = QStringLiteral("mcp.session");
+        inline const QString McpProtocol = QStringLiteral("mcp.protocol");
+        inline const QString McpTransport = QStringLiteral("mcp.transport");
+        inline const QString McpSecurity = QStringLiteral("mcp.security");
     }
 
 } // namespace core::logging

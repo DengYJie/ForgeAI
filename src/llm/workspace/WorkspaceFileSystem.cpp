@@ -1,4 +1,6 @@
 #include "WorkspaceFileSystem.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -44,13 +46,20 @@ namespace llm::workspace {
     ) const {
         const QString canonicalRoot = QDir(workspaceRoot).canonicalPath();
         if (canonicalRoot.isEmpty()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("工作区根目录不存在"), {
+                {QStringLiteral("workspaceRoot"), workspaceRoot}
+            });
             if (error) *error = QStringLiteral("工作区根目录不存在");
             return {};
         }
 
         const QString cleanedRelative = QDir::cleanPath(relativePath);
         if (cleanedRelative.startsWith(QStringLiteral("../")) || cleanedRelative == QStringLiteral("..")) {
-            if (error) *error = QStringLiteral("路径必须位于工作区内");
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("读取路径越界访问被拒绝"), {
+                {QStringLiteral("path"), cleanedRelative},
+                {QStringLiteral("reason"), QStringLiteral("EscapeAttempt")}
+            });
+            if (error) *error = QStringLiteral("出于安全原因，无法访问项目外的路径。");
             return {};
         }
 
@@ -66,7 +75,10 @@ namespace llm::workspace {
         const QString prefix = QDir::cleanPath(canonicalRoot + QLatin1Char('/'));
         if (resolved.isEmpty() || (resolved.compare(canonicalRoot, caseSensitivity) != 0
             && !resolved.startsWith(prefix, caseSensitivity))) {
-            if (error) *error = QStringLiteral("路径必须位于工作区内或文件不存在");
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("文件不存在或位于工作区外部"), {
+                {QStringLiteral("path"), cleanedRelative}
+            });
+            if (error) *error = QStringLiteral("出于安全原因，无法访问项目外的路径或文件不存在。");
             return {};
         }
 
@@ -80,13 +92,20 @@ namespace llm::workspace {
     ) const {
         const QString canonicalRoot = QDir(workspaceRoot).canonicalPath();
         if (canonicalRoot.isEmpty()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("工作区根目录不存在"), {
+                {QStringLiteral("workspaceRoot"), workspaceRoot}
+            });
             if (error) *error = QStringLiteral("工作区根目录不存在");
             return {};
         }
 
         const QString cleaned = QDir::cleanPath(relativePath);
         if (cleaned.isEmpty() || QDir::isAbsolutePath(cleaned) || cleaned == QStringLiteral("..") || cleaned.startsWith(QStringLiteral("../"))) {
-            if (error) *error = QStringLiteral("路径必须位于工作区内");
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("写入路径越界访问被拒绝"), {
+                {QStringLiteral("path"), cleaned},
+                {QStringLiteral("reason"), QStringLiteral("EscapeAttempt")}
+            });
+            if (error) *error = QStringLiteral("出于安全原因，无法访问项目外的路径。");
             return {};
         }
 
@@ -95,6 +114,9 @@ namespace llm::workspace {
         const QString parentDir = candidateInfo.absolutePath();
         const QString parent = QFileInfo(parentDir).canonicalFilePath();
         if (parent.isEmpty()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("写入目标父目录不存在"), {
+                {QStringLiteral("path"), cleaned}
+            });
             if (error) *error = QStringLiteral("目标目录不存在");
             return {};
         }
@@ -106,14 +128,20 @@ namespace llm::workspace {
 #endif
         const QString prefix = QDir::cleanPath(canonicalRoot + QLatin1Char('/'));
         if (parent.compare(canonicalRoot, sensitivity) != 0 && !parent.startsWith(prefix, sensitivity)) {
-            if (error) *error = QStringLiteral("路径必须位于工作区内");
+            core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("写入目标目录位于工作区外"), {
+                {QStringLiteral("path"), cleaned}
+            });
+            if (error) *error = QStringLiteral("出于安全原因，无法访问项目外的路径。");
             return {};
         }
 
         if (candidateInfo.exists()) {
             const QString candidateCanonical = candidateInfo.canonicalFilePath();
             if (candidateCanonical.compare(canonicalRoot, sensitivity) != 0 && !candidateCanonical.startsWith(prefix, sensitivity)) {
-                if (error) *error = QStringLiteral("已存在的文件是符号链接且指向工作区外");
+                core::logging::LoggingService::instance().warn(core::logging::Category::Workspace, QStringLiteral("已存在的文件是符号链接且指向工作区外"), {
+                    {QStringLiteral("path"), cleaned}
+                });
+                if (error) *error = QStringLiteral("出于安全原因，无法访问项目外的路径。");
                 return {};
             }
         }

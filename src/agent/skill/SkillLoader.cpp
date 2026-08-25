@@ -1,9 +1,12 @@
 #include "SkillLoader.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 
 namespace agent::skill {
 
@@ -18,6 +21,10 @@ namespace agent::skill {
     std::optional<domain::agent::Skill> SkillLoader::loadFromFile(const QString& filePath, bool loadInstructionsImmediately) const {
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentSkill, QStringLiteral("无法读取 Skill 文件"), {
+                {QStringLiteral("path"), filePath},
+                {QStringLiteral("error"), file.errorString()}
+            });
             return std::nullopt;
         }
 
@@ -60,6 +67,10 @@ namespace agent::skill {
                     }
                 }
                 return skill;
+            } else {
+                core::logging::LoggingService::instance().warn(core::logging::Category::AgentSkill, QStringLiteral("Skill Frontmatter 格式无效，未找到闭合 ---"), {
+                    {QStringLiteral("path"), filePath}
+                });
             }
         }
 
@@ -81,6 +92,10 @@ namespace agent::skill {
 
         QFile file(skill.path);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentSkill, QStringLiteral("无法读取 Skill 指令正文"), {
+                {QStringLiteral("skillId"), skill.id},
+                {QStringLiteral("error"), file.errorString()}
+            });
             return false;
         }
 
@@ -106,6 +121,9 @@ namespace agent::skill {
     }
 
     QList<domain::agent::Skill> SkillLoader::scanDirectory(const QString& rootPath, bool loadInstructionsImmediately) const {
+        QElapsedTimer timer;
+        timer.start();
+
         QList<domain::agent::Skill> result;
         if (rootPath.isEmpty()) return result;
 
@@ -138,6 +156,12 @@ namespace agent::skill {
                 }
             }
         }
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::AgentSkill, QStringLiteral("Skill 目录扫描完成"), {
+            {QStringLiteral("rootPath"), rootPath},
+            {QStringLiteral("discoveredCount"), QString::number(result.size())},
+            {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+        });
 
         return result;
     }

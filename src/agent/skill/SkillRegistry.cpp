@@ -1,4 +1,6 @@
 #include "SkillRegistry.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 namespace agent::skill {
 
@@ -8,6 +10,12 @@ namespace agent::skill {
         const QString key = !skill.id.isEmpty() ? skill.id : skill.name;
         std::lock_guard<std::mutex> lock(m_mutex);
         m_skills.insert(key, skill);
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::AgentSkill, QStringLiteral("注册 Skill"), {
+            {QStringLiteral("skillId"), key},
+            {QStringLiteral("name"), skill.name}
+        });
+
         return true;
     }
 

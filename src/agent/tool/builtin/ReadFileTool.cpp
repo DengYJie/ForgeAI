@@ -1,6 +1,9 @@
 #include "ReadFileTool.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QFile>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -35,6 +38,9 @@ namespace agent::tool::builtin {
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {
+        QElapsedTimer timer;
+        timer.start();
+
         domain::agent::ToolResult result{call.id, {}, true};
         const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
         const QString relativePath = args.value(QStringLiteral("path")).toString();
@@ -52,18 +58,35 @@ namespace agent::tool::builtin {
         QString error;
         const QString path = m_fs->resolveReadablePath(context.workspaceRoot, relativePath, &error);
         if (path.isEmpty()) {
-            result.content = error.isEmpty() ? QStringLiteral("路径不合法或超出工作区") : error;
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("read_file 路径校验失败"), {
+                {QStringLiteral("path"), relativePath},
+                {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+            });
+            result.content = error.isEmpty() ? QStringLiteral("出于安全原因，无法访问项目外的路径或文件不存在。") : error;
             return result;
         }
 
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            result.content = QStringLiteral("无法读取文件: ") + file.errorString();
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("read_file 无法打开文件"), {
+                {QStringLiteral("path"), relativePath},
+                {QStringLiteral("osError"), file.errorString()},
+                {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+            });
+            result.content = QStringLiteral("无法读取该文件，请检查文件是否存在及访问权限。");
             return result;
         }
 
-        result.content = QString::fromUtf8(file.read(64 * 1024));
+        const QByteArray data = file.read(64 * 1024);
+        result.content = QString::fromUtf8(data);
         result.isError = false;
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::AgentTool, QStringLiteral("read_file 执行完成"), {
+            {QStringLiteral("path"), relativePath},
+            {QStringLiteral("bytes"), QString::number(data.size())},
+            {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
+        });
+
         return result;
     }
 

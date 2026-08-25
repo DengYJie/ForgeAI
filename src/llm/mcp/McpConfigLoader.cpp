@@ -1,4 +1,6 @@
 #include "McpConfigLoader.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -12,10 +14,17 @@ namespace llm::mcp {
     McpConfigLoadResult McpConfigLoader::loadFromFile(const QString& filePath) {
         QFile file(filePath);
         if (!file.exists()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpConfig, QStringLiteral("MCP 配置文件不存在"), {
+                {QStringLiteral("filePath"), filePath}
+            });
             return {false, QStringLiteral("配置文件不存在: %1").arg(filePath), {}, {}};
         }
 
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpConfig, QStringLiteral("无法读取 MCP 配置文件"), {
+                {QStringLiteral("filePath"), filePath},
+                {QStringLiteral("osError"), file.errorString()}
+            });
             return {false, QStringLiteral("无法读取配置文件: %1 (原因: %2)").arg(filePath, file.errorString()), {}, {}};
         }
 
@@ -35,6 +44,10 @@ namespace llm::mcp {
         QJsonParseError parseErr;
         const auto doc = QJsonDocument::fromJson(jsonData, &parseErr);
         if (parseErr.error != QJsonParseError::NoError) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpConfig, QStringLiteral("MCP 配置文件 JSON 解析失败"), {
+                {QStringLiteral("error"), parseErr.errorString()},
+                {QStringLiteral("offset"), QString::number(parseErr.offset)}
+            });
             result.success = false;
             result.error = QStringLiteral("JSON 语法解析错误: %1 (offset: %2)").arg(parseErr.errorString()).arg(parseErr.offset);
             return result;
@@ -146,6 +159,12 @@ namespace llm::mcp {
             }
             result.error = QStringLiteral("所有 MCP 服务配置项均校验失败: %1").arg(msgs.join(QStringLiteral("; ")));
         }
+
+        core::logging::LoggingService::instance().info(core::logging::Category::McpConfig, QStringLiteral("MCP 配置加载完成"), {
+            {QStringLiteral("configsCount"), QString::number(result.configs.size())},
+            {QStringLiteral("issuesCount"), QString::number(result.issues.size())},
+            {QStringLiteral("success"), result.success ? QStringLiteral("true") : QStringLiteral("false")}
+        });
 
         return result;
     }

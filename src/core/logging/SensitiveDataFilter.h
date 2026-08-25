@@ -5,6 +5,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QMap>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace core::logging {
 
@@ -46,14 +48,14 @@ namespace core::logging {
 
             QString result = text;
             
-            static const QRegularExpression bearerRegex(QStringLiteral(R"((Bearer\s+)[A-Za-z0-9\-_]{8,})"), QRegularExpression::CaseInsensitiveOption);
-            result.replace(bearerRegex, QStringLiteral(R"(\1****)"));
+            static const QRegularExpression bearerRegex(QStringLiteral("(Bearer\\s+)[A-Za-z0-9\\-_]{8,}"), QRegularExpression::CaseInsensitiveOption);
+            result.replace(bearerRegex, QStringLiteral("\\1****"));
 
-            static const QRegularExpression skRegex(QStringLiteral(R"(sk-[A-Za-z0-9\-_]{16,})"));
+            static const QRegularExpression skRegex(QStringLiteral("sk-[A-Za-z0-9\\-_]{16,}"));
             result.replace(skRegex, QStringLiteral("sk-****"));
 
-            static const QRegularExpression apiKeyRegex(QStringLiteral(R"(((?:x-)?api-key["'\s:]+)[A-Za-z0-9\-_]{8,})"), QRegularExpression::CaseInsensitiveOption);
-            result.replace(apiKeyRegex, QStringLiteral(R"(\1****)"));
+            static const QRegularExpression apiKeyRegex(QStringLiteral("((?:x-)?api-key[\"'\\s:]+)[A-Za-z0-9\\-_]{8,}"), QRegularExpression::CaseInsensitiveOption);
+            result.replace(apiKeyRegex, QStringLiteral("\\1****"));
 
             return result;
         }
@@ -82,6 +84,20 @@ namespace core::logging {
                 }
             }
             return safeHeaders;
+        }
+
+        /**
+         * @brief 提取 JSON 参数对象的键名列表（用于安全日志记录，绝不输出具体参数值）
+         */
+        static QString extractArgKeys(const QString &jsonStr) {
+            if (jsonStr.isEmpty()) return QStringLiteral("[]");
+            QJsonParseError err;
+            const auto doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &err);
+            if (err.error == QJsonParseError::NoError && doc.isObject()) {
+                const auto keys = doc.object().keys();
+                return QStringLiteral("[%1]").arg(keys.join(QStringLiteral(", ")));
+            }
+            return QStringLiteral("[]");
         }
     };
 

@@ -1,4 +1,7 @@
 #include "AgentRuntime.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
+#include "core/logging/SensitiveDataFilter.h"
 
 #include <QDateTime>
 #include <QUuid>
@@ -69,10 +72,18 @@ namespace agent::runtime {
     void AgentRuntime::onTimeout() {
         if (!isRunning()) return;
         cleanupCurrentOp();
+
+        core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("Agent 操作执行超时"), {
+            {QStringLiteral("runId"), m_state.runId.toString(QUuid::WithoutBraces)},
+            {QStringLiteral("sessionId"), m_context.sessionId},
+            {QStringLiteral("round"), QString::number(m_state.round)},
+            {QStringLiteral("timeoutMs"), QString::number(m_context.policy.timeoutMs)}
+        });
+
         domain::llm::ChatError err;
         err.category = domain::llm::ChatErrorCategory::Network;
         err.code = QStringLiteral("RequestTimeout");
-        err.userMessage = QStringLiteral("Agent 操作执行超时（%1 ms）。").arg(m_context.policy.timeoutMs);
+        err.userMessage = QStringLiteral("任务响应超时，请重试。");
         setState(domain::agent::AgentRunStatus::Failed, err.userMessage);
         saveCheckpoint();
         emit runFailed(m_context.sessionId, err);
@@ -109,6 +120,12 @@ namespace agent::runtime {
         m_state.results.clear();
         m_state.errorMessage.clear();
         m_pendingPermissions.clear();
+
+        core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("Agent 任务启动"), {
+            {QStringLiteral("runId"), m_state.runId.toString(QUuid::WithoutBraces)},
+            {QStringLiteral("sessionId"), context.sessionId},
+            {QStringLiteral("projectId"), context.projectId.toString(QUuid::WithoutBraces)}
+        });
 
         setState(domain::agent::AgentRunStatus::Preparing);
 
@@ -305,6 +322,11 @@ namespace agent::runtime {
         m_pendingToolResults.clear();
         m_pendingPermissions.clear();
 
+        core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("Agent 任务已取消"), {
+            {QStringLiteral("runId"), m_state.runId.toString(QUuid::WithoutBraces)},
+            {QStringLiteral("sessionId"), m_context.sessionId}
+        });
+
         if (isRunning()) {
             setState(domain::agent::AgentRunStatus::Cancelled);
             saveCheckpoint();
@@ -361,16 +383,21 @@ namespace agent::runtime {
             if (m_toolRegistry) {
                 result = m_toolRegistry->execute(call, execContext);
             } else {
-                result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                result = domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
             }
             m_pendingToolResults.append(result);
             m_state.results = m_pendingToolResults;
             emit toolResultReady(m_context.sessionId, result);
             emit stateChanged(m_state);
         } else {
+            core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户拒绝工具权限授权"), {
+                {QStringLiteral("toolName"), call.name},
+                {QStringLiteral("callId"), call.id}
+            });
+
             domain::agent::ToolResult result{
                 call.id,
-                QStringLiteral("用户拒绝授权执行该敏感操作: %1").arg(perm.reason),
+                QStringLiteral("你已拒绝该工具请求。"),
                 true
             };
             m_pendingToolResults.append(result);
@@ -414,6 +441,11 @@ namespace agent::runtime {
 
             // 1. 校验 enabledTools
             if (!m_context.enabledTools.isEmpty() && !m_context.enabledTools.contains(call.name)) {
+                core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("工具未在启用列表中被拦截"), {
+                    {QStringLiteral("toolName"), call.name},
+                    {QStringLiteral("callId"), call.id}
+                });
+
                 domain::agent::ToolResult result{
                     call.id,
                     QStringLiteral("安全策略拒绝执行操作：工具 '%1' 未在当前智能体启用列表中。").arg(call.name),
@@ -448,6 +480,12 @@ namespace agent::runtime {
             }
 
             if (decision == domain::agent::PermissionDecision::Deny) {
+                core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("安全策略拒绝工具执行"), {
+                    {QStringLiteral("toolName"), call.name},
+                    {QStringLiteral("callId"), call.id},
+                    {QStringLiteral("reason"), requiredPerm.reason}
+                });
+
                 domain::agent::ToolResult result{
                     call.id,
                     QStringLiteral("安全策略拒绝执行操作: %1").arg(requiredPerm.reason),
@@ -501,12 +539,18 @@ namespace agent::runtime {
                 // 在主线程解析工具，剥离 this，防止超时后 AgentRuntime 析构导致的 UAF
                 auto tool = m_toolRegistry ? m_toolRegistry->findTool(call.name) : nullptr;
 
+                core::logging::LoggingService::instance().debug(core::logging::Category::AgentRuntime, QStringLiteral("派发并发工具调用"), {
+                    {QStringLiteral("toolName"), call.name},
+                    {QStringLiteral("callId"), call.id},
+                    {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(call.arguments)}
+                });
+
                 std::thread([tool, call, taskContext, doneFlag, resultHolder, completedCount, cv, cvMutex]() {
                     domain::agent::ToolResult res;
                     if (tool) {
                         res = tool->execute(call, taskContext);
                     } else {
-                        res = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪或未知工具"), true};
+                        res = domain::agent::ToolResult{call.id, QStringLiteral("请求的工具当前不可用。"), true};
                     }
                     *resultHolder = std::move(res);
                     doneFlag->store(true, std::memory_order_release);
@@ -537,9 +581,15 @@ namespace agent::runtime {
                 } else {
                     // 超时：发出合作式取消信号，立即生成超时结果并不阻塞流转
                     task.token.cancel();
+                    core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("工具后台执行超时"), {
+                        {QStringLiteral("toolName"), task.call.name},
+                        {QStringLiteral("callId"), task.call.id},
+                        {QStringLiteral("timeoutMs"), QString::number(timeoutMs)}
+                    });
+
                     domain::agent::ToolResult timeoutResult{
                         task.call.id,
-                        QStringLiteral("工具执行超时（%1 ms）").arg(timeoutMs),
+                        QStringLiteral("工具执行响应超时，请稍后重试。"),
                         true
                     };
                     m_pendingToolResults.append(timeoutResult);
@@ -551,11 +601,17 @@ namespace agent::runtime {
 
         // 3. 在主线程顺序执行需保证 QObject 亲和性的工具（如 MCP / UI 交互）
         for (const auto& call : serialCalls) {
+            core::logging::LoggingService::instance().debug(core::logging::Category::AgentRuntime, QStringLiteral("主线程执行工具调用"), {
+                {QStringLiteral("toolName"), call.name},
+                {QStringLiteral("callId"), call.id},
+                {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(call.arguments)}
+            });
+
             domain::agent::ToolResult result;
             if (m_toolRegistry) {
                 result = m_toolRegistry->execute(call, execContext);
             } else {
-                result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                result = domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
             }
             m_pendingToolResults.append(result);
             m_state.results = m_pendingToolResults;

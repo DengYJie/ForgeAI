@@ -1,4 +1,6 @@
 #include "StdioMcpTransport.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 
 #include <QJsonDocument>
 #include <QProcessEnvironment>
@@ -19,6 +21,11 @@ namespace llm::mcp {
         }
 
         close();
+
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpTransport, QStringLiteral("启动 MCP 进程"), {
+            {QStringLiteral("command"), m_config.command},
+            {QStringLiteral("argsCount"), QString::number(m_config.args.size())}
+        });
 
         m_process = new QProcess(this);
         if (!m_config.cwd.isEmpty()) {
@@ -105,8 +112,11 @@ namespace llm::mcp {
     }
 
     void StdioMcpTransport::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
-        Q_UNUSED(exitCode);
-        Q_UNUSED(exitStatus);
+        core::logging::LoggingService::instance().info(core::logging::Category::McpTransport, QStringLiteral("MCP 进程退出"), {
+            {QStringLiteral("command"), m_config.command},
+            {QStringLiteral("exitCode"), QString::number(exitCode)},
+            {QStringLiteral("exitStatus"), exitStatus == QProcess::NormalExit ? QStringLiteral("Normal") : QStringLiteral("Crash")}
+        });
         emit closed();
     }
 
@@ -126,6 +136,12 @@ namespace llm::mcp {
             errStr = QStringLiteral("MCP 进程未知错误: %1").arg(m_process ? m_process->errorString() : QString());
             break;
         }
+
+        core::logging::LoggingService::instance().warn(core::logging::Category::McpTransport, QStringLiteral("MCP 进程发生异常"), {
+            {QStringLiteral("command"), m_config.command},
+            {QStringLiteral("error"), errStr}
+        });
+
         emit errorOccurred(errStr);
     }
 

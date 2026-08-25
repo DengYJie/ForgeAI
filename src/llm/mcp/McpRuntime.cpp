@@ -1,6 +1,8 @@
 #include "McpRuntime.h"
 #include "McpResourceProvider.h"
 #include "McpPromptProvider.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
 #include <QFileInfo>
 #include <QDir>
 
@@ -110,6 +112,9 @@ namespace llm::mcp {
 
         // 安全信任检查：未批准的外部服务禁止启动
         if (!m_trustPolicy.isServerTrusted(id, session->config().autoApprove)) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpSecurity, QStringLiteral("未受信 MCP 服务被安全策略拦截"), {
+                {QStringLiteral("serverId"), id}
+            });
             const QString err = QStringLiteral("MCP 服务 [%1] 未获得安全信任授权，拒绝启动").arg(id);
             emit serverError(id, err);
             return false;
@@ -119,6 +124,9 @@ namespace llm::mcp {
             if (m_toolProvider) {
                 m_toolProvider->refreshTools();
             }
+            core::logging::LoggingService::instance().info(core::logging::Category::McpSecurity, QStringLiteral("MCP 服务已启动"), {
+                {QStringLiteral("serverId"), id}
+            });
             emit serverStarted(id);
             return true;
         }
@@ -134,6 +142,9 @@ namespace llm::mcp {
             if (m_toolProvider) {
                 m_toolProvider->refreshTools();
             }
+            core::logging::LoggingService::instance().info(core::logging::Category::McpSecurity, QStringLiteral("MCP 服务已停止"), {
+                {QStringLiteral("serverId"), id}
+            });
             emit serverStopped(id);
         }
     }

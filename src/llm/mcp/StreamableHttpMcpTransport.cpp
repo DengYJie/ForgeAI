@@ -1,4 +1,8 @@
 #include "StreamableHttpMcpTransport.h"
+#include "core/logging/LoggingService.h"
+#include "core/logging/LogCategory.h"
+#include "core/logging/SensitiveDataFilter.h"
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
@@ -24,6 +28,11 @@ namespace llm::mcp {
             emit errorOccurred(QStringLiteral("无效的 HTTP/HTTPS 端点: %1").arg(m_config.url));
             return false;
         }
+
+        const QString cleanUrl = core::logging::SensitiveDataFilter::sanitizeUrl(m_config.url);
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpTransport, QStringLiteral("发起 MCP HTTP SSE 握手连接"), {
+            {QStringLiteral("url"), cleanUrl}
+        });
 
         if (!m_netManager) {
             m_netManager = std::make_unique<QNetworkAccessManager>();
@@ -76,6 +85,13 @@ namespace llm::mcp {
         }
 
         const QByteArray payload = QJsonDocument(json).toJson(QJsonDocument::Compact);
+
+        const QString cleanUrl = core::logging::SensitiveDataFilter::sanitizeUrl(m_postEndpoint.toString());
+        core::logging::LoggingService::instance().debug(core::logging::Category::McpTransport, QStringLiteral("发送 MCP HTTP POST 请求"), {
+            {QStringLiteral("url"), cleanUrl},
+            {QStringLiteral("bytes"), QString::number(payload.size())}
+        });
+
         auto* reply = m_netManager->post(request, payload);
 
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -166,6 +182,11 @@ namespace llm::mcp {
     void StreamableHttpMcpTransport::onSseError(QNetworkReply::NetworkError code) {
         if (code != QNetworkReply::NoError && code != QNetworkReply::OperationCanceledError) {
             if (m_sseReply) {
+                const QString cleanUrl = core::logging::SensitiveDataFilter::sanitizeUrl(m_config.url);
+                core::logging::LoggingService::instance().warn(core::logging::Category::McpTransport, QStringLiteral("SSE 连接错误"), {
+                    {QStringLiteral("url"), cleanUrl},
+                    {QStringLiteral("error"), m_sseReply->errorString()}
+                });
                 emit errorOccurred(QStringLiteral("SSE 连接错误: %1").arg(m_sseReply->errorString()));
             }
         }
@@ -176,6 +197,9 @@ namespace llm::mcp {
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::McpTransport, QStringLiteral("HTTP MCP POST 请求失败"), {
+                {QStringLiteral("error"), reply->errorString()}
+            });
             emit errorOccurred(QStringLiteral("HTTP MCP POST 请求失败: %1").arg(reply->errorString()));
             return;
         }

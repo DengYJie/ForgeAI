@@ -30,6 +30,8 @@
 #include "llm/mcp/McpResourceProvider.h"
 #include "llm/mcp/McpPromptProvider.h"
 #include "domain/mcp/McpServerTrust.h"
+#include "core/logging/SensitiveDataFilter.h"
+#include "core/logging/LogCategory.h"
 
 class AgentToolTests final : public QObject {
     Q_OBJECT
@@ -57,6 +59,8 @@ private slots:
     void mcpResourceAndPromptProviderTests();
     void mcpSessionCrashRecoveryAndHandshakeVersionTests();
     void streamableHttpMcpTransportSseIntegrationTests();
+    void testSensitiveDataFilterAndArgKeys();
+    void testToolExecutionErrorSanitization();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -868,7 +872,67 @@ void AgentToolTests::streamableHttpMcpTransportSseIntegrationTests() {
     QVERIFY(!transport.isConnected());
 }
 
+void AgentToolTests::testSensitiveDataFilterAndArgKeys() {
+    // 1. 验证从参数 JSON 字符串中仅提取键名列表
+    const QString argsJson = QStringLiteral(R"({"path": "src/main.cpp", "content": "secret password 123", "dryRun": true})");
+    const QString extractedKeys = core::logging::SensitiveDataFilter::extractArgKeys(argsJson);
+    QVERIFY(extractedKeys.contains(QStringLiteral("path")));
+    QVERIFY(extractedKeys.contains(QStringLiteral("content")));
+    QVERIFY(extractedKeys.contains(QStringLiteral("dryRun")));
+    QVERIFY(!extractedKeys.contains(QStringLiteral("secret password 123")));
+    QVERIFY(!extractedKeys.contains(QStringLiteral("src/main.cpp")));
+
+    // 2. 验证 URL 脱敏
+    const QString rawUrl = QStringLiteral("https://api.example.com/mcp?apiKey=sk-1234567890abcdef&token=my_secret_token&user=test");
+    const QString cleanUrl = core::logging::SensitiveDataFilter::sanitizeUrl(rawUrl);
+    QVERIFY(!cleanUrl.contains(QStringLiteral("sk-1234567890abcdef")));
+    QVERIFY(!cleanUrl.contains(QStringLiteral("my_secret_token")));
+    QVERIFY(cleanUrl.contains(QStringLiteral("user=test")));
+
+    // 3. 验证 Header 过滤
+    QMap<QString, QString> headers{
+        {QStringLiteral("Authorization"), QStringLiteral("Bearer secret-jwt-token")},
+        {QStringLiteral("Content-Type"), QStringLiteral("application/json")},
+        {QStringLiteral("X-Custom-Secret"), QStringLiteral("confidential-data")}
+    };
+    const auto safeHeaders = core::logging::SensitiveDataFilter::filterHeaders(headers);
+    QCOMPARE(safeHeaders.value(QStringLiteral("Content-Type")), QStringLiteral("application/json"));
+    QCOMPARE(safeHeaders.value(QStringLiteral("Authorization")), QStringLiteral("****"));
+    QVERIFY(!safeHeaders.contains(QStringLiteral("X-Custom-Secret")));
+}
+
+void AgentToolTests::testToolExecutionErrorSanitization() {
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::builtin::ReadFileTool readTool(fs);
+    agent::tool::builtin::WriteFileTool writeTool(fs);
+    agent::tool::builtin::SearchTextTool searchTool(fs);
+
+    application::ports::ToolExecutionContext ctx{root.path(), QStringLiteral("session-1"), {}};
+
+    // 1. 缺少参数：提供模型可识别的明确错误
+    domain::agent::ToolCall callEmptyRead{QStringLiteral("c1"), QStringLiteral("read_file"), QStringLiteral("{}")};
+    auto resEmpty = readTool.execute(callEmptyRead, ctx);
+    QVERIFY(resEmpty.isError);
+    QCOMPARE(resEmpty.content, QStringLiteral("缺少 path 参数"));
+
+    // 2. 越界路径：返回友好的脱敏错误提示
+    domain::agent::ToolCall callEscapeRead{QStringLiteral("c2"), QStringLiteral("read_file"), QStringLiteral(R"({"path":"../../etc/passwd"})")};
+    auto resEscape = readTool.execute(callEscapeRead, ctx);
+    QVERIFY(resEscape.isError);
+    QVERIFY(resEscape.content.contains(QStringLiteral("出于安全原因，无法访问项目外的路径")));
+
+    // 3. 不存在的文件读写
+    domain::agent::ToolCall callNotFoundRead{QStringLiteral("c3"), QStringLiteral("read_file"), QStringLiteral(R"({"path":"not_exist.txt"})")};
+    auto resNotFound = readTool.execute(callNotFoundRead, ctx);
+    QVERIFY(resNotFound.isError);
+    QVERIFY(resNotFound.content.contains(QStringLiteral("出于安全原因，无法访问项目外的路径或文件不存在。")));
+}
+
 QTEST_GUILESS_MAIN(AgentToolTests)
 #include "AgentToolTests.moc"
+
 
 
