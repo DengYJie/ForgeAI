@@ -204,7 +204,7 @@ namespace ui::widget::chat {
 
     void ChatAnchorBar::paintEvent(QPaintEvent *event) {
         Q_UNUSED(event);
-        if (m_items.isEmpty())
+        if (m_items.size() < 3)
             return;
 
         QPainter painter(this);
@@ -233,6 +233,10 @@ namespace ui::widget::chat {
     }
 
     void ChatAnchorBar::mouseMoveEvent(QMouseEvent *event) {
+        if (m_items.size() < 3) {
+            event->ignore();
+            return;
+        }
         const int idx = indexAtPosition(event->pos());
         if (idx >= 0) {
             setCursor(Qt::PointingHandCursor);

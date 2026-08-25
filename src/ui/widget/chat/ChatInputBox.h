@@ -6,6 +6,7 @@
 #include <FluentQt/Design.h>
 
 class QTextEdit;
+class QVariantAnimation;
 
 namespace fluent::basicinput {
     class Button;
@@ -35,10 +36,13 @@ namespace ui::widget::chat {
 
         SendState sendState() const { return m_sendState; }
 
-        void setModelName(const QString &name) const;
-        void setModelPresentation(const QString& name, const QString& reasoningEffort) const;
+        void setModelName(const QString &name);
+        void setModelPresentation(const QString& name, const QString& reasoningEffort);
         void setToolAvailability(bool attachments, bool webSearch, bool deepThinking) const;
         QWidget* modelAnchor() const;
+
+        void notifyModelMenuOpened();
+        void notifyModelMenuClosed();
 
         QString modelName() const;
 
@@ -70,6 +74,8 @@ namespace ui::widget::chat {
     protected:
         bool eventFilter(QObject *watched, QEvent *event) override;
 
+        void resizeEvent(QResizeEvent *event) override;
+
         void paintEvent(QPaintEvent *event) override;
 
     private:
@@ -79,6 +85,10 @@ namespace ui::widget::chat {
 
         void updateSendButtonVisual();
 
+        void updateModelButtonDisplay();
+
+        int calculateCompactModelButtonWidth() const;
+
         SendState m_sendState = SendState::Idle;
         QTextEdit *m_textEdit = nullptr;
         fluent::basicinput::Button *m_attachButton = nullptr;
@@ -86,5 +96,11 @@ namespace ui::widget::chat {
         fluent::basicinput::Button *m_deepThinkButton = nullptr;
         fluent::basicinput::Button *m_modelButton = nullptr;
         fluent::basicinput::Button *m_sendButton = nullptr;
+
+        QString m_currentModelName;
+        QString m_currentReasoningEffort;
+        QVariantAnimation *m_modelExpandAnim = nullptr;
+        bool m_isModelMenuOpen = false;
+        bool m_isIconOnlyMode = false;
     };
 } // namespace ui::widget::chat

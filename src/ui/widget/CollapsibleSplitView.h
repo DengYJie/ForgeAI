@@ -148,6 +148,23 @@ public:
     void setPaneMaxOpenLength(int index, int maxLength);
 
     /**
+     * @brief 设置指定面板的自动折叠断点宽度（0 表示禁用，例如 768）
+     * @param index 面板索引
+     * @param breakpointWidth 触发自动折叠的控件最小总宽度
+     */
+    void setAutoCollapseBreakpoint(int index, int breakpointWidth);
+
+    /**
+     * @brief 获取指定面板的自动折叠断点宽度
+     */
+    int autoCollapseBreakpoint(int index) const;
+
+    /**
+     * @brief 显式设置用户对指定面板的开合偏好（覆盖断点自动行为）
+     */
+    void setUserExplicitExpansion(int index, bool expanded);
+
+    /**
      * @brief 启用或禁用悬浮模式下的点击遮罩自动收起行为
      * @param enabled 是否启用
      */
@@ -222,6 +239,10 @@ private:
         int minOpenLength = 120;
         int maxOpenLength = 16777215;
         int currentAnimatedLength = 320;
+
+        int autoCollapseBreakpoint = 0;
+        bool userExplicitClosed = false;
+        bool autoCollapsedByBreakpoint = false;
     };
 
     PaneState *stateForIndex(int index);

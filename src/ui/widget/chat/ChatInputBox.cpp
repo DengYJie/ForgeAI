@@ -5,13 +5,16 @@
 #include <QKeyEvent>
 #include <QPainter>
 #include <QAbstractTextDocumentLayout>
+#include <QVariantAnimation>
+#include <QEasingCurve>
+#include <QFontMetrics>
 #include <FluentQt/BasicInput.h>
 
 namespace ui::widget::chat {
     namespace {
         constexpr int kMinInputHeight = 48;
         constexpr int kMaxInputHeight = 140;
-        constexpr int kMinBoxWidth = 400;
+        constexpr int kMinBoxWidth = 200;
         constexpr int kMaxBoxWidth = 1000;
         constexpr int kShadowMargin = 8;
         constexpr int kShadowLayers = 8;
@@ -97,15 +100,21 @@ namespace ui::widget::chat {
         m_modelButton = new fluent::basicinput::Button(this);
         m_modelButton->setFluentStyle(fluent::basicinput::Button::Subtle);
         m_modelButton->setFluentLayout(fluent::basicinput::Button::TextOnly);
-        m_modelButton->setText(QStringLiteral("选择模型  ▾"));
         m_modelButton->setFixedHeight(28);
-        m_modelButton->setMinimumWidth(168);
         QFont modelFont = themeFont(Typography::FontRole::Caption).toQFont();
         m_modelButton->setFont(modelFont);
         m_modelButton->setToolTip(tr("切换当前会话模型"));
         m_modelButton->setCursor(Qt::PointingHandCursor);
         connect(m_modelButton, &QPushButton::clicked, this, &ChatInputBox::modelButtonClicked);
         bottomLayout->addWidget(m_modelButton);
+
+        m_modelExpandAnim = new QVariantAnimation(this);
+        m_modelExpandAnim->setEasingCurve(QEasingCurve::OutCubic);
+        connect(m_modelExpandAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant& val) {
+            if (m_modelButton) {
+                m_modelButton->setFixedWidth(val.toInt());
+            }
+        });
 
         m_sendButton = new fluent::basicinput::Button(this);
         m_sendButton->setFluentStyle(fluent::basicinput::Button::Subtle);
@@ -126,6 +135,7 @@ namespace ui::widget::chat {
 
         mainLayout->addLayout(bottomLayout);
 
+        updateModelButtonDisplay();
         updateSendButtonVisual();
     }
 
@@ -137,14 +147,77 @@ namespace ui::widget::chat {
         updateSendButtonVisual();
     }
 
-    void ChatInputBox::setModelName(const QString &name) const {
+    void ChatInputBox::setModelName(const QString &name) {
         setModelPresentation(name, {});
     }
 
-    void ChatInputBox::setModelPresentation(const QString& name, const QString& reasoningEffort) const {
-        if (m_modelButton) {
-            const QString effortLabel = reasoningEffort.isEmpty() ? QString() : QStringLiteral("  %1").arg(reasoningEffort);
-            m_modelButton->setText(QStringLiteral("%1%2  ▾").arg(name, effortLabel));
+    void ChatInputBox::setModelPresentation(const QString& name, const QString& reasoningEffort) {
+        m_currentModelName = name;
+        m_currentReasoningEffort = reasoningEffort;
+        updateModelButtonDisplay();
+    }
+
+    int ChatInputBox::calculateCompactModelButtonWidth() const {
+        if (m_isIconOnlyMode) return 28;
+        QFont font = m_modelButton ? m_modelButton->font() : themeFont(Typography::FontRole::Caption).toQFont();
+        QFontMetrics fm(font);
+        const QString effortLabel = m_currentReasoningEffort.isEmpty() ? QString() : QStringLiteral("  %1").arg(m_currentReasoningEffort);
+        const QString labelText = m_currentModelName.isEmpty() ? tr("选择模型  ▾") : QStringLiteral("%1%2  ▾").arg(m_currentModelName, effortLabel);
+        const int textW = fm.horizontalAdvance(labelText);
+        return qMax(48, textW + 18);
+    }
+
+    void ChatInputBox::updateModelButtonDisplay() {
+        if (!m_modelButton) return;
+
+        if (m_isIconOnlyMode) {
+            m_modelButton->setFluentLayout(fluent::basicinput::Button::IconOnly);
+            m_modelButton->setIconGlyph(Typography::Icons::glyph(QStringLiteral("ic_fluent_brain_circuit_20_regular")), 13);
+            m_modelButton->setFixedSize(28, 28);
+            const QString effortLabel = m_currentReasoningEffort.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(m_currentReasoningEffort);
+            const QString displayName = m_currentModelName.isEmpty() ? tr("选择模型") : m_currentModelName;
+            m_modelButton->setToolTip(tr("当前模型：%1%2\n点击切换模型").arg(displayName, effortLabel));
+        } else {
+            m_modelButton->setFluentLayout(fluent::basicinput::Button::TextOnly);
+            const QString effortLabel = m_currentReasoningEffort.isEmpty() ? QString() : QStringLiteral("  %1").arg(m_currentReasoningEffort);
+            const QString labelText = m_currentModelName.isEmpty() ? tr("选择模型  ▾") : QStringLiteral("%1%2  ▾").arg(m_currentModelName, effortLabel);
+            m_modelButton->setText(labelText);
+            m_modelButton->setFixedHeight(28);
+            m_modelButton->setToolTip(tr("切换当前会话模型"));
+            const int compactW = calculateCompactModelButtonWidth();
+            if (!m_isModelMenuOpen && (!m_modelExpandAnim || m_modelExpandAnim->state() != QAbstractAnimation::Running)) {
+                m_modelButton->setFixedWidth(compactW);
+            }
+        }
+    }
+
+    void ChatInputBox::notifyModelMenuOpened() {
+        m_isModelMenuOpen = true;
+        // 展开动画态只在宽度足够时（宽度 >= 360 且非 IconOnly）
+        if (!m_isIconOnlyMode && width() >= 360 && m_modelButton && m_modelExpandAnim) {
+            m_modelExpandAnim->stop();
+            m_modelExpandAnim->setDuration(themeAnimation().fast);
+            m_modelExpandAnim->setStartValue(m_modelButton->width());
+            m_modelExpandAnim->setEndValue(168);
+            m_modelExpandAnim->start();
+        }
+    }
+
+    void ChatInputBox::notifyModelMenuClosed() {
+        m_isModelMenuOpen = false;
+        if (!m_isIconOnlyMode && m_modelButton && m_modelExpandAnim && m_modelButton->width() != calculateCompactModelButtonWidth()) {
+            const int targetW = calculateCompactModelButtonWidth();
+            m_modelExpandAnim->stop();
+            m_modelExpandAnim->setDuration(themeAnimation().fast);
+            m_modelExpandAnim->setStartValue(m_modelButton->width());
+            m_modelExpandAnim->setEndValue(targetW);
+            connect(m_modelExpandAnim, &QVariantAnimation::finished, this, [this]() {
+                m_modelExpandAnim->disconnect(SIGNAL(finished()));
+                updateModelButtonDisplay();
+            });
+            m_modelExpandAnim->start();
+        } else {
+            updateModelButtonDisplay();
         }
     }
 
@@ -158,6 +231,7 @@ namespace ui::widget::chat {
 
     QString ChatInputBox::modelName() const {
         if (!m_modelButton) return {};
+        if (!m_currentModelName.isEmpty()) return m_currentModelName;
         QString text = m_modelButton->text();
         text.remove(QStringLiteral("  ▾"));
         return text.trimmed();
@@ -189,7 +263,20 @@ namespace ui::widget::chat {
         if (m_textEdit) {
             m_textEdit->setFont(themeFont(Typography::FontRole::Body).toQFont());
         }
+        if (m_modelButton) {
+            m_modelButton->setFont(themeFont(Typography::FontRole::Caption).toQFont());
+            updateModelButtonDisplay();
+        }
         update();
+    }
+
+    void ChatInputBox::resizeEvent(QResizeEvent *event) {
+        QWidget::resizeEvent(event);
+        const bool shouldBeIconOnly = (width() < 360);
+        if (shouldBeIconOnly != m_isIconOnlyMode) {
+            m_isIconOnlyMode = shouldBeIconOnly;
+            updateModelButtonDisplay();
+        }
     }
 
     void ChatInputBox::updateInputHeight() const {

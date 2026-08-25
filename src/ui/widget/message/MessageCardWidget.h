@@ -80,10 +80,12 @@ namespace ui::widget::message {
 
     protected:
         void resizeEvent(QResizeEvent* event) override;
+        bool eventFilter(QObject* watched, QEvent* event) override;
 
     private:
         void setupUi();
         void updateVisuals();
+        void updateActionBarVisibility();
 
         domain::conversation::Message m_message;
         QString m_senderName;

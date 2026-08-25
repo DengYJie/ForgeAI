@@ -85,6 +85,7 @@ namespace ui::screen::chat {
             /*initialOpenLength=*/260,
             sidebarOptions
         );
+        m_splitView->setAutoCollapseBreakpoint(0, 768);
 
         if (m_viewModel) {
             connect(m_sidebar, &ChatSidebar::newChatRequested, m_viewModel, &ChatViewModel::newSession);
@@ -103,7 +104,7 @@ namespace ui::screen::chat {
 
         m_pane = new widget::chat::ConversationPane(m_chatAreaWidget);
         m_pane->emptyStateLabel()->setText(tr("开始新对话\n\n选择模型，然后输入你的问题。"));
-        m_pane->setAnchorBarVisible(true);
+        m_pane->setAnchorBarVisible(false);
         chatAreaLayout->addWidget(m_pane);
 
         connect(m_pane->header(), &ChatHeader::toggleSidebarRequested, this, [this]() {
@@ -156,8 +157,9 @@ namespace ui::screen::chat {
         }
         m_sidebar->setSessions(visibleSessions, state.currentSessionId);
 
-        // 1. 顶部会话标题
+        // 1. 顶部会话标题与侧边栏折叠按钮状态
         m_pane->header()->setTitle(state.sessionTitle);
+        m_pane->header()->setSidebarExpanded(m_splitView->isPaneExpanded(0));
 
         // 2. 输入控制台状态与模型
         updateModelChoices(state);
@@ -182,9 +184,15 @@ namespace ui::screen::chat {
         m_pane->messageList()->syncMessages(state.messages);
         m_pane->emptyStateLabel()->setVisible(state.messages.isEmpty());
 
-        // 4. 侧边时间线锚点同步
-        m_pane->anchorBar()->setAnchors(state.anchors);
-        m_pane->anchorBar()->setActiveIndex(state.activeAnchorIndex);
+        // 4. 侧边时间线锚点智能静默 (仅在消息数 >= 3 时显示，避免孤立小横线与右侧多余边距)
+        const bool showAnchor = (state.anchors.size() >= 3);
+        m_pane->setAnchorBarVisible(showAnchor);
+        if (showAnchor) {
+            m_pane->anchorBar()->setAnchors(state.anchors);
+            m_pane->anchorBar()->setActiveIndex(state.activeAnchorIndex);
+        } else {
+            m_pane->anchorBar()->setAnchors({});
+        }
     }
 
     void ChatPage::updateModelChoices(const ChatState& state) {
@@ -200,8 +208,16 @@ namespace ui::screen::chat {
 
     void ChatPage::showModelPicker() {
         if (!m_pane->inputBox() || !m_pane->inputBox()->modelAnchor()) return;
+        m_pane->inputBox()->notifyModelMenuOpened();
+
         auto* menu = new fluent::menus_toolbars::FluentMenu(QString(), this);
         menu->setMinimumWidth(220);
+        connect(menu, &fluent::menus_toolbars::FluentMenu::aboutToHide, this, [this]() {
+            if (m_pane && m_pane->inputBox()) {
+                m_pane->inputBox()->notifyModelMenuClosed();
+            }
+        });
+
         auto* modelMenu = new fluent::menus_toolbars::FluentMenu(tr("模型"), menu);
         modelMenu->setMinimumWidth(260);
         modelMenu->menuAction()->setText(tr("模型\t%1").arg(m_pane->inputBox()->modelName()));

@@ -344,9 +344,28 @@ int CollapsibleSplitView::paneMaxOpenLength(int index) const {
     return st ? st->maxOpenLength : kDefaultMaxOpenLength;
 }
 
+void CollapsibleSplitView::setAutoCollapseBreakpoint(int index, int breakpointWidth) {
+    auto *st = stateForIndex(index);
+    if (!st) return;
+    st->autoCollapseBreakpoint = breakpointWidth;
+}
+
+int CollapsibleSplitView::autoCollapseBreakpoint(int index) const {
+    const auto *st = stateForIndex(index);
+    return st ? st->autoCollapseBreakpoint : 0;
+}
+
+void CollapsibleSplitView::setUserExplicitExpansion(int index, bool expanded) {
+    auto *st = stateForIndex(index);
+    if (!st) return;
+    st->userExplicitClosed = !expanded;
+    st->autoCollapsedByBreakpoint = false;
+}
+
 void CollapsibleSplitView::togglePane(int index, bool animated) {
     const auto *st = stateForIndex(index);
     if (st) {
+        setUserExplicitExpansion(index, !st->isExpanded);
         setPaneExpanded(index, !st->isExpanded, animated);
     }
 }
@@ -842,6 +861,25 @@ void CollapsibleSplitView::leaveEvent(QEvent *event) {
 void CollapsibleSplitView::resizeEvent(QResizeEvent *event) {
     fluent::collections::SplitView::resizeEvent(event);
     updateOverlayLayout();
+
+    const int currentWidth = width();
+    for (int i = 0; i < paneCount(); ++i) {
+        auto *st = stateForIndex(i);
+        if (!st || st->autoCollapseBreakpoint <= 0) continue;
+
+        if (currentWidth < st->autoCollapseBreakpoint) {
+            if (st->isExpanded && !st->animationOpening) {
+                st->autoCollapsedByBreakpoint = true;
+                setPaneExpanded(i, false, shouldAnimate());
+            }
+        } else {
+            // 宽度恢复至断点以上：用户显式关闭优先！
+            if (!st->isExpanded && st->autoCollapsedByBreakpoint && !st->userExplicitClosed) {
+                st->autoCollapsedByBreakpoint = false;
+                setPaneExpanded(i, true, shouldAnimate());
+            }
+        }
+    }
 }
 
 } // namespace ui::widget

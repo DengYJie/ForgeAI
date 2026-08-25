@@ -1,4 +1,4 @@
-﻿#include "blocks/AbstractToolBlockWidget.h"
+#include "blocks/AbstractToolBlockWidget.h"
 #include "blocks/ErrorBlockWidget.h"
 #include "blocks/ImageBlockWidget.h"
 #include "blocks/ThinkingBlockWidget.h"
@@ -52,8 +52,8 @@ namespace ui::widget::message {
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
         m_mainLayout = new QVBoxLayout(this);
-        m_mainLayout->setContentsMargins(12, 6, 12, 6);
-        m_mainLayout->setSpacing(4);
+        m_mainLayout->setContentsMargins(12, 4, 12, 4);
+        m_mainLayout->setSpacing(2);
 
         m_headerWidget = new QWidget(this);
         m_headerLayout = new QHBoxLayout(m_headerWidget);
@@ -109,9 +109,11 @@ namespace ui::widget::message {
         m_mainLayout->addWidget(m_contentRow);
 
         m_actionBar = new QWidget(this);
+        m_actionBar->setFixedHeight(24);
+        m_actionBar->installEventFilter(this);
         m_actionLayout = new QHBoxLayout(m_actionBar);
-        m_actionLayout->setContentsMargins(0, 2, 0, 0);
-        m_actionLayout->setSpacing(8);
+        m_actionLayout->setContentsMargins(0, 0, 0, 0);
+        m_actionLayout->setSpacing(4);
 
         m_copyButton = new fluent::basicinput::Button(this);
         m_copyButton->setFluentStyle(fluent::basicinput::Button::Subtle);
@@ -120,6 +122,7 @@ namespace ui::widget::message {
         m_copyButton->setToolTip(tr("复制"));
         m_copyButton->setCursor(Qt::PointingHandCursor);
         m_copyButton->setFocusPolicy(Qt::NoFocus);
+        m_copyButton->hide();
         connect(m_copyButton, &QPushButton::clicked, this, [this]() {
             QGuiApplication::clipboard()->setText(m_markdownView->markdown());
             });
@@ -202,6 +205,36 @@ namespace ui::widget::message {
                         freezeHeight();
                     }
                     });
+            }
+        }
+    }
+
+    bool MessageCardWidget::eventFilter(QObject* watched, QEvent* event)
+    {
+        if (watched == m_actionBar) {
+            if (event->type() == QEvent::Enter) {
+                if (m_message.status != domain::MessageStatus::Sending && m_copyButton) {
+                    m_copyButton->show();
+                }
+            } else if (event->type() == QEvent::Leave) {
+                if (m_copyButton) {
+                    m_copyButton->hide();
+                }
+            }
+        }
+        return QWidget::eventFilter(watched, event);
+    }
+
+    void MessageCardWidget::updateActionBarVisibility()
+    {
+        const bool isStreaming = (m_message.status == domain::MessageStatus::Sending);
+        if (isStreaming) {
+            if (m_copyButton) m_copyButton->hide();
+        } else {
+            if (m_actionBar && m_actionBar->underMouse()) {
+                if (m_copyButton) m_copyButton->show();
+            } else {
+                if (m_copyButton) m_copyButton->hide();
             }
         }
     }
@@ -407,6 +440,8 @@ namespace ui::widget::message {
         else if (m_errorWidget) {
             m_errorWidget->hide();
         }
+
+        updateActionBarVisibility();
     }
 
     void MessageCardWidget::resetForReuse()
@@ -490,6 +525,8 @@ namespace ui::widget::message {
             m_actionLayout->addWidget(m_copyButton);
             m_actionLayout->addStretch(1);
         }
+
+        updateActionBarVisibility();
     }
 
 } // namespace ui::widget::message

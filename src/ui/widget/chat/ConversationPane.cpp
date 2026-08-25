@@ -15,7 +15,7 @@ namespace ui::widget::chat {
 
 namespace {
 constexpr int kHorizontalMargin = 16;
-constexpr int kMinBoxWidth = 400;
+constexpr int kMinBoxWidth = 200;
 constexpr int kMaxBoxWidth = 1000;
 } // namespace
 
@@ -118,7 +118,8 @@ void ConversationPane::updateInputBoxWidth() {
     const int sideWidths = anchorVisible ? (2 * (8 + 32 + 8)) : (2 * 8);
     const int columnWidth = qMax(1, width() - sideWidths);
     const int cardWidth = qMax(1, columnWidth - 2 * kHorizontalMargin);
-    const int targetWidth = qBound(kMinBoxWidth, cardWidth, kMaxBoxWidth);
+    const int maxAllowedWidth = qMin(columnWidth, kMaxBoxWidth);
+    const int targetWidth = qBound(kMinBoxWidth, cardWidth, maxAllowedWidth);
     if (targetWidth > 0 && m_inputBox->width() != targetWidth) {
         m_inputBox->setFixedWidth(targetWidth);
     }

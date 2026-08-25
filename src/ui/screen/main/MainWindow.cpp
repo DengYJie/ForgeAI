@@ -60,16 +60,6 @@ namespace ui::screen::main {
             ui::navigation::NavigationItemPosition::Top
         );
 
-        auto *knowledgePage = new ui::screen::knowledge::KnowledgePage(m_knowledgeViewModel, this);
-        addSubInterface(
-            QStringLiteral("knowledge"),
-            knowledgePage,
-            Typography::Icons::glyph(QStringLiteral("ic_fluent_document_search_20_regular")),
-            tr("知识库"),
-            QString(),
-            ui::navigation::NavigationItemPosition::Top
-        );
-
         // 2. 安装设置特性模块 (Feature Module Installer)
         m_settingsModule = new ui::screen::settings::SettingsNavigationModule(
             m_settingsUiRegistry,
