@@ -265,6 +265,12 @@ set(PROJECT_SOURCES
         src/ui/screen/work/WorkViewModel.cpp
         src/ui/screen/work/WorkPage.h
         src/ui/screen/work/WorkPage.cpp
+        src/ui/screen/work/LeftAlignedButton.h
+        src/ui/screen/work/LeftAlignedButton.cpp
+        src/ui/screen/work/ProjectHeader.h
+        src/ui/screen/work/ProjectHeader.cpp
+        src/ui/screen/work/CreateProjectDialog.h
+        src/ui/screen/work/CreateProjectDialog.cpp
         src/ui/screen/work/ProjectSessionTreeDelegate.h
         src/ui/screen/work/ProjectSessionTreeDelegate.cpp
 
