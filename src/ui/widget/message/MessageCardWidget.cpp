@@ -6,8 +6,6 @@
 #include "MessageCardWidget.h"
 #include "ProcessGroupWidget.h"
 #include "ui/widget/MarkdownView.h"
-#include "core/logging/LoggingService.h"
-#include "core/logging/LogCategory.h"
 
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/Layout.h>
@@ -284,13 +282,6 @@ namespace ui::widget::message {
 
     void MessageCardWidget::syncMessage(const domain::conversation::Message& newMessage)
     {
-        core::logging::LoggingService::instance().debug(core::logging::Category::UiChat, QStringLiteral("MessageCardWidget syncMessage"), QMap<QString, QString>{
-            {QStringLiteral("id"), newMessage.id.toString(QUuid::WithoutBraces)},
-            {QStringLiteral("role"), QString::number(static_cast<int>(newMessage.role))},
-            {QStringLiteral("status"), QString::number(static_cast<int>(newMessage.status))},
-            {QStringLiteral("blocks"), QString::number(newMessage.blocks.size())}
-        });
-
         bool isInitialLoad = m_message.id.isNull();
         bool justFinished = (newMessage.status != domain::MessageStatus::Sending && m_message.status == domain::MessageStatus::Sending);
         bool roleChanged = (m_message.role != newMessage.role);

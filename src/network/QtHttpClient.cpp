@@ -34,9 +34,6 @@ namespace network {
         if (m_isCancelled) return;
         QByteArray data = m_reply->readAll();
         if (!data.isEmpty()) {
-            core::logging::LoggingService::instance().debug(core::logging::Category::NetworkHttp, QStringLiteral("HTTP chunk received"), QMap<QString, QString>{
-                {QStringLiteral("bytes"), QString::number(data.size())}
-            });
             emit dataReceived(data);
         }
     }

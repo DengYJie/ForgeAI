@@ -187,10 +187,6 @@ namespace llm::runtime {
                     if (m_state == RequestState::Streaming && m_timeoutPolicy.idleTimeoutMs > 0) {
                         m_idleTimer->start(m_timeoutPolicy.idleTimeoutMs);
                     }
-                    core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("Text delta"), QMap<QString, QString>{
-                        {QStringLiteral("req"), m_metrics.requestId},
-                        {QStringLiteral("len"), QString::number(arg.text.length())}
-                    });
                 } else if constexpr (std::is_same_v<T, domain::llm::EventThinkingDelta>) {
                     if (!m_hasEmittedVisibleTokens) {
                         m_hasEmittedVisibleTokens = true;
@@ -207,10 +203,6 @@ namespace llm::runtime {
                     if (m_state == RequestState::Streaming && m_timeoutPolicy.idleTimeoutMs > 0) {
                         m_idleTimer->start(m_timeoutPolicy.idleTimeoutMs);
                     }
-                    core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("Thinking delta"), QMap<QString, QString>{
-                        {QStringLiteral("req"), m_metrics.requestId},
-                        {QStringLiteral("len"), QString::number(arg.thought.length())}
-                    });
                 } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
                     core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("Finish reason received"), QMap<QString, QString>{
                         {QStringLiteral("req"), m_metrics.requestId},
@@ -229,10 +221,6 @@ namespace llm::runtime {
     }
 
     void ChatOperation::onFinished() {
-        core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("ChatOperation onFinished"), QMap<QString, QString>{
-            {QStringLiteral("req"), m_metrics.requestId},
-            {QStringLiteral("state"), QString::number(static_cast<int>(m_state))}
-        });
         if (m_state == RequestState::Cancelling || m_state == RequestState::Cancelled) {
             return;
         }

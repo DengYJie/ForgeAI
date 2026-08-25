@@ -116,10 +116,6 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::tokenReceived,
                 this, [this](const QString& sessionId, const QString& token) {
-            core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel tokenReceived"), QMap<QString, QString>{
-                {QStringLiteral("session"), sessionId},
-                {QStringLiteral("len"), QString::number(token.length())}
-            });
             updateState([sessionId, token](ChatState& s) {
                 if (s.currentSessionId != sessionId || token.isEmpty()) return;
                 auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
@@ -140,10 +136,6 @@ namespace ui::screen::chat {
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::thoughtReceived,
                 this, [this](const QString& sessionId, const QString& thought) {
-            core::logging::LoggingService::instance().debug(core::logging::Category::LlmRequest, QStringLiteral("ChatViewModel thoughtReceived"), QMap<QString, QString>{
-                {QStringLiteral("session"), sessionId},
-                {QStringLiteral("len"), QString::number(thought.length())}
-            });
             updateState([sessionId, thought](ChatState& s) {
                 if (s.currentSessionId != sessionId || thought.isEmpty()) return;
                 auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
