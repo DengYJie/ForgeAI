@@ -1,4 +1,5 @@
 #include "ToolRegistry.h"
+#include <QSet>
 
 namespace agent::tool {
 
@@ -20,17 +21,21 @@ namespace agent::tool {
     int ToolRegistry::registerProvider(std::shared_ptr<application::ports::IToolProvider> provider) {
         if (!provider) return 0;
 
-        int count = 0;
-        const auto toolList = provider->tools();
-        for (const auto& tool : toolList) {
-            if (registerTool(tool)) {
-                ++count;
-            }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_providers.contains(provider)) {
+            m_providers.append(provider);
         }
 
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_providers.append(provider);
-        return count;
+        const auto toolList = provider->tools();
+        for (const auto& tool : toolList) {
+            if (tool) {
+                const auto def = tool->definition();
+                if (!def.name.isEmpty() && !m_tools.contains(def.name)) {
+                    m_tools.insert(def.name, tool);
+                }
+            }
+        }
+        return toolList.size();
     }
 
     void ToolRegistry::unregisterTool(const QString& name) {
@@ -46,23 +51,55 @@ namespace agent::tool {
 
     std::shared_ptr<application::ports::ITool> ToolRegistry::findTool(const QString& name) const {
         std::lock_guard<std::mutex> lock(m_mutex);
-        return m_tools.value(name, nullptr);
+        if (m_tools.contains(name)) {
+            return m_tools.value(name);
+        }
+
+        for (const auto& provider : m_providers) {
+            if (!provider) continue;
+            const auto toolList = provider->tools();
+            for (const auto& tool : toolList) {
+                if (tool && tool->definition().name == name) {
+                    return tool;
+                }
+            }
+        }
+        return nullptr;
     }
 
     bool ToolRegistry::hasTool(const QString& name) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_tools.contains(name);
+        return findTool(name) != nullptr;
     }
 
     QList<domain::agent::ToolDefinition> ToolRegistry::definitions() const {
         std::lock_guard<std::mutex> lock(m_mutex);
         QList<domain::agent::ToolDefinition> defs;
-        defs.reserve(m_tools.size());
+        QSet<QString> seenNames;
+
         for (const auto& tool : m_tools) {
             if (tool) {
-                defs.append(tool->definition());
+                const auto def = tool->definition();
+                if (!seenNames.contains(def.name)) {
+                    seenNames.insert(def.name);
+                    defs.append(def);
+                }
             }
         }
+
+        for (const auto& provider : m_providers) {
+            if (!provider) continue;
+            const auto toolList = provider->tools();
+            for (const auto& tool : toolList) {
+                if (tool) {
+                    const auto def = tool->definition();
+                    if (!seenNames.contains(def.name)) {
+                        seenNames.insert(def.name);
+                        defs.append(def);
+                    }
+                }
+            }
+        }
+
         return defs;
     }
 
@@ -70,12 +107,7 @@ namespace agent::tool {
         const domain::agent::ToolCall& call,
         const application::ports::ToolExecutionContext& context
     ) {
-        std::shared_ptr<application::ports::ITool> tool;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            tool = m_tools.value(call.name, nullptr);
-        }
-
+        auto tool = findTool(call.name);
         if (!tool) {
             return domain::agent::ToolResult{
                 call.id,

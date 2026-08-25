@@ -30,7 +30,11 @@ namespace llm::mcp {
 
             const auto defs = session->tools();
             for (const auto& def : defs) {
-                result.append(std::make_shared<McpTool>(const_cast<McpSession*>(session), def));
+                result.append(std::make_shared<McpTool>(
+                    const_cast<McpSession*>(session),
+                    session->config().name,
+                    def
+                ));
             }
         }
 

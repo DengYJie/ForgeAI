@@ -55,7 +55,8 @@ namespace llm::workspace {
         }
 
         const QString candidate = QDir(canonicalRoot).absoluteFilePath(cleanedRelative.isEmpty() ? QStringLiteral(".") : cleanedRelative);
-        const QString resolved = QFileInfo(candidate).canonicalFilePath();
+        const QFileInfo candidateInfo(candidate);
+        const QString resolved = candidateInfo.canonicalFilePath();
 
 #ifdef Q_OS_WIN
         constexpr Qt::CaseSensitivity caseSensitivity = Qt::CaseInsensitive;
@@ -90,8 +91,9 @@ namespace llm::workspace {
         }
 
         const QString candidate = QDir(canonicalRoot).absoluteFilePath(cleaned);
-        const QFileInfo parentInfo(QFileInfo(candidate).dir().absolutePath());
-        const QString parent = parentInfo.canonicalFilePath();
+        const QFileInfo candidateInfo(candidate);
+        const QString parentDir = candidateInfo.absolutePath();
+        const QString parent = QFileInfo(parentDir).canonicalFilePath();
         if (parent.isEmpty()) {
             if (error) *error = QStringLiteral("目标目录不存在");
             return {};
@@ -108,7 +110,6 @@ namespace llm::workspace {
             return {};
         }
 
-        QFileInfo candidateInfo(candidate);
         if (candidateInfo.exists()) {
             const QString candidateCanonical = candidateInfo.canonicalFilePath();
             if (candidateCanonical.compare(canonicalRoot, sensitivity) != 0 && !candidateCanonical.startsWith(prefix, sensitivity)) {
