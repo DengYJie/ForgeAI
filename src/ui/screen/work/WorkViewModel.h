@@ -6,6 +6,8 @@
 #include <QList>
 #include <QSet>
 #include "domain/conversation/Message.h"
+#include "domain/agent/AgentRunState.h"
+#include "domain/agent/ToolPermission.h"
 #include "ui/screen/chat/ChatSessionListModel.h"
 #include "domain/project/Project.h"
 
@@ -14,6 +16,24 @@ namespace domain::service { class IConversationService; }
 namespace domain::repository { class IConversationRepository; class IProjectRepository; }
 
 namespace ui::screen::work {
+
+    /**
+     * @brief Agent 运行时的表现层 UI 状态投影
+     */
+    struct AgentRunUiState {
+        QString currentTaskId;
+        domain::agent::AgentRunStatus status = domain::agent::AgentRunStatus::Idle;
+        int currentRound = 0;
+        int maxRounds = 8;
+        QString activeToolName;
+        QString statusMessage;
+        bool isWaitingPermission = false;
+        domain::agent::ToolCall permissionPendingCall;
+        domain::agent::ToolPermission permissionRequired;
+
+        bool operator==(const AgentRunUiState&) const = default;
+    };
+
     struct WorkState {
         struct ToolEvent {
             QString name;
@@ -25,6 +45,7 @@ namespace ui::screen::work {
         QString currentTask;
         bool isProcessing = false;
         QString statusMessage;
+        AgentRunUiState agentUiState;
         QList<ToolEvent> toolEvents;
         QList<domain::conversation::Message> messages;
         QList<ui::screen::chat::ChatSessionItemData> sessions;
@@ -67,6 +88,12 @@ namespace ui::screen::work {
          * @brief 取消当前工作流任务
          */
         void cancelTask();
+
+        /**
+         * @brief 响应用户对敏感工具操作的权限授权
+         */
+        void grantPermission(const QString& toolCallId, bool granted);
+
         void setProjectRoot(const QString& rootPath);
         void selectProject(const QUuid& projectId);
         void addProject(const QString& rootPath, const QString& displayName = {});

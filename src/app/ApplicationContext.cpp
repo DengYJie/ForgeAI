@@ -103,7 +103,8 @@ namespace app {
         m_runAgentUseCase = std::make_unique<application::usecase::agent::RunAgentUseCase>(
             m_agentRuntime.get(),
             m_modelService.get(),
-            m_projectContextService.get()
+            m_projectContextService.get(),
+            m_mcpManager.get()
         );
         m_cancelAgentRunUseCase = std::make_unique<application::usecase::agent::CancelAgentRunUseCase>(
             m_agentRuntime.get()

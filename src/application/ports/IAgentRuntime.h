@@ -4,6 +4,7 @@
 #include <QString>
 #include <QUuid>
 #include "domain/agent/AgentRunState.h"
+#include "domain/agent/ToolPermission.h"
 #include "domain/conversation/Message.h"
 #include "domain/llm/ChatError.h"
 #include "agent/runtime/AgentRunContext.h"
@@ -40,6 +41,11 @@ namespace application::ports {
         virtual void resumeRun(const agent::runtime::AgentRunContext& context) = 0;
 
         /**
+         * @brief 用户确认或拒绝某项敏感工具执行权限
+         */
+        virtual void grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) = 0;
+
+        /**
          * @brief 查询是否处于运行状态
          */
         virtual bool isRunning() const = 0;
@@ -57,6 +63,7 @@ namespace application::ports {
         void toolCallStarted(const QString& sessionId, const domain::agent::ToolCall& call);
         void toolCallFinished(const QString& sessionId, const domain::agent::ToolCall& call);
         void toolResultReady(const QString& sessionId, const domain::agent::ToolResult& result);
+        void permissionRequested(const QString& sessionId, const domain::agent::ToolCall& call, const domain::agent::ToolPermission& permission);
         void replyGenerated(const QString& sessionId, const domain::conversation::Message& message);
         void runCompleted(const QString& sessionId);
         void runFailed(const QString& sessionId, const domain::llm::ChatError& error);

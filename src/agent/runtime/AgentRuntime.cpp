@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QUuid>
+#include <QTimer>
 #include "domain/conversation/MessageBlock.h"
 
 namespace agent::runtime {
@@ -26,6 +27,7 @@ namespace agent::runtime {
     bool AgentRuntime::isRunning() const {
         return m_state.status == domain::agent::AgentRunStatus::Preparing
             || m_state.status == domain::agent::AgentRunStatus::CallingModel
+            || m_state.status == domain::agent::AgentRunStatus::WaitingPermission
             || m_state.status == domain::agent::AgentRunStatus::WaitingTool
             || m_state.status == domain::agent::AgentRunStatus::ExecutingTool
             || m_state.status == domain::agent::AgentRunStatus::Continuing;
@@ -78,6 +80,7 @@ namespace agent::runtime {
         m_state.pendingCalls.clear();
         m_state.results.clear();
         m_state.errorMessage.clear();
+        m_pendingPermissions.clear();
 
         setState(domain::agent::AgentRunStatus::Preparing);
 
@@ -123,6 +126,7 @@ namespace agent::runtime {
         m_thoughtBuffer.clear();
         m_activeToolCalls.clear();
         m_pendingToolResults.clear();
+        m_pendingPermissions.clear();
 
         const auto history = m_conversationService
             ? m_conversationService->loadMessages(m_context.sessionId)
@@ -250,6 +254,7 @@ namespace agent::runtime {
         m_thoughtBuffer.clear();
         m_activeToolCalls.clear();
         m_pendingToolResults.clear();
+        m_pendingPermissions.clear();
 
         if (isRunning()) {
             setState(domain::agent::AgentRunStatus::Cancelled);
@@ -273,9 +278,162 @@ namespace agent::runtime {
             auto cpOpt = m_checkpointRepo->getLatestCheckpoint(context.sessionId);
             if (cpOpt.has_value()) {
                 m_state.round = cpOpt->roundIndex;
+                m_state.runId = cpOpt->runId;
+                m_activeToolCalls.clear();
+                for (const auto& call : cpOpt->pendingToolCalls) {
+                    m_activeToolCalls[call.id] = call;
+                }
+                m_pendingToolResults = cpOpt->pendingToolResults;
+
+                if ((cpOpt->status == domain::agent::AgentRunStatus::WaitingPermission ||
+                     cpOpt->status == domain::agent::AgentRunStatus::ExecutingTool) && !m_activeToolCalls.isEmpty()) {
+                    processExecutableToolCalls();
+                    return;
+                }
             }
         }
         startNextModelRequest();
+    }
+
+    void AgentRuntime::grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) {
+        if (sessionId != m_context.sessionId) return;
+        if (!m_pendingPermissions.contains(toolCallId)) return;
+
+        const auto [call, perm] = m_pendingPermissions.take(toolCallId);
+
+        if (granted) {
+            application::ports::ToolExecutionContext execContext{
+                m_context.workspaceRoot,
+                m_context.sessionId,
+                m_context.projectId
+            };
+
+            domain::agent::ToolResult result;
+            if (m_toolRegistry) {
+                result = m_toolRegistry->execute(call, execContext);
+            } else {
+                result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+            }
+            m_pendingToolResults.append(result);
+            emit toolResultReady(m_context.sessionId, result);
+        } else {
+            domain::agent::ToolResult result{
+                call.id,
+                QStringLiteral("用户拒绝授权执行该敏感操作: %1").arg(perm.reason),
+                true
+            };
+            m_pendingToolResults.append(result);
+            emit toolResultReady(m_context.sessionId, result);
+        }
+
+        if (m_pendingPermissions.isEmpty()) {
+            finishToolExecutionRound();
+        }
+    }
+
+    void AgentRuntime::processExecutableToolCalls() {
+        application::ports::ToolExecutionContext execContext{
+            m_context.workspaceRoot,
+            m_context.sessionId,
+            m_context.projectId
+        };
+
+        bool hasPendingPermission = false;
+
+        for (const auto& call : m_activeToolCalls) {
+            // 如果该工具调用已存在执行结果，跳过避免重复执行
+            bool alreadyExecuted = false;
+            for (const auto& existingRes : m_pendingToolResults) {
+                if (existingRes.toolCallId == call.id) {
+                    alreadyExecuted = true;
+                    break;
+                }
+            }
+            if (alreadyExecuted) continue;
+
+            domain::agent::ToolPermission requiredPerm;
+            domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
+
+            if (m_toolRegistry) {
+                auto tool = m_toolRegistry->findTool(call.name);
+                if (tool) {
+                    for (const auto& perm : tool->permissions()) {
+                        auto d = m_context.policy.evaluatePermission(perm.type);
+                        if (d == domain::agent::PermissionDecision::Deny) {
+                            decision = domain::agent::PermissionDecision::Deny;
+                            requiredPerm = perm;
+                            break;
+                        } else if (d == domain::agent::PermissionDecision::AskUser) {
+                            decision = domain::agent::PermissionDecision::AskUser;
+                            requiredPerm = perm;
+                        }
+                    }
+                }
+            }
+
+            if (decision == domain::agent::PermissionDecision::Deny) {
+                domain::agent::ToolResult result{
+                    call.id,
+                    QStringLiteral("安全策略拒绝执行操作: %1").arg(requiredPerm.reason),
+                    true
+                };
+                m_pendingToolResults.append(result);
+                emit toolResultReady(m_context.sessionId, result);
+            } else if (decision == domain::agent::PermissionDecision::AskUser) {
+                m_pendingPermissions[call.id] = {call, requiredPerm};
+                hasPendingPermission = true;
+                emit permissionRequested(m_context.sessionId, call, requiredPerm);
+            } else {
+                domain::agent::ToolResult result;
+                if (m_toolRegistry) {
+                    result = m_toolRegistry->execute(call, execContext);
+                } else {
+                    result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                }
+                m_pendingToolResults.append(result);
+                emit toolResultReady(m_context.sessionId, result);
+            }
+        }
+
+        if (hasPendingPermission) {
+            setState(domain::agent::AgentRunStatus::WaitingPermission);
+            saveCheckpoint();
+        } else {
+            finishToolExecutionRound();
+        }
+    }
+
+    void AgentRuntime::finishToolExecutionRound() {
+        setState(domain::agent::AgentRunStatus::ExecutingTool);
+
+        // 保存包含 ToolResult 的消息记录
+        if (!m_pendingToolResults.isEmpty()) {
+            domain::conversation::Message resultMsg;
+            resultMsg.id = QUuid::createUuid();
+            resultMsg.role = domain::MessageRole::Tool;
+            resultMsg.status = domain::MessageStatus::Sent;
+            resultMsg.createdAt = QDateTime::currentDateTime();
+            domain::conversation::ToolResultBlock rb;
+            rb.results = m_pendingToolResults;
+            resultMsg.blocks.append({domain::BlockType::ToolResult, rb});
+            saveMessage(resultMsg);
+        }
+
+        saveCheckpoint();
+
+        // 检查轮数上限
+        if (m_state.round < m_context.policy.maxToolRounds) {
+            ++m_state.round;
+            setState(domain::agent::AgentRunStatus::Continuing);
+            QTimer::singleShot(0, this, [this]() {
+                startNextModelRequest();
+            });
+        } else {
+            cleanupCurrentOp();
+            setState(domain::agent::AgentRunStatus::Completed);
+            saveCheckpoint();
+            emit runCompleted(m_context.sessionId);
+        }
     }
 
     void AgentRuntime::onChatEventReceived(const domain::llm::ChatEvent& event) {
@@ -312,74 +470,7 @@ namespace agent::runtime {
 
                 // 判断是否需要执行工具并 continuation
                 if (!m_activeToolCalls.isEmpty()) {
-                    setState(domain::agent::AgentRunStatus::ExecutingTool);
-
-                    application::ports::ToolExecutionContext execContext{
-                        m_context.workspaceRoot,
-                        m_context.sessionId,
-                        m_context.projectId
-                    };
-
-                    for (const auto& call : m_activeToolCalls) {
-                        domain::agent::ToolResult result;
-
-                        // 权限安全策略校验
-                        bool permissionDenied = false;
-                        if (m_toolRegistry) {
-                            auto tool = m_toolRegistry->findTool(call.name);
-                            if (tool) {
-                                for (const auto& perm : tool->permissions()) {
-                                    if (m_context.policy.evaluatePermission(perm.type) == domain::agent::PermissionDecision::Deny) {
-                                        result = domain::agent::ToolResult{
-                                            call.id,
-                                            QStringLiteral("安全策略拒绝执行操作: %1").arg(perm.reason),
-                                            true
-                                        };
-                                        permissionDenied = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (!permissionDenied) {
-                            if (m_toolRegistry) {
-                                result = m_toolRegistry->execute(call, execContext);
-                            } else {
-                                result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
-                            }
-                        }
-
-                        m_pendingToolResults.append(result);
-                        emit toolResultReady(m_context.sessionId, result);
-                    }
-
-                    // 保存包含 ToolResult 的消息记录
-                    if (!m_pendingToolResults.isEmpty()) {
-                        domain::conversation::Message resultMsg;
-                        resultMsg.id = QUuid::createUuid();
-                        resultMsg.role = domain::MessageRole::Tool;
-                        resultMsg.status = domain::MessageStatus::Sent;
-                        resultMsg.createdAt = QDateTime::currentDateTime();
-                        domain::conversation::ToolResultBlock rb;
-                        rb.results = m_pendingToolResults;
-                        resultMsg.blocks.append({domain::BlockType::ToolResult, rb});
-                        saveMessage(resultMsg);
-                    }
-
-                    saveCheckpoint();
-
-                    // 检查轮数上限
-                    if (m_state.round < m_context.policy.maxToolRounds) {
-                        ++m_state.round;
-                        setState(domain::agent::AgentRunStatus::Continuing);
-                        startNextModelRequest();
-                    } else {
-                        cleanupCurrentOp();
-                        setState(domain::agent::AgentRunStatus::Completed);
-                        saveCheckpoint();
-                        emit runCompleted(m_context.sessionId);
-                    }
+                    processExecutableToolCalls();
                 } else {
                     cleanupCurrentOp();
                     setState(domain::agent::AgentRunStatus::Completed);

@@ -105,6 +105,32 @@ void WorkViewModel::setupUseCaseConnections() {
                 message.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
             });
         });
+        connect(agent, &application::usecase::agent::RunAgentUseCase::stateChanged, this,
+                [this](const domain::agent::AgentRunState& runState) {
+            if (runState.conversationId != m_agentSessionId) return;
+            updateState([runState](WorkState& state) {
+                state.agentUiState.status = runState.status;
+                state.agentUiState.currentRound = runState.round;
+                state.agentUiState.statusMessage = runState.errorMessage;
+                state.isProcessing = (runState.status == domain::agent::AgentRunStatus::Preparing
+                    || runState.status == domain::agent::AgentRunStatus::CallingModel
+                    || runState.status == domain::agent::AgentRunStatus::WaitingPermission
+                    || runState.status == domain::agent::AgentRunStatus::WaitingTool
+                    || runState.status == domain::agent::AgentRunStatus::ExecutingTool
+                    || runState.status == domain::agent::AgentRunStatus::Continuing);
+                state.agentUiState.isWaitingPermission = (runState.status == domain::agent::AgentRunStatus::WaitingPermission);
+            });
+        });
+        connect(agent, &application::usecase::agent::RunAgentUseCase::permissionRequested, this,
+                [this](const QString& sessionId, const domain::agent::ToolCall& call, const domain::agent::ToolPermission& permission) {
+            if (sessionId != m_agentSessionId) return;
+            updateState([call, permission](WorkState& state) {
+                state.agentUiState.isWaitingPermission = true;
+                state.agentUiState.permissionPendingCall = call;
+                state.agentUiState.permissionRequired = permission;
+                state.statusMessage = QStringLiteral("等待用户授权操作: %1").arg(permission.reason);
+            });
+        });
         connect(agent, &application::usecase::agent::RunAgentUseCase::toolCallFinished, this,
                 [this](const QString& sessionId, const domain::agent::ToolCall& call) {
             if (sessionId != m_agentSessionId) return;
@@ -113,6 +139,7 @@ void WorkViewModel::setupUseCaseConnections() {
                 domain::conversation::ToolCallBlock calls; calls.calls.append(call);
                 message.blocks.append({domain::BlockType::ToolCall, calls});
 
+                state.agentUiState.activeToolName = call.name;
                 state.toolEvents.append(WorkState::ToolEvent{
                     call.name,
                     call.arguments,
@@ -150,7 +177,12 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::runCompleted, this,
                 [this](const QString& sessionId) {
             if (sessionId != m_agentSessionId) return;
-            updateState([](WorkState& state) { state.isProcessing = false; state.statusMessage.clear(); });
+            updateState([](WorkState& state) {
+                state.isProcessing = false;
+                state.statusMessage.clear();
+                state.agentUiState.status = domain::agent::AgentRunStatus::Completed;
+                state.agentUiState.isWaitingPermission = false;
+            });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::runFailed, this,
                 [this](const QString& sessionId, const domain::llm::ChatError& error) {
@@ -158,9 +190,19 @@ void WorkViewModel::setupUseCaseConnections() {
             updateState([error](WorkState& state) {
                 state.isProcessing = false;
                 state.statusMessage = error.userMessage.isEmpty() ? error.message : error.userMessage;
+                state.agentUiState.status = domain::agent::AgentRunStatus::Failed;
+                state.agentUiState.isWaitingPermission = false;
             });
         });
     }
+}
+
+void WorkViewModel::grantPermission(const QString& toolCallId, bool granted) {
+    if (m_agentSessionId.isEmpty() || !m_useCases.runAgent) return;
+    updateState([](WorkState& state) {
+        state.agentUiState.isWaitingPermission = false;
+    });
+    m_useCases.runAgent->grantPermission(m_agentSessionId, toolCallId, granted);
 }
 
 QString WorkViewModel::taskTitle(const QString& task) {

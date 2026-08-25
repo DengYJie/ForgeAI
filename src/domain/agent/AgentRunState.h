@@ -14,7 +14,8 @@ namespace domain::agent {
         Idle,           ///< 空闲状态
         Preparing,      ///< 准备上下文中
         CallingModel,   ///< 正在调用模型生成回复或工具调用指令
-        WaitingTool,    ///< 等待工具就绪或用户授权
+        WaitingPermission, ///< 等待用户授权敏感工具操作 (HITL)
+        WaitingTool,    ///< 等待工具就绪
         ExecutingTool,  ///< 正在执行本地或 MCP 工具
         Continuing,     ///< 工具执行完毕，正在将结果回填并发起下一轮模型推理
         Completed,      ///< 任务成功完成

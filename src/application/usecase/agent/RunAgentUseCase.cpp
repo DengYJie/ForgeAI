@@ -1,6 +1,8 @@
 #include "RunAgentUseCase.h"
 
 #include <algorithm>
+#include <QDir>
+#include <QFile>
 
 namespace application::usecase::agent {
 
@@ -8,11 +10,13 @@ namespace application::usecase::agent {
         ports::IAgentRuntime* runtime,
         domain::service::IModelService* modelService,
         domain::service::IProjectContextService* projectContextService,
+        llm::mcp::McpManager* mcpManager,
         QObject* parent
     ) : QObject(parent),
         m_runtime(runtime),
         m_modelService(modelService),
-        m_projectContextService(projectContextService) {
+        m_projectContextService(projectContextService),
+        m_mcpManager(mcpManager) {
 
         if (m_runtime) {
             connect(m_runtime, &ports::IAgentRuntime::userMessageCreated, this, &RunAgentUseCase::userMessageCreated);
@@ -22,6 +26,7 @@ namespace application::usecase::agent {
             connect(m_runtime, &ports::IAgentRuntime::toolCallStarted, this, &RunAgentUseCase::toolCallStarted);
             connect(m_runtime, &ports::IAgentRuntime::toolCallFinished, this, &RunAgentUseCase::toolCallFinished);
             connect(m_runtime, &ports::IAgentRuntime::toolResultReady, this, &RunAgentUseCase::toolResultReady);
+            connect(m_runtime, &ports::IAgentRuntime::permissionRequested, this, &RunAgentUseCase::permissionRequested);
             connect(m_runtime, &ports::IAgentRuntime::replyGenerated, this, &RunAgentUseCase::replyGenerated);
             connect(m_runtime, &ports::IAgentRuntime::runCompleted, this, &RunAgentUseCase::runCompleted);
             connect(m_runtime, &ports::IAgentRuntime::runFailed, this, &RunAgentUseCase::runFailed);
@@ -39,6 +44,12 @@ namespace application::usecase::agent {
     void RunAgentUseCase::cancelCurrent() {
         if (m_runtime) {
             m_runtime->cancelRun();
+        }
+    }
+
+    void RunAgentUseCase::grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) {
+        if (m_runtime) {
+            m_runtime->grantPermission(sessionId, toolCallId, granted);
         }
     }
 
@@ -95,6 +106,24 @@ namespace application::usecase::agent {
             err.userMessage = QStringLiteral("所选模型不可用，请重新选择。");
             emit runFailed(sessionId, err);
             return;
+        }
+
+        // 项目级 MCP 服务自动挂载与启动
+        if (m_mcpManager && !workspaceRoot.isEmpty()) {
+            const QStringList candidateConfigFiles = {
+                QDir(workspaceRoot).filePath(QStringLiteral(".mcp.json")),
+                QDir(workspaceRoot).filePath(QStringLiteral("mcp.json"))
+            };
+            for (const auto& cfgPath : candidateConfigFiles) {
+                if (QFile::exists(cfgPath)) {
+                    const auto serverConfigs = m_mcpManager->parseConfigFile(cfgPath);
+                    for (auto sCfg : serverConfigs) {
+                        if (sCfg.cwd.isEmpty()) sCfg.cwd = workspaceRoot;
+                        m_mcpManager->registerServer(sCfg);
+                        m_mcpManager->startServer(sCfg.name);
+                    }
+                }
+            }
         }
 
         ::agent::runtime::AgentRunContext context;
