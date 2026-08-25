@@ -22,4 +22,10 @@ target_sources(ForgeAICore PRIVATE
     tool/builtin/ListFilesTool.cpp
     tool/builtin/SearchTextTool.h
     tool/builtin/SearchTextTool.cpp
+    tool/builtin/ApplyPatchTool.h
+    tool/builtin/ApplyPatchTool.cpp
+    tool/builtin/RunCommandTool.h
+    tool/builtin/RunCommandTool.cpp
+    tool/builtin/ProcessToolOperation.h
+    tool/builtin/ProcessToolOperation.cpp
 )

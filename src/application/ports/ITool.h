@@ -49,11 +49,13 @@ namespace application::ports {
      * @brief 工具执行上下文（包含当前会话、项目与工作区根目录等运行期元数据）
      */
     struct ToolExecutionContext {
-        QString workspaceRoot;
+        QUuid runId;
         QString conversationId;
         QUuid projectId;
+        QString workspaceRoot;
         int timeoutMs = 30000;
         CancellationToken cancellationToken;
+        QString executionId;
     };
 
     /**
@@ -74,7 +76,15 @@ namespace application::ports {
         virtual ToolExecutionTraits traits() const = 0;
 
         /**
-         * @brief 获取该工具声明所需的权限要求
+         * @brief 根据具体调用参数动态获取所需权限要求
+         */
+        virtual QList<domain::agent::ToolPermission> permissions(const domain::agent::ToolCall& call) const {
+            Q_UNUSED(call);
+            return permissions();
+        }
+
+        /**
+         * @brief 获取该工具声明所需的默认静态权限要求
          */
         virtual QList<domain::agent::ToolPermission> permissions() const {
             return {};

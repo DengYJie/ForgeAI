@@ -1,5 +1,6 @@
 #pragma once
 #include <QString>
+#include <QJsonObject>
 
 namespace domain::agent {
     /**
@@ -20,6 +21,8 @@ namespace domain::agent {
         QString toolCallId; ///< 对应的 ToolCall 标识符
         QString content; ///< 工具执行产出的结果文本或 JSON 串
         bool isError = false; ///< 是否执行失败（便于模型自主进行错误重试/修正）
+        QString errorCode; ///< 结构化错误代码（如 "UnsupportedBinaryFile", "PatchContextNotFound", "FileAlreadyExists"）
+        QJsonObject metadata; ///< 结构化元数据（如 {"path": "...", "bytes": 1024, "truncated": false}）
 
         bool operator==(const ToolResult &other) const = default;
     };

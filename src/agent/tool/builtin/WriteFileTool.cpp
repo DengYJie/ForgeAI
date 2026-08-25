@@ -3,7 +3,8 @@
 #include "core/logging/LogCategory.h"
 
 #include <QDir>
-#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
 #include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -21,7 +22,7 @@ namespace agent::tool::builtin {
     domain::agent::ToolDefinition WriteFileTool::definition() const {
         return {
             QStringLiteral("write_file"),
-            QStringLiteral("创建或覆盖工作区内的 UTF-8 文本文件。仅在用户明确要求修改项目时使用。"),
+            QStringLiteral("创建新文件，或在明确指定 overwrite=true 时全量覆盖已有文件。若只需修改现有文件的一小部分，应优先使用 apply_patch。"),
             QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("object")},
                 {QStringLiteral("properties"), QJsonObject{
@@ -32,6 +33,10 @@ namespace agent::tool::builtin {
                     {QStringLiteral("content"), QJsonObject{
                         {QStringLiteral("type"), QStringLiteral("string")},
                         {QStringLiteral("description"), QStringLiteral("要写入的文件文本内容")}
+                    }},
+                    {QStringLiteral("overwrite"), QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("boolean")},
+                        {QStringLiteral("description"), QStringLiteral("当文件已存在时是否允许覆盖。默认 false，以防止误破坏已有代码。")}
                     }}
                 }},
                 {QStringLiteral("required"), QJsonArray{QStringLiteral("path"), QStringLiteral("content")}}
@@ -62,14 +67,17 @@ namespace agent::tool::builtin {
         domain::agent::ToolResult result{call.id, {}, true};
         const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
         const QString relativePath = args.value(QStringLiteral("path")).toString();
+        const bool overwrite = args.value(QStringLiteral("overwrite")).toBool(false);
 
         if (context.cancellationToken.isCanceled()) {
             result.content = QStringLiteral("写入文件已被取消");
+            result.errorCode = QStringLiteral("Cancelled");
             return result;
         }
 
         if (relativePath.trimmed().isEmpty()) {
             result.content = QStringLiteral("缺少 path 参数");
+            result.errorCode = QStringLiteral("MissingParameter");
             return result;
         }
 
@@ -81,30 +89,65 @@ namespace agent::tool::builtin {
                 {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
             });
             result.content = error.isEmpty() ? QStringLiteral("出于安全原因，无法访问项目外的路径。") : error;
+            result.errorCode = QStringLiteral("PathValidationFailed");
             return result;
         }
 
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        const QFileInfo fileInfo(path);
+        const bool fileExisted = fileInfo.exists();
+
+        // 1. 防误覆盖检查
+        if (fileExisted && !overwrite) {
+            result.content = QStringLiteral("文件已存在。若确定要整体覆盖，请指定 overwrite=true，或改用 apply_patch 进行精准局部修改。");
+            result.errorCode = QStringLiteral("FileAlreadyExists");
+            return result;
+        }
+
+        const QString content = args.value(QStringLiteral("content")).toString();
+        const QByteArray bytesToWrite = content.toUtf8();
+
+        // 2. QSaveFile 原子写入
+        QSaveFile saveFile(path);
+        if (!saveFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
             core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("write_file 无法打开文件写入"), {
                 {QStringLiteral("path"), relativePath},
-                {QStringLiteral("osError"), file.errorString()},
+                {QStringLiteral("osError"), saveFile.errorString()},
                 {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
             });
-            result.content = QStringLiteral("无法写入该文件，请检查目录权限。");
+            result.content = QStringLiteral("无法写入该文件，请检查目录权限: ") + saveFile.errorString();
+            result.errorCode = QStringLiteral("FileOpenError");
             return result;
         }
 
-        const QByteArray bytesToWrite = args.value(QStringLiteral("content")).toString().toUtf8();
-        file.write(bytesToWrite);
-        file.close();
+        saveFile.write(bytesToWrite);
+        if (!saveFile.commit()) {
+            core::logging::LoggingService::instance().warn(core::logging::Category::AgentTool, QStringLiteral("write_file 原子提交失败"), {
+                {QStringLiteral("path"), relativePath},
+                {QStringLiteral("osError"), saveFile.errorString()}
+            });
+            result.content = QStringLiteral("文件原子提交失败: ") + saveFile.errorString();
+            result.errorCode = QStringLiteral("FileCommitError");
+            return result;
+        }
 
-        result.content = QStringLiteral("已写入 ") + QDir(context.workspaceRoot).relativeFilePath(path);
+        QJsonObject rootObj;
+        rootObj[QStringLiteral("path")] = relativePath;
+        rootObj[QStringLiteral("bytes_written")] = bytesToWrite.size();
+        rootObj[QStringLiteral("created")] = !fileExisted;
+
+        QJsonObject meta;
+        meta[QStringLiteral("path")] = relativePath;
+        meta[QStringLiteral("bytes_written")] = bytesToWrite.size();
+        meta[QStringLiteral("created")] = !fileExisted;
+
+        result.content = QString::fromUtf8(QJsonDocument(rootObj).toJson(QJsonDocument::Indented));
         result.isError = false;
+        result.metadata = meta;
 
         core::logging::LoggingService::instance().debug(core::logging::Category::AgentTool, QStringLiteral("write_file 执行完成"), {
             {QStringLiteral("path"), relativePath},
             {QStringLiteral("bytes"), QString::number(bytesToWrite.size())},
+            {QStringLiteral("created"), fileExisted ? QStringLiteral("false") : QStringLiteral("true")},
             {QStringLiteral("durationMs"), QString::number(timer.elapsed())}
         });
 

@@ -67,6 +67,12 @@ private slots:
     void testAsyncToolOperationLifecycle();
     void testFineGrainedPermissionEvaluation();
     void testAgentPolicyWildcardOverrides();
+    void testListFilesTool();
+    void testReadFileToolWithLineRangeAndBinaryRejection();
+    void testSearchTextToolAdvanced();
+    void testWriteFileToolOverwriteProtectionAndAtomicCommit();
+    void testApplyPatchToolExactMatchingAndAtomicRollback();
+    void testRunCommandToolExecutionAndSandboxing();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -113,15 +119,17 @@ void AgentToolTests::toolRegistryRegistrationAndLookup() {
     auto provider = std::make_shared<agent::tool::BuiltinToolProvider>(fs);
 
     int count = registry.registerProvider(provider);
-    QCOMPARE(count, 4);
+    QCOMPARE(count, 6);
 
     QVERIFY(registry.hasTool("read_file"));
     QVERIFY(registry.hasTool("write_file"));
     QVERIFY(registry.hasTool("list_files"));
     QVERIFY(registry.hasTool("search_text"));
+    QVERIFY(registry.hasTool("apply_patch"));
+    QVERIFY(registry.hasTool("run_command"));
 
     auto defs = registry.definitions();
-    QCOMPARE(defs.size(), 4);
+    QCOMPARE(defs.size(), 6);
 
     auto tool = registry.findTool("read_file");
     QVERIFY(tool != nullptr);
@@ -142,19 +150,23 @@ void AgentToolTests::toolRegistryDuplicateRejection() {
 static domain::agent::ToolResult runOpSync(std::unique_ptr<application::ports::IToolOperation> op) {
     if (!op) return {};
     domain::agent::ToolResult res;
+    bool done = false;
     QEventLoop loop;
     QObject::connect(op.get(), &application::ports::IToolOperation::finished, [&](const domain::agent::ToolResult& r) {
         res = r;
+        done = true;
         loop.quit();
     });
     op->start();
-    loop.exec();
+    if (!done) {
+        loop.exec();
+    }
     return res;
 }
 
 void AgentToolTests::toolRegistryUnknownToolError() {
     agent::tool::ToolRegistry registry;
-    application::ports::ToolExecutionContext ctx{QStringLiteral("/tmp"), QStringLiteral("s1"), {}};
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), QStringLiteral("/tmp"), 30000, {}};
     domain::agent::ToolCall call{QStringLiteral("call_x"), QStringLiteral("non_existent_tool"), QStringLiteral("{}")};
 
     auto result = runOpSync(registry.execute(call, ctx));
@@ -170,13 +182,13 @@ void AgentToolTests::builtinToolsExecution() {
     agent::tool::ToolRegistry registry;
     registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(fs));
 
-    application::ports::ToolExecutionContext ctx{root.path(), QStringLiteral("session_1"), {}};
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("session_1"), QUuid::createUuid(), root.path(), 30000, {}};
 
     // 1. write_file
     domain::agent::ToolCall writeCall{
         QStringLiteral("c1"),
         QStringLiteral("write_file"),
-        QStringLiteral(R"({"path":"hello.txt","content":"Hello World\nLine 2"})")
+        QString::fromUtf8(R"({"path":"hello.txt","content":"Hello World\nLine 2"})")
     };
     auto writeResult = runOpSync(registry.execute(writeCall, ctx));
     QVERIFY(!writeResult.isError);
@@ -189,7 +201,8 @@ void AgentToolTests::builtinToolsExecution() {
     };
     auto readResult = runOpSync(registry.execute(readCall, ctx));
     QVERIFY(!readResult.isError);
-    QCOMPARE(readResult.content, QStringLiteral("Hello World\nLine 2"));
+    auto readObj = QJsonDocument::fromJson(readResult.content.toUtf8()).object();
+    QVERIFY(readObj.value("content").toString().contains(QStringLiteral("Hello World")));
 
     // 3. list_files
     domain::agent::ToolCall listCall{
@@ -199,8 +212,16 @@ void AgentToolTests::builtinToolsExecution() {
     };
     auto listResult = runOpSync(registry.execute(listCall, ctx));
     QVERIFY(!listResult.isError);
-    auto filesArray = QJsonDocument::fromJson(listResult.content.toUtf8()).array();
-    QVERIFY(filesArray.contains(QJsonValue(QStringLiteral("hello.txt"))));
+    auto listObj = QJsonDocument::fromJson(listResult.content.toUtf8()).object();
+    auto entries = listObj.value("entries").toArray();
+    bool foundHello = false;
+    for (const auto& e : entries) {
+        if (e.toObject().value("name").toString() == QStringLiteral("hello.txt")) {
+            foundHello = true;
+            break;
+        }
+    }
+    QVERIFY(foundHello);
 
     // 4. search_text
     domain::agent::ToolCall searchCall{
@@ -210,10 +231,11 @@ void AgentToolTests::builtinToolsExecution() {
     };
     auto searchResult = runOpSync(registry.execute(searchCall, ctx));
     QVERIFY(!searchResult.isError);
-    auto searchArray = QJsonDocument::fromJson(searchResult.content.toUtf8()).array();
-    QCOMPARE(searchArray.size(), 1);
-    QCOMPARE(searchArray.at(0).toObject().value("path").toString(), QStringLiteral("hello.txt"));
-    QCOMPARE(searchArray.at(0).toObject().value("line").toInt(), 1);
+    auto searchObj = QJsonDocument::fromJson(searchResult.content.toUtf8()).object();
+    auto searchMatches = searchObj.value("matches").toArray();
+    QCOMPARE(searchMatches.size(), 1);
+    QCOMPARE(searchMatches.at(0).toObject().value("path").toString(), QStringLiteral("hello.txt"));
+    QCOMPARE(searchMatches.at(0).toObject().value("line").toInt(), 1);
 }
 
 void AgentToolTests::loadsProjectContext() {
@@ -929,7 +951,7 @@ void AgentToolTests::testToolExecutionErrorSanitization() {
     agent::tool::builtin::WriteFileTool writeTool(fs);
     agent::tool::builtin::SearchTextTool searchTool(fs);
 
-    application::ports::ToolExecutionContext ctx{root.path(), QStringLiteral("session-1"), {}};
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("session-1"), QUuid::createUuid(), root.path(), 30000, {}};
 
     // 1. 缺少参数：提供模型可识别的明确错误
     domain::agent::ToolCall callEmptyRead{QStringLiteral("c1"), QStringLiteral("read_file"), QStringLiteral("{}")};
@@ -938,7 +960,7 @@ void AgentToolTests::testToolExecutionErrorSanitization() {
     QCOMPARE(resEmpty.content, QStringLiteral("缺少 path 参数"));
 
     // 2. 越界路径：返回友好的脱敏错误提示
-    domain::agent::ToolCall callEscapeRead{QStringLiteral("c2"), QStringLiteral("read_file"), QStringLiteral(R"({"path":"../../etc/passwd"})")};
+    domain::agent::ToolCall callEscapeRead{QStringLiteral("c2"), QStringLiteral("read_file"), QString::fromUtf8(R"({"path":"../../etc/passwd"})")};
     auto resEscape = runOpSync(readTool.execute(callEscapeRead, ctx));
     QVERIFY(resEscape.isError);
     QVERIFY(resEscape.content.contains(QStringLiteral("出于安全原因，无法访问项目外的路径")));
@@ -1060,6 +1082,330 @@ void AgentToolTests::testAgentPolicyWildcardOverrides() {
     policy.toolRules.clear();
     policy.toolRules.insert(QStringLiteral("*"), domain::agent::PermissionDecision::Deny);
     QCOMPARE(policy.evaluateTool(QStringLiteral("read_file"), anyPerm), domain::agent::PermissionDecision::Deny);
+}
+
+void AgentToolTests::testListFilesTool() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QDir dir(temp.path());
+    QVERIFY(dir.mkdir(QStringLiteral("sub_dir")));
+    QFile f1(dir.filePath(QStringLiteral("visible.txt")));
+    QVERIFY(f1.open(QIODevice::WriteOnly));
+    f1.write("visible");
+    f1.close();
+
+    QFile f2(dir.filePath(QStringLiteral(".hidden_file")));
+    QVERIFY(f2.open(QIODevice::WriteOnly));
+    f2.write("hidden");
+    f2.close();
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 1. 默认不包含隐藏文件
+    domain::agent::ToolCall call1{
+        QStringLiteral("l1"),
+        QStringLiteral("list_files"),
+        QStringLiteral("{\"path\":\".\"}")
+    };
+    auto res1 = runOpSync(registry.execute(call1, ctx));
+    QVERIFY(!res1.isError);
+    auto obj1 = QJsonDocument::fromJson(res1.content.toUtf8()).object();
+    auto entries1 = obj1.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries1.size(), 2); // sub_dir, visible.txt
+
+    // 2. include_hidden = true
+    domain::agent::ToolCall call2{
+        QStringLiteral("l2"),
+        QStringLiteral("list_files"),
+        QStringLiteral("{\"path\":\".\",\"include_hidden\":true}")
+    };
+    auto res2 = runOpSync(registry.execute(call2, ctx));
+    QVERIFY(!res2.isError);
+    auto obj2 = QJsonDocument::fromJson(res2.content.toUtf8()).object();
+    auto entries2 = obj2.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries2.size(), 3); // .hidden_file, sub_dir, visible.txt
+
+    // 3. 越界路径拒绝
+    domain::agent::ToolCall call3{
+        QStringLiteral("l3"),
+        QStringLiteral("list_files"),
+        QStringLiteral("{\"path\":\"../escape\"}")
+    };
+    auto res3 = runOpSync(registry.execute(call3, ctx));
+    QVERIFY(res3.isError);
+    QCOMPARE(res3.errorCode, QStringLiteral("PathValidationFailed"));
+}
+
+void AgentToolTests::testReadFileToolWithLineRangeAndBinaryRejection() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QDir dir(temp.path());
+
+    // 文本文件 10 行
+    QFile textFile(dir.filePath(QStringLiteral("sample.txt")));
+    QVERIFY(textFile.open(QIODevice::WriteOnly));
+    for (int i = 1; i <= 10; ++i) {
+        textFile.write(QStringLiteral("Line %1 content\n").arg(i).toUtf8());
+    }
+    textFile.close();
+
+    // 二进制文件 (含 \0)
+    QFile binFile(dir.filePath(QStringLiteral("data.bin")));
+    QVERIFY(binFile.open(QIODevice::WriteOnly));
+    const char binData[] = {'E', 'L', 'F', '\0', 0x01, 0x02};
+    binFile.write(binData, sizeof(binData));
+    binFile.close();
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 1. 指定行号范围读取 (3 ~ 6)
+    domain::agent::ToolCall callRange{
+        QStringLiteral("r1"),
+        QStringLiteral("read_file"),
+        QStringLiteral("{\"path\":\"sample.txt\",\"start_line\":3,\"end_line\":6}")
+    };
+    auto resRange = runOpSync(registry.execute(callRange, ctx));
+    QVERIFY(!resRange.isError);
+    auto objRange = QJsonDocument::fromJson(resRange.content.toUtf8()).object();
+    QCOMPARE(objRange.value(QStringLiteral("start_line")).toInt(), 3);
+    QCOMPARE(objRange.value(QStringLiteral("end_line")).toInt(), 6);
+    QCOMPARE(objRange.value(QStringLiteral("total_lines")).toInt(), 10);
+    const QString content = objRange.value(QStringLiteral("content")).toString();
+    QVERIFY(content.contains(QStringLiteral("Line 3 content")));
+    QVERIFY(content.contains(QStringLiteral("Line 6 content")));
+    QVERIFY(!content.contains(QStringLiteral("Line 2 content")));
+    QVERIFY(!content.contains(QStringLiteral("Line 7 content")));
+
+    // 2. 二进制文件直接拒绝
+    domain::agent::ToolCall callBin{
+        QStringLiteral("r2"),
+        QStringLiteral("read_file"),
+        QStringLiteral("{\"path\":\"data.bin\"}")
+    };
+    auto resBin = runOpSync(registry.execute(callBin, ctx));
+    QVERIFY(resBin.isError);
+    QCOMPARE(resBin.errorCode, QStringLiteral("UnsupportedBinaryFile"));
+
+    // 3. 越界逃逸防护
+    domain::agent::ToolCall callEscape{
+        QStringLiteral("r3"),
+        QStringLiteral("read_file"),
+        QStringLiteral("{\"path\":\"../../outside.txt\"}")
+    };
+    auto resEscape = runOpSync(registry.execute(callEscape, ctx));
+    QVERIFY(resEscape.isError);
+    QCOMPARE(resEscape.errorCode, QStringLiteral("PathValidationFailed"));
+}
+
+void AgentToolTests::testSearchTextToolAdvanced() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QDir dir(temp.path());
+
+    QFile cppFile(dir.filePath(QStringLiteral("main.cpp")));
+    QVERIFY(cppFile.open(QIODevice::WriteOnly));
+    cppFile.write("int main() {\n    int count = 42;\n    return count;\n}");
+    cppFile.close();
+
+    QFile hFile(dir.filePath(QStringLiteral("header.h")));
+    QVERIFY(hFile.open(QIODevice::WriteOnly));
+    hFile.write("class Header {\n    int count = 10;\n};");
+    hFile.close();
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 1. 正则搜索
+    domain::agent::ToolCall callRegex{
+        QStringLiteral("s1"),
+        QStringLiteral("search_text"),
+        QStringLiteral("{\"query\":\"int\\\\s+count\\\\s*=\\\\s*\\\\d+\",\"regex\":true}")
+    };
+    auto resRegex = runOpSync(registry.execute(callRegex, ctx));
+    QVERIFY(!resRegex.isError);
+    auto objRegex = QJsonDocument::fromJson(resRegex.content.toUtf8()).object();
+    auto matchesRegex = objRegex.value(QStringLiteral("matches")).toArray();
+    QCOMPARE(matchesRegex.size(), 2);
+
+    // 2. 文件通配过滤 (*.h)
+    domain::agent::ToolCall callPattern{
+        QStringLiteral("s2"),
+        QStringLiteral("search_text"),
+        QStringLiteral("{\"query\":\"count\",\"file_pattern\":\"*.h\"}")
+    };
+    auto resPattern = runOpSync(registry.execute(callPattern, ctx));
+    QVERIFY(!resPattern.isError);
+    auto objPattern = QJsonDocument::fromJson(resPattern.content.toUtf8()).object();
+    auto matchesPattern = objPattern.value(QStringLiteral("matches")).toArray();
+    QCOMPARE(matchesPattern.size(), 1);
+    QCOMPARE(matchesPattern.at(0).toObject().value(QStringLiteral("path")).toString(), QStringLiteral("header.h"));
+    QCOMPARE(matchesPattern.at(0).toObject().value(QStringLiteral("line")).toInt(), 2);
+}
+
+void AgentToolTests::testWriteFileToolOverwriteProtectionAndAtomicCommit() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 1. 创建新文件
+    domain::agent::ToolCall callCreate{
+        QStringLiteral("w1"),
+        QStringLiteral("write_file"),
+        QStringLiteral("{\"path\":\"created.txt\",\"content\":\"Initial Content\"}")
+    };
+    auto resCreate = runOpSync(registry.execute(callCreate, ctx));
+    QVERIFY(!resCreate.isError);
+    auto objCreate = QJsonDocument::fromJson(resCreate.content.toUtf8()).object();
+    QCOMPARE(objCreate.value(QStringLiteral("created")).toBool(), true);
+
+    // 2. 尝试无 overwrite 覆盖 -> 拒绝
+    domain::agent::ToolCall callNoOverwrite{
+        QStringLiteral("w2"),
+        QStringLiteral("write_file"),
+        QStringLiteral("{\"path\":\"created.txt\",\"content\":\"New Overwrite Content\"}")
+    };
+    auto resNoOverwrite = runOpSync(registry.execute(callNoOverwrite, ctx));
+    QVERIFY(resNoOverwrite.isError);
+    QCOMPARE(resNoOverwrite.errorCode, QStringLiteral("FileAlreadyExists"));
+
+    // 3. 显式 overwrite = true 覆盖 -> 成功
+    domain::agent::ToolCall callOverwrite{
+        QStringLiteral("w3"),
+        QStringLiteral("write_file"),
+        QStringLiteral("{\"path\":\"created.txt\",\"content\":\"New Overwrite Content\",\"overwrite\":true}")
+    };
+    auto resOverwrite = runOpSync(registry.execute(callOverwrite, ctx));
+    QVERIFY(!resOverwrite.isError);
+    auto objOverwrite = QJsonDocument::fromJson(resOverwrite.content.toUtf8()).object();
+    QCOMPARE(objOverwrite.value(QStringLiteral("created")).toBool(), false);
+
+    // 验证文件真实内容
+    QFile f(QDir(temp.path()).filePath(QStringLiteral("created.txt")));
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QCOMPARE(f.readAll(), QByteArray("New Overwrite Content"));
+}
+
+void AgentToolTests::testApplyPatchToolExactMatchingAndAtomicRollback() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QDir dir(temp.path());
+
+    QFile file(dir.filePath(QStringLiteral("code.cpp")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("void foo() {\n    int a = 1;\n    int b = 2;\n    int duplicate = 99;\n    int duplicate = 99;\n}\n");
+    file.close();
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 1. 找不到 old_text -> PatchContextNotFound
+    domain::agent::ToolCall callNotFound{
+        QStringLiteral("p1"),
+        QStringLiteral("apply_patch"),
+        QStringLiteral("{\"path\":\"code.cpp\",\"patches\":[{\"old_text\":\"void not_exist()\",\"new_text\":\"void exist()\"}]}")
+    };
+    auto resNotFound = runOpSync(registry.execute(callNotFound, ctx));
+    QVERIFY(resNotFound.isError);
+    QCOMPARE(resNotFound.errorCode, QStringLiteral("PatchContextNotFound"));
+
+    // 2. 出现多次 -> PatchContextAmbiguous
+    domain::agent::ToolCall callAmbiguous{
+        QStringLiteral("p2"),
+        QStringLiteral("apply_patch"),
+        QStringLiteral("{\"path\":\"code.cpp\",\"patches\":[{\"old_text\":\"    int duplicate = 99;\",\"new_text\":\"    int duplicate = 100;\"}]}")
+    };
+    auto resAmbiguous = runOpSync(registry.execute(callAmbiguous, ctx));
+    QVERIFY(resAmbiguous.isError);
+    QCOMPARE(resAmbiguous.errorCode, QStringLiteral("PatchContextAmbiguous"));
+
+    // 3. 多 Patch 事务性回滚：Patch 1 有效，但 Patch 2 找不到 -> 文件不应被任何一个 Patch 修改
+    domain::agent::ToolCall callRollback{
+        QStringLiteral("p3"),
+        QStringLiteral("apply_patch"),
+        QStringLiteral("{\"path\":\"code.cpp\",\"patches\":[{\"old_text\":\"    int a = 1;\",\"new_text\":\"    int a = 100;\"},{\"old_text\":\"non_existent_code_line\",\"new_text\":\"something\"}]}")
+    };
+    auto resRollback = runOpSync(registry.execute(callRollback, ctx));
+    QVERIFY(resRollback.isError);
+    QCOMPARE(resRollback.errorCode, QStringLiteral("PatchContextNotFound"));
+
+    // 验证文件原内容未受任何影响
+    QFile f1(dir.filePath(QStringLiteral("code.cpp")));
+    QVERIFY(f1.open(QIODevice::ReadOnly));
+    QVERIFY(f1.readAll().contains("int a = 1;"));
+    f1.close();
+
+    // 4. 两个 Patch 均唯一匹配 -> 原子应用成功
+    domain::agent::ToolCall callSuccess{
+        QStringLiteral("p4"),
+        QStringLiteral("apply_patch"),
+        QStringLiteral("{\"path\":\"code.cpp\",\"patches\":[{\"old_text\":\"    int a = 1;\",\"new_text\":\"    int a = 10;\"},{\"old_text\":\"    int b = 2;\",\"new_text\":\"    int b = 20;\"}]}")
+    };
+    auto resSuccess = runOpSync(registry.execute(callSuccess, ctx));
+    QVERIFY(!resSuccess.isError);
+    auto objSuccess = QJsonDocument::fromJson(resSuccess.content.toUtf8()).object();
+    QCOMPARE(objSuccess.value(QStringLiteral("patch_count")).toInt(), 2);
+    QCOMPARE(objSuccess.value(QStringLiteral("changed")).toBool(), true);
+
+    QFile f2(dir.filePath(QStringLiteral("code.cpp")));
+    QVERIFY(f2.open(QIODevice::ReadOnly));
+    const auto finalContent = f2.readAll();
+    QVERIFY(finalContent.contains("int a = 10;"));
+    QVERIFY(finalContent.contains("int b = 20;"));
+}
+
+void AgentToolTests::testRunCommandToolExecutionAndSandboxing() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    auto runTool = registry.findTool(QStringLiteral("run_command"));
+    QVERIFY(runTool != nullptr);
+
+    // 1. 权限动态识别：高危命令升级为 DestructiveOperation
+    domain::agent::ToolCall callRm{
+        QStringLiteral("rc1"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"rm\",\"args\":[\"-rf\",\".\"]}")
+    };
+    const auto permsRm = runTool->permissions(callRm);
+    QCOMPARE(permsRm.first().type, domain::agent::ToolPermissionType::DestructiveOperation);
+
+    domain::agent::ToolCall callCmake{
+        QStringLiteral("rc2"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"]}")
+    };
+    const auto permsCmake = runTool->permissions(callCmake);
+    QCOMPARE(permsCmake.first().type, domain::agent::ToolPermissionType::ProcessExecute);
+
+    // 2. 工作目录越界逃逸防护
+    domain::agent::ToolCall callEscape{
+        QStringLiteral("rc3"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"cmake\",\"working_directory\":\"../../escape_dir\"}")
+    };
+    auto resEscape = runOpSync(registry.execute(callEscape, ctx));
+    QVERIFY(resEscape.isError);
+    QCOMPARE(resEscape.errorCode, QStringLiteral("WorkingDirectoryEscape"));
+
+    // 3. 执行真实命令 (cmake --version)
+    auto resCmake = runOpSync(registry.execute(callCmake, ctx));
+    QVERIFY(!resCmake.isError);
+    auto objCmake = QJsonDocument::fromJson(resCmake.content.toUtf8()).object();
+    QCOMPARE(objCmake.value(QStringLiteral("exit_code")).toInt(), 0);
+    QVERIFY(objCmake.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("cmake version")));
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)

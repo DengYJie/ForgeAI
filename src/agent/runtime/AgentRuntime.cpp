@@ -407,11 +407,13 @@ namespace agent::runtime {
 
             const int toolTimeout = m_context.policy.toolTimeoutMs > 0 ? m_context.policy.toolTimeoutMs : (m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000);
             application::ports::ToolExecutionContext execContext{
-                m_context.workspaceRoot,
+                m_state.runId,
                 m_context.sessionId,
                 m_context.projectId,
+                m_context.workspaceRoot,
                 toolTimeout,
-                m_runCancellationToken
+                m_runCancellationToken,
+                call.id
             };
 
             std::unique_ptr<application::ports::IToolOperation> op;
@@ -500,7 +502,7 @@ namespace agent::runtime {
             } else if (m_toolRegistry) {
                 auto tool = m_toolRegistry->findTool(call.name);
                 if (tool) {
-                    for (const auto& perm : tool->permissions()) {
+                    for (const auto& perm : tool->permissions(call)) {
                         auto d = m_context.policy.evaluateTool(call.name, perm);
                         if (d == domain::agent::PermissionDecision::Deny) {
                             decision = domain::agent::PermissionDecision::Deny;
@@ -578,15 +580,20 @@ namespace agent::runtime {
 
         const int toolTimeout = m_context.policy.toolTimeoutMs > 0 ? m_context.policy.toolTimeoutMs : (m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000);
         application::ports::ToolExecutionContext execContext{
-            m_context.workspaceRoot,
+            m_state.runId,
             m_context.sessionId,
             m_context.projectId,
+            m_context.workspaceRoot,
             toolTimeout,
-            m_runCancellationToken
+            m_runCancellationToken,
+            QString()
         };
 
         for (const auto& call : currentBatch) {
             if (m_runCancellationToken.isCanceled()) return;
+
+            auto callContext = execContext;
+            callContext.executionId = call.id;
 
             core::logging::LoggingService::instance().debug(core::logging::Category::AgentRuntime, QStringLiteral("派发异步工具调用"), {
                 {QStringLiteral("toolName"), call.name},
@@ -596,7 +603,7 @@ namespace agent::runtime {
 
             std::unique_ptr<application::ports::IToolOperation> op;
             if (m_toolRegistry) {
-                op = m_toolRegistry->execute(call, execContext);
+                op = m_toolRegistry->execute(call, callContext);
             } else {
                 op = std::make_unique<application::ports::ImmediateToolOperation>(
                     call.id,

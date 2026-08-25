@@ -4,6 +4,8 @@
 #include "agent/tool/builtin/WriteFileTool.h"
 #include "agent/tool/builtin/ListFilesTool.h"
 #include "agent/tool/builtin/SearchTextTool.h"
+#include "agent/tool/builtin/ApplyPatchTool.h"
+#include "agent/tool/builtin/RunCommandTool.h"
 
 namespace agent::tool {
 
@@ -17,7 +19,9 @@ namespace agent::tool {
             std::make_shared<builtin::ReadFileTool>(m_fs),
             std::make_shared<builtin::WriteFileTool>(m_fs),
             std::make_shared<builtin::ListFilesTool>(m_fs),
-            std::make_shared<builtin::SearchTextTool>(m_fs)
+            std::make_shared<builtin::SearchTextTool>(m_fs),
+            std::make_shared<builtin::ApplyPatchTool>(m_fs),
+            std::make_shared<builtin::RunCommandTool>(m_fs)
         };
     }
 

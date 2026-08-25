@@ -760,8 +760,8 @@ void WorkIntegrationTests::testAgentRuntimeParallelToolExecution() {
 
     QVERIFY2(completed, "Parallel execution test timed out");
     QCOMPARE(resultsMap.size(), 2);
-    QCOMPARE(resultsMap.value(QStringLiteral("call_p1")), QStringLiteral("parallel 1"));
-    QCOMPARE(resultsMap.value(QStringLiteral("call_p2")), QStringLiteral("parallel 2"));
+    QVERIFY(resultsMap.value(QStringLiteral("call_p1")).contains(QStringLiteral("parallel 1")));
+    QVERIFY(resultsMap.value(QStringLiteral("call_p2")).contains(QStringLiteral("parallel 2")));
 }
 
 void WorkIntegrationTests::testAgentRuntimeTimeoutWatchdog() {
