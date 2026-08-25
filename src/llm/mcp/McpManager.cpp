@@ -20,6 +20,20 @@ namespace llm::mcp {
         return m_runtime.get();
     }
 
+    void McpManager::setTrustPolicy(const domain::mcp::McpServerTrustPolicy& policy) {
+        if (m_runtime) {
+            m_runtime->setTrustPolicy(policy);
+        }
+    }
+
+    domain::mcp::McpServerTrustPolicy& McpManager::trustPolicy() {
+        return m_runtime->trustPolicy();
+    }
+
+    const domain::mcp::McpServerTrustPolicy& McpManager::trustPolicy() const {
+        return m_runtime->trustPolicy();
+    }
+
     QList<domain::mcp::McpServerConfig> McpManager::parseConfigFile(const QString& filePath) {
         return McpConfigLoader::loadFromFile(filePath).configs;
     }

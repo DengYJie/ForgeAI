@@ -33,6 +33,17 @@ namespace llm::mcp {
         McpRuntime* runtime() const;
 
         /**
+         * @brief 设置安全信任策略
+         */
+        void setTrustPolicy(const domain::mcp::McpServerTrustPolicy& policy);
+
+        /**
+         * @brief 获取安全信任策略引用
+         */
+        domain::mcp::McpServerTrustPolicy& trustPolicy();
+        const domain::mcp::McpServerTrustPolicy& trustPolicy() const;
+
+        /**
          * @brief 解析 .mcp.json 或 mcp.json 配置文件
          */
         static QList<domain::mcp::McpServerConfig> parseConfigFile(const QString& filePath);

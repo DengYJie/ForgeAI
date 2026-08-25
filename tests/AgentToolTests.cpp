@@ -4,7 +4,8 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QJsonObject>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include "llm/workspace/WorkspaceFileSystem.h"
 #include "agent/tool/ToolRegistry.h"
@@ -55,6 +56,7 @@ private slots:
     void mcpSecurityTrustAndEnvMaskingTests();
     void mcpResourceAndPromptProviderTests();
     void mcpSessionCrashRecoveryAndHandshakeVersionTests();
+    void streamableHttpMcpTransportSseIntegrationTests();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -597,6 +599,34 @@ void AgentToolTests::mcpSecurityTrustAndEnvMaskingTests() {
     QVERIFY(!maskedEnv.value(QStringLiteral("OPENAI_API_KEY")).contains(QStringLiteral("1234567890")));
     QVERIFY(maskedEnv.value(QStringLiteral("AUTH_TOKEN")).contains(QStringLiteral("******")));
     QCOMPARE(maskedEnv.value(QStringLiteral("DB_PASSWORD")), QStringLiteral("******"));
+
+    // 4. 验证 McpRuntime 核心执行链路中的安全信任拦截
+    {
+        llm::mcp::McpServerRegistry registry;
+        llm::mcp::McpRuntime runtime(&registry);
+
+        domain::mcp::McpServerConfig unapprovedCfg;
+        unapprovedCfg.id = QStringLiteral("unapproved_srv");
+        unapprovedCfg.command = QStringLiteral("echo");
+        unapprovedCfg.autoApprove = false;
+        registry.registerServer(unapprovedCfg);
+
+        QString runtimeError;
+        connect(&runtime, &llm::mcp::McpRuntime::serverError, [&](const QString&, const QString& err) {
+            runtimeError = err;
+        });
+
+        // 未受信且无 autoApprove，启动必须被强制拦截并报错
+        bool startRes = runtime.startServer(QStringLiteral("unapproved_srv"));
+        QVERIFY(!startRes);
+        QVERIFY(runtimeError.contains(QStringLiteral("未获得安全信任授权")));
+
+        // 显式授权后，放行进入底层通道启动链路
+        runtime.trustPolicy().setServerTrust(QStringLiteral("unapproved_srv"), domain::mcp::McpTrustLevel::AlwaysAllow);
+        runtimeError.clear();
+        runtime.startServer(QStringLiteral("unapproved_srv"));
+        QVERIFY(!runtimeError.contains(QStringLiteral("未获得安全信任授权")));
+    }
 }
 
 class FakeCrashTransport final : public llm::mcp::IMcpTransport {
@@ -765,6 +795,77 @@ void AgentToolTests::mcpSessionCrashRecoveryAndHandshakeVersionTests() {
         session.stop();
         QCOMPARE(session.state(), domain::mcp::McpConnectionState::Stopped);
     }
+}
+
+void AgentToolTests::streamableHttpMcpTransportSseIntegrationTests() {
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    quint16 port = server.serverPort();
+
+    // 模拟 HTTP / SSE MCP 服务端
+    connect(&server, &QTcpServer::newConnection, [&]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket* sock = server.nextPendingConnection();
+            connect(sock, &QTcpSocket::readyRead, [sock]() {
+                const QByteArray reqData = sock->readAll();
+                if (reqData.startsWith("GET /events")) {
+                    // 发送 SSE 握手响应
+                    sock->write("HTTP/1.1 200 OK\r\n"
+                                "Content-Type: text/event-stream\r\n"
+                                "Cache-Control: no-cache\r\n"
+                                "Connection: keep-alive\r\n\r\n");
+                    sock->flush();
+                    // 发送 endpoint 路由事件与一条下行通知 message 事件
+                    sock->write("event: endpoint\r\ndata: /messages?session_id=sse123\r\n\r\n");
+                    sock->write("event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\r\n\r\n");
+                    sock->flush();
+                } else if (reqData.startsWith("POST /messages?session_id=sse123")) {
+                    // 回复 POST 请求的 JSON-RPC 响应
+                    const QByteArray body = "{\"jsonrpc\":\"2.0\",\"id\":999,\"result\":{\"status\":\"ok\"}}";
+                    sock->write("HTTP/1.1 200 OK\r\n"
+                                "Content-Type: application/json\r\n"
+                                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+                                "Connection: close\r\n\r\n" + body);
+                    sock->flush();
+                    sock->disconnectFromHost();
+                }
+            });
+        }
+    });
+
+    domain::mcp::McpServerConfig httpCfg;
+    httpCfg.id = QStringLiteral("http_sse_test");
+    httpCfg.url = QStringLiteral("http://127.0.0.1:%1/events").arg(port);
+    httpCfg.transport = domain::mcp::McpTransportType::Http;
+
+    llm::mcp::StreamableHttpMcpTransport transport(httpCfg);
+
+    QList<QJsonObject> receivedMessages;
+    connect(&transport, &llm::mcp::IMcpTransport::messageReceived, [&](const QJsonObject& obj) {
+        receivedMessages.append(obj);
+    });
+
+    QVERIFY(transport.start());
+
+    // 1. 验证 SSE endpoint 与下行消息接收
+    QTRY_VERIFY_WITH_TIMEOUT(!receivedMessages.isEmpty(), 3000);
+    QCOMPARE(receivedMessages.first().value("method").toString(), QStringLiteral("notifications/initialized"));
+    QCOMPARE(transport.postEndpoint().toString(), QStringLiteral("http://127.0.0.1:%1/messages?session_id=sse123").arg(port));
+
+    // 2. 验证 POST 请求发送与响应派发
+    QJsonObject reqObj{
+        {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+        {QStringLiteral("id"), 999},
+        {QStringLiteral("method"), QStringLiteral("ping")}
+    };
+    QVERIFY(transport.sendJson(reqObj));
+
+    QTRY_VERIFY_WITH_TIMEOUT(receivedMessages.size() >= 2, 3000);
+    QCOMPARE(receivedMessages.at(1).value("id").toInt(), 999);
+    QCOMPARE(receivedMessages.at(1).value("result").toObject().value("status").toString(), QStringLiteral("ok"));
+
+    transport.close();
+    QVERIFY(!transport.isConnected());
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)

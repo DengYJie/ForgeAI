@@ -29,6 +29,18 @@ namespace llm::mcp {
         stopAll();
     }
 
+    void McpRuntime::setTrustPolicy(const domain::mcp::McpServerTrustPolicy& policy) {
+        m_trustPolicy = policy;
+    }
+
+    domain::mcp::McpServerTrustPolicy& McpRuntime::trustPolicy() {
+        return m_trustPolicy;
+    }
+
+    const domain::mcp::McpServerTrustPolicy& McpRuntime::trustPolicy() const {
+        return m_trustPolicy;
+    }
+
     void McpRuntime::setRegistry(McpServerRegistry* registry) {
         if (m_registry) {
             disconnect(m_registry, nullptr, this, nullptr);
@@ -94,6 +106,13 @@ namespace llm::mcp {
 
         if (session->state() == domain::mcp::McpConnectionState::Ready) {
             return true;
+        }
+
+        // 安全信任检查：未批准的外部服务禁止启动
+        if (!m_trustPolicy.isServerTrusted(id, session->config().autoApprove)) {
+            const QString err = QStringLiteral("MCP 服务 [%1] 未获得安全信任授权，拒绝启动").arg(id);
+            emit serverError(id, err);
+            return false;
         }
 
         if (session->start()) {

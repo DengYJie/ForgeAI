@@ -4,7 +4,7 @@
 #include <QString>
 #include <QMap>
 #include <memory>
-#include "domain/mcp/McpServerConfig.h"
+#include "domain/mcp/McpServerTrust.h"
 #include "McpServerRegistry.h"
 #include "McpTransportFactory.h"
 #include "McpSession.h"
@@ -37,6 +37,17 @@ namespace llm::mcp {
          * @brief 获取关联的配置注册表
          */
         McpServerRegistry* registry() const;
+
+        /**
+         * @brief 设置安全信任策略
+         */
+        void setTrustPolicy(const domain::mcp::McpServerTrustPolicy& policy);
+
+        /**
+         * @brief 获取安全信任策略引用
+         */
+        domain::mcp::McpServerTrustPolicy& trustPolicy();
+        const domain::mcp::McpServerTrustPolicy& trustPolicy() const;
 
         /**
          * @brief 启动指定 ID 的 MCP 服务
@@ -107,6 +118,7 @@ namespace llm::mcp {
 
         McpServerRegistry* m_registry = nullptr;
         std::unique_ptr<McpTransportFactory> m_transportFactory;
+        domain::mcp::McpServerTrustPolicy m_trustPolicy;
         std::shared_ptr<McpToolProvider> m_toolProvider;
         std::shared_ptr<McpResourceProvider> m_resourceProvider;
         std::shared_ptr<McpPromptProvider> m_promptProvider;
