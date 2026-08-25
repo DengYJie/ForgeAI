@@ -135,6 +135,7 @@ namespace ui::widget::chat {
 
         mainLayout->addLayout(bottomLayout);
 
+        onThemeUpdated();
         updateModelButtonDisplay();
         updateSendButtonVisual();
     }
@@ -262,12 +263,27 @@ namespace ui::widget::chat {
     void ChatInputBox::onThemeUpdated() {
         if (m_textEdit) {
             m_textEdit->setFont(themeFont(Typography::FontRole::Body).toQFont());
+            const auto &colors = themeColorsRef();
+            const QColor textColor = colors.textPrimary;
+            const QColor placeholderColor = colors.textSecondary;
+            QPalette pal = m_textEdit->palette();
+            pal.setColor(QPalette::Text, textColor);
+            pal.setColor(QPalette::PlaceholderText, placeholderColor);
+            m_textEdit->setPalette(pal);
+            m_textEdit->setStyleSheet(QStringLiteral(
+                "QTextEdit { background: transparent; border: none; color: %1; }"
+            ).arg(textColor.name(QColor::HexArgb)));
         }
         if (m_modelButton) {
             m_modelButton->setFont(themeFont(Typography::FontRole::Caption).toQFont());
             updateModelButtonDisplay();
         }
         update();
+    }
+
+    void ChatInputBox::showEvent(QShowEvent *event) {
+        QWidget::showEvent(event);
+        onThemeUpdated();
     }
 
     void ChatInputBox::resizeEvent(QResizeEvent *event) {

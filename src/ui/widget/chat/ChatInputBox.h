@@ -76,6 +76,8 @@ namespace ui::widget::chat {
 
         void resizeEvent(QResizeEvent *event) override;
 
+        void showEvent(QShowEvent *event) override;
+
         void paintEvent(QPaintEvent *event) override;
 
     private:
