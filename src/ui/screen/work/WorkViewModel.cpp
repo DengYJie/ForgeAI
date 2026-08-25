@@ -52,7 +52,13 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
             sessions.append({conversation.id.toString(), conversation.title, conversation.isPinned, conversation.isArchived,
                              conversation.updatedAt.toMSecsSinceEpoch(), conversation.projectId});
         }
-        updateState([projects, sessions](WorkState& state) { state.projects = projects; state.sessions = sessions; });
+        updateState([projects, sessions](WorkState& state) { 
+            state.projects = projects; 
+            state.sessions = sessions; 
+            for (const auto& p : projects) {
+                if (p.isPinned) state.pinnedProjects.insert(p.id);
+            }
+        });
     }
     // A project must be explicitly selected before creating a Work chat.
 }
@@ -250,10 +256,26 @@ void WorkViewModel::removeProject(const QUuid& projectId) {
     if (m_projectRepository) {
         m_projectRepository->deleteProject(projectId);
     }
+    
     updateState([this, projectId](WorkState& state) {
+        // Cascade delete all conversations associated with this project to prevent DB orphan records and JSONL file leaks
+        QList<QString> sessionsToDelete;
+        for (const auto& s : state.sessions) {
+            if (s.projectId == projectId) {
+                sessionsToDelete.append(s.id);
+            }
+        }
+        for (const auto& sessionId : sessionsToDelete) {
+            if (m_conversationService) {
+                QString dummyCurrent;
+                m_conversationService->deleteSession(state.sessions, sessionId, dummyCurrent);
+            }
+        }
+        
         state.projects.removeIf([&](const auto& p) { return p.id == projectId; });
         state.sessions.removeIf([&](const auto& s) { return s.projectId == projectId; });
         state.pinnedProjects.remove(projectId);
+        
         if (state.currentProjectId == projectId) {
             if (!state.projects.isEmpty()) {
                 selectProject(state.projects.first().id);
@@ -290,11 +312,29 @@ void WorkViewModel::renameProject(const QUuid& projectId, const QString& newName
 }
 
 void WorkViewModel::toggleProjectPinned(const QUuid& projectId) {
-    updateState([projectId](WorkState& state) {
+    updateState([this, projectId](WorkState& state) {
         if (state.pinnedProjects.contains(projectId)) {
             state.pinnedProjects.remove(projectId);
         } else {
             state.pinnedProjects.insert(projectId);
+        }
+        
+        // Save to Database
+        if (m_projectRepository) {
+            auto optProject = m_projectRepository->getProject(projectId);
+            if (optProject.has_value()) {
+                auto p = optProject.value();
+                p.isPinned = state.pinnedProjects.contains(projectId);
+                m_projectRepository->saveProject(p);
+            }
+        }
+        
+        // Also update the loaded project list
+        for (auto& p : state.projects) {
+            if (p.id == projectId) {
+                p.isPinned = state.pinnedProjects.contains(projectId);
+                break;
+            }
         }
     });
 }

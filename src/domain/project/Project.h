@@ -22,6 +22,7 @@ namespace domain::project {
 
         QDateTime createdAt; ///< 项目添加时间
         QDateTime lastOpenedAt; ///< 最近一次打开时间
+        bool isPinned = false; ///< Whether the project is pinned in the sidebar
 
         bool operator==(const Project&) const = default;
     };
