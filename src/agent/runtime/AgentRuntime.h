@@ -33,7 +33,12 @@ namespace agent::runtime {
         void cancelRun() override;
         void suspendRun() override;
         void resumeRun(const AgentRunContext& context) override;
-        void grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) override;
+        void grantPermission(
+            const QString& sessionId,
+            const QString& toolCallId,
+            bool granted,
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+        ) override;
 
         bool isRunning() const override;
         domain::agent::AgentRunState currentState() const override;
@@ -70,6 +75,7 @@ namespace agent::runtime {
         QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
         QList<domain::agent::ToolResult> m_pendingToolResults;
         QMap<QString, std::pair<domain::agent::ToolCall, domain::agent::ToolPermission>> m_pendingPermissions;
+        QSet<QString> m_runApprovedTools;
         QList<QList<domain::agent::ToolCall>> m_pendingBatches;
         std::vector<std::unique_ptr<application::ports::IToolOperation>> m_activeOperations;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;

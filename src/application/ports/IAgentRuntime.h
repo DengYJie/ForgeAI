@@ -41,9 +41,14 @@ namespace application::ports {
         virtual void resumeRun(const agent::runtime::AgentRunContext& context) = 0;
 
         /**
-         * @brief 用户确认或拒绝某项敏感工具执行权限
+         * @brief 用户确认或拒绝某项敏感工具执行权限 (支持记忆化授权范围)
          */
-        virtual void grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) = 0;
+        virtual void grantPermission(
+            const QString& sessionId,
+            const QString& toolCallId,
+            bool granted,
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+        ) = 0;
 
         /**
          * @brief 查询是否处于运行状态

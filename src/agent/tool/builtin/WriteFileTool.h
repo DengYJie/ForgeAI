@@ -16,7 +16,7 @@ namespace agent::tool::builtin {
             return {true, false, false, QStringLiteral("fs:write")};
         }
         QList<domain::agent::ToolPermission> permissions() const override {
-            return {{domain::agent::ToolPermissionType::WriteWorkspace, QStringLiteral("写入或创建工作区文件")}};
+            return {{domain::agent::ToolPermissionType::FileSystemWrite, QStringLiteral("写入或创建工作区文件")}};
         }
         std::unique_ptr<application::ports::IToolOperation> execute(
             const domain::agent::ToolCall& call,

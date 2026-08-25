@@ -121,6 +121,7 @@ namespace agent::runtime {
         m_state.results.clear();
         m_state.errorMessage.clear();
         m_pendingPermissions.clear();
+        m_runApprovedTools.clear();
 
         core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("Agent 任务启动"), {
             {QStringLiteral("runId"), m_state.runId.toString(QUuid::WithoutBraces)},
@@ -339,6 +340,7 @@ namespace agent::runtime {
         m_activeToolCalls.clear();
         m_pendingToolResults.clear();
         m_pendingPermissions.clear();
+        m_runApprovedTools.clear();
 
         core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("Agent 任务已取消"), {
             {QStringLiteral("runId"), m_state.runId.toString(QUuid::WithoutBraces)},
@@ -384,18 +386,31 @@ namespace agent::runtime {
         startNextModelRequest();
     }
 
-    void AgentRuntime::grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) {
+    void AgentRuntime::grantPermission(
+        const QString& sessionId,
+        const QString& toolCallId,
+        bool granted,
+        domain::agent::PermissionScope scope
+    ) {
         if (sessionId != m_context.sessionId) return;
         if (!m_pendingPermissions.contains(toolCallId)) return;
 
         const auto [call, perm] = m_pendingPermissions.take(toolCallId);
 
         if (granted) {
+            if (scope == domain::agent::PermissionScope::Run) {
+                m_runApprovedTools.insert(call.name);
+                core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前会话内的工具授权"), {
+                    {QStringLiteral("toolName"), call.name}
+                });
+            }
+
+            const int toolTimeout = m_context.policy.toolTimeoutMs > 0 ? m_context.policy.toolTimeoutMs : (m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000);
             application::ports::ToolExecutionContext execContext{
                 m_context.workspaceRoot,
                 m_context.sessionId,
                 m_context.projectId,
-                m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000,
+                toolTimeout,
                 m_runCancellationToken
             };
 
@@ -472,17 +487,21 @@ namespace agent::runtime {
                 m_pendingToolResults.append(result);
                 m_state.results = m_pendingToolResults;
                 emit toolResultReady(m_context.sessionId, result);
+                saveCheckpoint();
                 continue;
             }
 
             domain::agent::ToolPermission requiredPerm;
             domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
 
-            if (m_toolRegistry) {
+            // 如果当前会话已授权该工具，直接允许
+            if (m_runApprovedTools.contains(call.name)) {
+                decision = domain::agent::PermissionDecision::Allow;
+            } else if (m_toolRegistry) {
                 auto tool = m_toolRegistry->findTool(call.name);
                 if (tool) {
                     for (const auto& perm : tool->permissions()) {
-                        auto d = m_context.policy.evaluatePermission(perm.type);
+                        auto d = m_context.policy.evaluateTool(call.name, perm);
                         if (d == domain::agent::PermissionDecision::Deny) {
                             decision = domain::agent::PermissionDecision::Deny;
                             requiredPerm = perm;
@@ -557,11 +576,12 @@ namespace agent::runtime {
             return;
         }
 
+        const int toolTimeout = m_context.policy.toolTimeoutMs > 0 ? m_context.policy.toolTimeoutMs : (m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000);
         application::ports::ToolExecutionContext execContext{
             m_context.workspaceRoot,
             m_context.sessionId,
             m_context.projectId,
-            m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000,
+            toolTimeout,
             m_runCancellationToken
         };
 
@@ -598,9 +618,17 @@ namespace agent::runtime {
     }
 
     void AgentRuntime::onToolOperationFinished(const QString& toolCallId, const domain::agent::ToolResult& result) {
-        m_pendingToolResults.append(result);
+        domain::agent::ToolResult safeResult = result;
+        const int maxOutputChars = m_context.policy.maxToolOutputChars > 0 ? m_context.policy.maxToolOutputChars : 32768;
+        if (safeResult.content.length() > maxOutputChars) {
+            const int originalLen = safeResult.content.length();
+            safeResult.content = safeResult.content.left(maxOutputChars) +
+                QStringLiteral("\n\n[工具输出已截断：原始内容共 %1 字符，仅保留前 %2 字符以保护上下文窗口]").arg(originalLen).arg(maxOutputChars);
+        }
+
+        m_pendingToolResults.append(safeResult);
         m_state.results = m_pendingToolResults;
-        emit toolResultReady(m_context.sessionId, result);
+        emit toolResultReady(m_context.sessionId, safeResult);
         emit stateChanged(m_state);
         saveCheckpoint();
 
@@ -618,6 +646,31 @@ namespace agent::runtime {
 
     void AgentRuntime::finishToolExecutionRound() {
         setState(domain::agent::AgentRunStatus::ExecutingTool);
+
+        // 结果保序重排
+        QList<domain::agent::ToolResult> orderedResults;
+        for (const auto& call : m_activeToolCalls) {
+            for (const auto& res : m_pendingToolResults) {
+                if (res.toolCallId == call.id) {
+                    orderedResults.append(res);
+                    break;
+                }
+            }
+        }
+        for (const auto& res : m_pendingToolResults) {
+            bool exists = false;
+            for (const auto& ord : orderedResults) {
+                if (ord.toolCallId == res.toolCallId) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                orderedResults.append(res);
+            }
+        }
+        m_pendingToolResults = orderedResults;
+        m_state.results = m_pendingToolResults;
 
         // 保存包含 ToolResult 的消息记录
         if (!m_pendingToolResults.isEmpty()) {

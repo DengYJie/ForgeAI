@@ -16,7 +16,7 @@ namespace agent::tool::builtin {
             return {true, true, true, QString()};
         }
         QList<domain::agent::ToolPermission> permissions() const override {
-            return {{domain::agent::ToolPermissionType::ReadOnly, QStringLiteral("读取工作区文件内容")}};
+            return {{domain::agent::ToolPermissionType::FileSystemRead, QStringLiteral("读取工作区文件内容")}};
         }
         std::unique_ptr<application::ports::IToolOperation> execute(
             const domain::agent::ToolCall& call,

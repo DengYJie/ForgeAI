@@ -65,6 +65,8 @@ private slots:
     void testToolExecutionErrorSanitization();
     void testToolExecutionSchedulerBatches();
     void testAsyncToolOperationLifecycle();
+    void testFineGrainedPermissionEvaluation();
+    void testAgentPolicyWildcardOverrides();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -1009,6 +1011,55 @@ void AgentToolTests::testAsyncToolOperationLifecycle() {
 
     op->cancel();
     QCOMPARE(op->state(), application::ports::ToolOperationState::Cancelled);
+}
+
+void AgentToolTests::testFineGrainedPermissionEvaluation() {
+    domain::agent::AgentPolicy policy;
+    policy.autoApproveReadOnly = true;
+    policy.autoApproveWriteWorkspace = true;
+    policy.autoApproveExecuteProcess = false;
+    policy.autoApproveDestructive = false;
+
+    // 细粒度只读/读网络
+    QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::FileSystemRead), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::NetworkRead), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::ExternalServiceRead), domain::agent::PermissionDecision::Allow);
+
+    // 细粒度写入/命令执行
+    QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::FileSystemWrite), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::ProcessExecute), domain::agent::PermissionDecision::AskUser);
+    QCOMPARE(policy.evaluatePermission(domain::agent::ToolPermissionType::DestructiveOperation), domain::agent::PermissionDecision::AskUser);
+}
+
+void AgentToolTests::testAgentPolicyWildcardOverrides() {
+    domain::agent::AgentPolicy policy;
+    policy.autoApproveWriteWorkspace = false; // 默认写操作要询问
+
+    domain::agent::ToolPermission writePerm{domain::agent::ToolPermissionType::FileSystemWrite, QStringLiteral("写入")};
+
+    // 1. 无规则时回退到 evaluatePermission (AskUser)
+    QCOMPARE(policy.evaluateTool(QStringLiteral("write_file"), writePerm), domain::agent::PermissionDecision::AskUser);
+
+    // 2. 精确工具名覆盖 -> Allow
+    policy.toolRules.insert(QStringLiteral("write_file"), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("write_file"), writePerm), domain::agent::PermissionDecision::Allow);
+
+    // 3. 服务级通配符 (如 "db_server.*")
+    domain::agent::ToolPermission mcpPerm{domain::agent::ToolPermissionType::ExternalServiceWrite, QStringLiteral("MCP写")};
+    policy.toolRules.insert(QStringLiteral("db_server.*"), domain::agent::PermissionDecision::Deny);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("db_server.insert_row"), mcpPerm), domain::agent::PermissionDecision::Deny);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("db_server.delete_table"), mcpPerm), domain::agent::PermissionDecision::Deny);
+
+    // 4. 精确优先于通配符: 单独放行 "db_server.insert_row"
+    policy.toolRules.insert(QStringLiteral("db_server.insert_row"), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("db_server.insert_row"), mcpPerm), domain::agent::PermissionDecision::Allow);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("db_server.delete_table"), mcpPerm), domain::agent::PermissionDecision::Deny);
+
+    // 5. 全局通配符 "*"
+    domain::agent::ToolPermission anyPerm{domain::agent::ToolPermissionType::ReadOnly, QStringLiteral("只读")};
+    policy.toolRules.clear();
+    policy.toolRules.insert(QStringLiteral("*"), domain::agent::PermissionDecision::Deny);
+    QCOMPARE(policy.evaluateTool(QStringLiteral("read_file"), anyPerm), domain::agent::PermissionDecision::Deny);
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)
