@@ -21,7 +21,10 @@ namespace agent::runtime {
     }
 
     AgentRuntime::~AgentRuntime() {
-        cancelRun();
+        if (m_currentOp) {
+            m_currentOp->cancel();
+            cleanupCurrentOp();
+        }
     }
 
     bool AgentRuntime::isRunning() const {
@@ -40,6 +43,8 @@ namespace agent::runtime {
     void AgentRuntime::setState(domain::agent::AgentRunStatus status, const QString& errorMessage) {
         m_state.status = status;
         m_state.errorMessage = errorMessage;
+        m_state.pendingCalls = m_activeToolCalls.values();
+        m_state.results = m_pendingToolResults;
         emit stateChanged(m_state);
     }
 
@@ -76,7 +81,7 @@ namespace agent::runtime {
         m_context = context;
         m_state.runId = context.runId.isNull() ? QUuid::createUuid() : context.runId;
         m_state.conversationId = context.sessionId;
-        m_state.round = 0;
+        m_state.round = 1;
         m_state.pendingCalls.clear();
         m_state.results.clear();
         m_state.errorMessage.clear();
@@ -315,7 +320,9 @@ namespace agent::runtime {
                 result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
             }
             m_pendingToolResults.append(result);
+            m_state.results = m_pendingToolResults;
             emit toolResultReady(m_context.sessionId, result);
+            emit stateChanged(m_state);
         } else {
             domain::agent::ToolResult result{
                 call.id,
@@ -323,7 +330,9 @@ namespace agent::runtime {
                 true
             };
             m_pendingToolResults.append(result);
+            m_state.results = m_pendingToolResults;
             emit toolResultReady(m_context.sessionId, result);
+            emit stateChanged(m_state);
         }
 
         if (m_pendingPermissions.isEmpty()) {
@@ -378,6 +387,7 @@ namespace agent::runtime {
                     true
                 };
                 m_pendingToolResults.append(result);
+                m_state.results = m_pendingToolResults;
                 emit toolResultReady(m_context.sessionId, result);
             } else if (decision == domain::agent::PermissionDecision::AskUser) {
                 m_pendingPermissions[call.id] = {call, requiredPerm};
@@ -391,6 +401,7 @@ namespace agent::runtime {
                     result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
                 }
                 m_pendingToolResults.append(result);
+                m_state.results = m_pendingToolResults;
                 emit toolResultReady(m_context.sessionId, result);
             }
         }
@@ -453,15 +464,20 @@ namespace agent::runtime {
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallStarted>) {
                 domain::agent::ToolCall call{arg.id, arg.functionName, {}};
                 m_activeToolCalls[arg.id] = call;
+                m_state.pendingCalls = m_activeToolCalls.values();
                 emit toolCallStarted(m_context.sessionId, call);
+                emit stateChanged(m_state);
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallDelta>) {
                 if (m_activeToolCalls.contains(arg.id)) {
                     m_activeToolCalls[arg.id].arguments += arg.argumentsDelta;
+                    m_state.pendingCalls = m_activeToolCalls.values();
                 }
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallFinished>) {
                 if (m_activeToolCalls.contains(arg.id)) {
                     const auto call = m_activeToolCalls[arg.id];
+                    m_state.pendingCalls = m_activeToolCalls.values();
                     emit toolCallFinished(m_context.sessionId, call);
+                    emit stateChanged(m_state);
                 }
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
                 const auto assistantMsg = makeAssistantMessage();
