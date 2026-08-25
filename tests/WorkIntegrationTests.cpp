@@ -103,6 +103,8 @@ private slots:
     void testAgentRuntimeParallelToolExecution();
     void testAgentRuntimeTimeoutWatchdog();
     void testWorkViewModelMcpProjectSwitchUnload();
+    void testAgentRuntimeConcurrentMcpToolCallsSafety();
+    void testAgentRuntimeToolExecutionTimeoutProtection();
 
 private:
     QTemporaryDir m_tempDir;
@@ -822,9 +824,172 @@ void WorkIntegrationTests::testWorkViewModelMcpProjectSwitchUnload() {
     mcpManager.registerServer(cfg);
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) != nullptr);
 
-    // 切换到 Project 2，验证 stopServersForProject 卸载了 Project 1 的 MCP 服务
     mcpManager.stopServersForProject(proj1Dir.path());
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) == nullptr);
+}
+
+// 模拟测试用的慢速工具
+class SlowTestTool final : public application::ports::ITool {
+public:
+    domain::agent::ToolDefinition definition() const override {
+        domain::agent::ToolDefinition def;
+        def.name = QStringLiteral("slow_tool");
+        return def;
+    }
+    bool isThreadSafe() const override {
+        return true;
+    }
+    domain::agent::ToolResult execute(
+        const domain::agent::ToolCall& call,
+        const application::ports::ToolExecutionContext& context
+    ) override {
+        Q_UNUSED(context);
+        QThread::msleep(400);
+        return domain::agent::ToolResult{call.id, QStringLiteral("slow finish"), false};
+    }
+};
+
+// 模拟非线程安全 MCP 工具
+class NonThreadSafeMockTool final : public application::ports::ITool {
+public:
+    explicit NonThreadSafeMockTool(const QString& name) : m_name(name) {}
+    domain::agent::ToolDefinition definition() const override {
+        domain::agent::ToolDefinition def;
+        def.name = m_name;
+        return def;
+    }
+    bool isThreadSafe() const override {
+        return false;
+    }
+    domain::agent::ToolResult execute(
+        const domain::agent::ToolCall& call,
+        const application::ports::ToolExecutionContext& context
+    ) override {
+        Q_UNUSED(context);
+        return domain::agent::ToolResult{call.id, QStringLiteral("mcp res: %1").arg(m_name), false};
+    }
+private:
+    QString m_name;
+};
+
+class SimpleMockProvider final : public application::ports::IToolProvider {
+public:
+    explicit SimpleMockProvider(QList<std::shared_ptr<application::ports::ITool>> tools) : m_tools(std::move(tools)) {}
+    QList<std::shared_ptr<application::ports::ITool>> tools() const override { return m_tools; }
+private:
+    QList<std::shared_ptr<application::ports::ITool>> m_tools;
+};
+
+void WorkIntegrationTests::testAgentRuntimeConcurrentMcpToolCallsSafety() {
+    MockChatGateway mockGateway;
+
+    // 模型下发两个并发 MCP 工具调用
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_mcp1"), QStringLiteral("mcp::server::tool1")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_mcp1")});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_mcp2"), QStringLiteral("mcp::server::tool2")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_mcp2")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    QList<domain::llm::ChatEvent> r2;
+    r2.append(domain::llm::EventStarted{});
+    r2.append(domain::llm::EventTextDelta{QStringLiteral("MCP 工具调用完成")});
+    r2.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r2);
+
+    auto mcp1 = std::make_shared<NonThreadSafeMockTool>(QStringLiteral("mcp::server::tool1"));
+    auto mcp2 = std::make_shared<NonThreadSafeMockTool>(QStringLiteral("mcp::server::tool2"));
+    auto provider = std::make_shared<SimpleMockProvider>(QList<std::shared_ptr<application::ports::ITool>>{mcp1, mcp2});
+
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(provider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_mcp_concurrency");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.allowParallelToolExecution = true;
+
+    QMap<QString, QString> resultsMap;
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        resultsMap.insert(res.toolCallId, res.content);
+    });
+
+    bool completed = false;
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        completed = true;
+        loop.quit();
+    });
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("调用多个 MCP 工具"));
+    loop.exec();
+
+    QVERIFY2(completed, "Concurrent MCP tool calls test timed out");
+    QCOMPARE(resultsMap.size(), 2);
+    QCOMPARE(resultsMap.value(QStringLiteral("call_mcp1")), QStringLiteral("mcp res: mcp::server::tool1"));
+    QCOMPARE(resultsMap.value(QStringLiteral("call_mcp2")), QStringLiteral("mcp res: mcp::server::tool2"));
+}
+
+void WorkIntegrationTests::testAgentRuntimeToolExecutionTimeoutProtection() {
+    MockChatGateway mockGateway;
+
+    // 模型下发两个并发工具调用（包含耗时 400ms 的慢速工具）
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow1"), QStringLiteral("slow_tool")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow1")});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow2"), QStringLiteral("slow_tool")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow2")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    QList<domain::llm::ChatEvent> r2;
+    r2.append(domain::llm::EventStarted{});
+    r2.append(domain::llm::EventTextDelta{QStringLiteral("处理完毕")});
+    r2.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r2);
+
+    auto slowTool = std::make_shared<SlowTestTool>();
+    auto provider = std::make_shared<SimpleMockProvider>(QList<std::shared_ptr<application::ports::ITool>>{slowTool});
+
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(provider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_tool_timeout");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.timeoutMs = 100; // 设定超时时间为 100ms
+    context.policy.allowParallelToolExecution = true;
+
+    QMap<QString, domain::agent::ToolResult> resultsMap;
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        resultsMap.insert(res.toolCallId, res);
+    });
+
+    bool completed = false;
+    QEventLoop loop;
+    connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+        completed = true;
+        loop.quit();
+    });
+
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    runtime.startRun(context, QStringLiteral("超时工具调用"));
+    loop.exec();
+
+    QVERIFY2(completed, "Tool execution timeout test timed out");
+    QCOMPARE(resultsMap.size(), 2);
+    QVERIFY(resultsMap.value(QStringLiteral("call_slow1")).isError);
+    QVERIFY(resultsMap.value(QStringLiteral("call_slow1")).content.contains(QStringLiteral("超时")));
 }
 
 QTEST_GUILESS_MAIN(WorkIntegrationTests)
