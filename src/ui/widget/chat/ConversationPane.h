@@ -9,6 +9,10 @@ namespace fluent::textfields {
     class Label;
 }
 
+namespace fluent::scrolling {
+    class ScrollBar;
+}
+
 namespace ui::widget::message {
     class MessageListView;
 }
@@ -36,20 +40,18 @@ public:
     void setEmptyStateVisible(bool visible);
     void setStatusLabelVisible(bool visible);
 
-protected:
-    void resizeEvent(QResizeEvent* event) override;
-
 private:
     void setupUi();
-    void updateInputBoxWidth();
 
     ChatHeader* m_header = nullptr;
     QHBoxLayout* m_contentRowLayout = nullptr;
     ChatAnchorBar* m_anchorBar = nullptr;
+    QWidget* m_conversationColumn = nullptr;
     message::MessageListView* m_messageList = nullptr;
     ChatInputBox* m_inputBox = nullptr;
     fluent::textfields::Label* m_emptyStateLabel = nullptr;
     fluent::textfields::Label* m_statusLabel = nullptr;
+    fluent::scrolling::ScrollBar* m_externalScrollBar = nullptr;
 };
 
 } // namespace ui::widget::chat

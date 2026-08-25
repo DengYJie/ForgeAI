@@ -8,9 +8,8 @@
 namespace ui::widget::message {
 namespace {
 constexpr int kHorizontalMargin = 16;
-constexpr int kMessageContentMaxWidth = 1000;
 constexpr int kTopMargin = 16;
-constexpr int kBottomMargin = 256;
+constexpr int kBottomMargin = 16;
 constexpr int kItemSpacing = 16;
 constexpr int kPreloadViewports = 2;
 }
@@ -226,9 +225,8 @@ void MessageListView::updateVisibleCards()
     const int anchorOffset = anchorIndex >= 0 ? oldScroll - m_items.at(anchorIndex).y : 0;
 
     bool heightsChanged = false;
-    const int availableWidth = qMax(1, m_container->width() - 2 * kHorizontalMargin);
-    const int width = qMin(kMessageContentMaxWidth, availableWidth);
-    const int x = qMax(kHorizontalMargin, (m_container->width() - width) / 2);
+    const int width = qMax(1, m_container->width() - 2 * kHorizontalMargin);
+    const int x = kHorizontalMargin;
     for (int index = first; index >= 0 && index <= end; ++index) {
         Item& item = m_items[index];
         MessageCardWidget* card = m_cardMap.value(item.message.id);
@@ -275,8 +273,7 @@ void MessageListView::onCardHeightChanged()
     const int index = itemIndex(card->messageId());
     if (index < 0) return;
     Item& item = m_items[index];
-    const int availableWidth = qMax(1, m_container->width() - 2 * kHorizontalMargin);
-    const int width = qMin(kMessageContentMaxWidth, availableWidth);
+    const int width = qMax(1, m_container->width() - 2 * kHorizontalMargin);
     const int height = qMax(1, card->heightForWidth(width));
     if (item.height == height) return;
     const bool aboveViewport = item.y + item.height <= verticalScrollBar()->value();
