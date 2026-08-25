@@ -20,11 +20,22 @@ namespace agent::runtime {
         agent::tool::ToolRegistry* toolRegistry,
         domain::repository::IAgentCheckpointRepository* checkpointRepo,
         QObject* parent
+    ) : AgentRuntime(chatGateway, conversationService, toolRegistry, checkpointRepo, nullptr, parent) {
+    }
+
+    AgentRuntime::AgentRuntime(
+        application::ports::IChatModelGateway* chatGateway,
+        domain::service::IConversationService* conversationService,
+        agent::tool::ToolRegistry* toolRegistry,
+        domain::repository::IAgentCheckpointRepository* checkpointRepo,
+        std::shared_ptr<application::ports::IProcessTaskRuntime> taskRuntime,
+        QObject* parent
     ) : application::ports::IAgentRuntime(parent),
         m_chatGateway(chatGateway),
         m_conversationService(conversationService),
         m_toolRegistry(toolRegistry),
-        m_checkpointRepo(checkpointRepo) {
+        m_checkpointRepo(checkpointRepo),
+        m_taskRuntime(std::move(taskRuntime)) {
         m_timeoutTimer = new QTimer(this);
         m_timeoutTimer->setSingleShot(true);
         connect(m_timeoutTimer, &QTimer::timeout, this, &AgentRuntime::onTimeout);
@@ -314,6 +325,9 @@ namespace agent::runtime {
 
     void AgentRuntime::cancelRun() {
         m_runCancellationToken.cancel();
+        if (m_taskRuntime && !m_state.runId.isNull()) {
+            m_taskRuntime->cancelTasksForRun(m_state.runId);
+        }
         if (m_currentOp) {
             m_currentOp->cancel();
             cleanupCurrentOp();

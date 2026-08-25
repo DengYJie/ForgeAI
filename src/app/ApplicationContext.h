@@ -27,6 +27,7 @@
 #include "llm/workspace/WorkspaceFileSystem.h"
 #include "agent/tool/ToolRegistry.h"
 #include "agent/tool/BuiltinToolProvider.h"
+#include "agent/task/ProcessTaskRuntime.h"
 #include "agent/skill/SkillRegistry.h"
 #include "agent/runtime/AgentRuntime.h"
 #include "application/usecase/chat/ChatUseCases.h"
@@ -125,6 +126,7 @@ namespace app {
 
         // 工具、沙箱与 MCP
         std::shared_ptr<llm::workspace::WorkspaceFileSystem> m_workspaceFs;
+        std::shared_ptr<agent::task::ProcessTaskRuntime> m_processTaskRuntime;
         std::shared_ptr<agent::tool::BuiltinToolProvider> m_builtinToolProvider;
         std::unique_ptr<llm::mcp::McpManager> m_mcpManager;
         std::unique_ptr<agent::tool::ToolRegistry> m_toolRegistry;

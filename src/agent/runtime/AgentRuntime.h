@@ -11,6 +11,8 @@
 #include <vector>
 #include <memory>
 
+#include "application/ports/IProcessTaskRuntime.h"
+
 namespace agent::runtime {
 
     /**
@@ -24,7 +26,16 @@ namespace agent::runtime {
             application::ports::IChatModelGateway* chatGateway,
             domain::service::IConversationService* conversationService,
             agent::tool::ToolRegistry* toolRegistry,
+            domain::repository::IAgentCheckpointRepository* checkpointRepo,
+            QObject* parent
+        );
+
+        explicit AgentRuntime(
+            application::ports::IChatModelGateway* chatGateway,
+            domain::service::IConversationService* conversationService,
+            agent::tool::ToolRegistry* toolRegistry,
             domain::repository::IAgentCheckpointRepository* checkpointRepo = nullptr,
+            std::shared_ptr<application::ports::IProcessTaskRuntime> taskRuntime = nullptr,
             QObject* parent = nullptr
         );
         ~AgentRuntime() override;
@@ -83,6 +94,7 @@ namespace agent::runtime {
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
 
         application::ports::CancellationToken m_runCancellationToken;
+        std::shared_ptr<application::ports::IProcessTaskRuntime> m_taskRuntime;
     };
 
 } // namespace agent::runtime

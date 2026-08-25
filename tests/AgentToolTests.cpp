@@ -35,6 +35,9 @@
 #include "domain/mcp/McpServerTrust.h"
 #include "core/logging/SensitiveDataFilter.h"
 #include "core/logging/LogCategory.h"
+#include "agent/task/ProcessOutputBuffer.h"
+#include "agent/task/ProcessTaskRuntime.h"
+#include "agent/tool/builtin/CheckTaskTool.h"
 
 class AgentToolTests final : public QObject {
     Q_OBJECT
@@ -74,6 +77,11 @@ private slots:
     void testWriteFileToolOverwriteProtectionAndAtomicCommit();
     void testApplyPatchToolExactMatchingAndAtomicRollback();
     void testRunCommandToolExecutionAndSandboxing();
+    void testProcessOutputBufferCursorTracking();
+    void testRunCommandBackgroundModeAndCheckTask();
+    void testCheckTaskIncrementalCursorStreaming();
+    void testCheckTaskWaitMsLongPolling();
+    void testProcessTaskCancellationAndOwnership();
 private:
     QTemporaryDir m_dbDir;
 };
@@ -120,7 +128,7 @@ void AgentToolTests::toolRegistryRegistrationAndLookup() {
     auto provider = std::make_shared<agent::tool::BuiltinToolProvider>(fs);
 
     int count = registry.registerProvider(provider);
-    QCOMPARE(count, 6);
+    QCOMPARE(count, 7);
 
     QVERIFY(registry.hasTool("read_file"));
     QVERIFY(registry.hasTool("write_file"));
@@ -128,9 +136,10 @@ void AgentToolTests::toolRegistryRegistrationAndLookup() {
     QVERIFY(registry.hasTool("search_text"));
     QVERIFY(registry.hasTool("apply_patch"));
     QVERIFY(registry.hasTool("run_command"));
+    QVERIFY(registry.hasTool("check_task"));
 
     auto defs = registry.definitions();
-    QCOMPARE(defs.size(), 6);
+    QCOMPARE(defs.size(), 7);
 
     auto tool = registry.findTool("read_file");
     QVERIFY(tool != nullptr);
@@ -1415,6 +1424,182 @@ void AgentToolTests::testRunCommandToolExecutionAndSandboxing() {
     auto objCmake = QJsonDocument::fromJson(resCmake.content.toUtf8()).object();
     QCOMPARE(objCmake.value(QStringLiteral("exit_code")).toInt(), 0);
     QVERIFY(objCmake.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("cmake version")));
+}
+
+void AgentToolTests::testProcessOutputBufferCursorTracking() {
+    agent::task::ProcessOutputBuffer buffer(100); // 100 bytes capacity
+
+    buffer.append("Hello ");
+    QCOMPARE(buffer.totalProducedBytes(), 6ULL);
+    QCOMPARE(buffer.availableHeadOffset(), 0ULL);
+    QVERIFY(!buffer.hasTruncated());
+
+    quint64 nextCursor = 0;
+    bool lost = false;
+    quint64 avail = 0;
+    QString chunk1 = buffer.readFrom(0, 10, &lost, &avail, &nextCursor);
+    QCOMPARE(chunk1, QStringLiteral("Hello "));
+    QCOMPARE(nextCursor, 6ULL);
+    QVERIFY(!lost);
+
+    buffer.append("World!");
+    QString chunk2 = buffer.readFrom(nextCursor, 10, &lost, &avail, &nextCursor);
+    QCOMPARE(chunk2, QStringLiteral("World!"));
+    QCOMPARE(nextCursor, 12ULL);
+
+    // 测试缓冲区溢出与游标过期
+    QByteArray bigData(150, 'A');
+    buffer.append(bigData);
+    QCOMPARE(buffer.totalProducedBytes(), 162ULL);
+    QVERIFY(buffer.hasTruncated());
+    QVERIFY(buffer.availableHeadOffset() > 0);
+
+    // 读取过期的旧游标 0 应标记 lost
+    QString chunk3 = buffer.readFrom(0, 50, &lost, &avail, &nextCursor);
+    QVERIFY(lost);
+    QCOMPARE(avail, buffer.availableHeadOffset());
+}
+
+void AgentToolTests::testRunCommandBackgroundModeAndCheckTask() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, fs));
+
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 1. 启动后台任务
+    domain::agent::ToolCall bgCall{
+        QStringLiteral("bg1"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"],\"background\":true}")
+    };
+    auto bgRes = runOpSync(registry.execute(bgCall, ctx));
+    QVERIFY(!bgRes.isError);
+
+    auto bgObj = QJsonDocument::fromJson(bgRes.content.toUtf8()).object();
+    const QString taskId = bgObj.value(QStringLiteral("task_id")).toString();
+    QVERIFY(!taskId.isEmpty());
+    QCOMPARE(bgObj.value(QStringLiteral("status")).toString(), QStringLiteral("running"));
+
+    // 2. 调用 check_task 轮询查询
+    domain::agent::ToolCall checkCall{
+        QStringLiteral("chk1"),
+        QStringLiteral("check_task"),
+        QStringLiteral("{\"task_id\":\"%1\",\"wait_ms\":2000}").arg(taskId)
+    };
+    auto checkRes = runOpSync(registry.execute(checkCall, ctx));
+    QVERIFY(!checkRes.isError);
+
+    auto checkObj = QJsonDocument::fromJson(checkRes.content.toUtf8()).object();
+    QCOMPARE(checkObj.value(QStringLiteral("task_id")).toString(), taskId);
+    QVERIFY(checkObj.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("cmake version")));
+}
+
+void AgentToolTests::testCheckTaskIncrementalCursorStreaming() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, fs));
+
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    domain::agent::ToolCall bgCall{
+        QStringLiteral("bg2"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"],\"background\":true}")
+    };
+    auto bgRes = runOpSync(registry.execute(bgCall, ctx));
+    const QString taskId = QJsonDocument::fromJson(bgRes.content.toUtf8()).object().value(QStringLiteral("task_id")).toString();
+
+    // 第一次读取前 10 个字节
+    domain::agent::ToolCall check1{
+        QStringLiteral("chk_inc1"),
+        QStringLiteral("check_task"),
+        QStringLiteral("{\"task_id\":\"%1\",\"stdout_cursor\":0,\"max_output_bytes\":10,\"wait_ms\":2000}").arg(taskId)
+    };
+    auto res1 = runOpSync(registry.execute(check1, ctx));
+    QVERIFY(!res1.isError);
+    auto obj1 = QJsonDocument::fromJson(res1.content.toUtf8()).object();
+    const quint64 cursor1 = obj1.value(QStringLiteral("stdout_cursor")).toInteger();
+    const QString text1 = obj1.value(QStringLiteral("stdout")).toString();
+    QCOMPARE(text1.length(), 10);
+
+    // 第二次基于 cursor1 读取后续增量
+    domain::agent::ToolCall check2{
+        QStringLiteral("chk_inc2"),
+        QStringLiteral("check_task"),
+        QStringLiteral("{\"task_id\":\"%1\",\"stdout_cursor\":%2,\"max_output_bytes\":5000}").arg(taskId).arg(cursor1)
+    };
+    auto res2 = runOpSync(registry.execute(check2, ctx));
+    QVERIFY(!res2.isError);
+    auto obj2 = QJsonDocument::fromJson(res2.content.toUtf8()).object();
+    const QString text2 = obj2.value(QStringLiteral("stdout")).toString();
+
+    // 增量文本不包含第一次读过的 text1 前缀
+    QVERIFY(!text2.startsWith(text1));
+}
+
+void AgentToolTests::testCheckTaskWaitMsLongPolling() {
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    agent::tool::builtin::CheckTaskTool checkTool(taskRuntime);
+
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), QStringLiteral("."), 30000, {}};
+
+    domain::agent::ToolCall callNonExistent{
+        QStringLiteral("chk_wait1"),
+        QStringLiteral("check_task"),
+        QStringLiteral("{\"task_id\":\"task_non_existent\",\"wait_ms\":100}")
+    };
+    auto res = runOpSync(checkTool.execute(callNonExistent, ctx));
+    QVERIFY(res.isError);
+    QCOMPARE(res.errorCode, QStringLiteral("TaskNotFound"));
+}
+
+void AgentToolTests::testProcessTaskCancellationAndOwnership() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
+    auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, fs));
+
+    const QUuid runA = QUuid::createUuid();
+    const QUuid runB = QUuid::createUuid();
+
+    application::ports::ToolExecutionContext ctxA{runA, QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+    application::ports::ToolExecutionContext ctxB{runB, QStringLiteral("s2"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    domain::agent::ToolCall bgCall{
+        QStringLiteral("bg_own"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"-E\",\"sleep\",\"2\"],\"background\":true}")
+    };
+    auto bgRes = runOpSync(registry.execute(bgCall, ctxA));
+    const QString taskId = QJsonDocument::fromJson(bgRes.content.toUtf8()).object().value(QStringLiteral("task_id")).toString();
+
+    // Run B 尝试越权读取 Run A 的任务日志 -> 返回 TaskNotOwnedByRun
+    domain::agent::ToolCall checkB{
+        QStringLiteral("chk_unauth"),
+        QStringLiteral("check_task"),
+        QStringLiteral("{\"task_id\":\"%1\"}").arg(taskId)
+    };
+    auto resB = runOpSync(registry.execute(checkB, ctxB));
+    QVERIFY(resB.isError);
+    QCOMPARE(resB.errorCode, QStringLiteral("TaskNotOwnedByRun"));
+
+    // Run A 取消任务
+    QVERIFY(taskRuntime->cancel(taskId, runA));
+    auto snap = taskRuntime->snapshot(taskId);
+    QVERIFY(snap.has_value());
+    QCOMPARE(snap->state, domain::agent::task::ProcessTaskState::Cancelled);
 }
 
 QTEST_GUILESS_MAIN(AgentToolTests)

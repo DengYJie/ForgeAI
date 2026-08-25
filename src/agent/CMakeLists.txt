@@ -26,6 +26,12 @@ target_sources(ForgeAICore PRIVATE
     tool/builtin/ApplyPatchTool.cpp
     tool/builtin/RunCommandTool.h
     tool/builtin/RunCommandTool.cpp
-    tool/builtin/ProcessToolOperation.h
-    tool/builtin/ProcessToolOperation.cpp
+    task/ProcessOutputBuffer.h
+    task/ProcessOutputBuffer.cpp
+    task/ProcessTask.h
+    task/ProcessTask.cpp
+    task/ProcessTaskRuntime.h
+    task/ProcessTaskRuntime.cpp
+    tool/builtin/CheckTaskTool.h
+    tool/builtin/CheckTaskTool.cpp
 )
