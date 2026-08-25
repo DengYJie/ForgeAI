@@ -32,6 +32,7 @@ namespace services::conversation {
         if (m_conversationRepo) {
             for (const auto& conversation : m_conversationRepo->getAllConversations()) {
                 auto session = makeSession(conversation.id.toString(), conversation.title, conversation.isPinned, conversation.isArchived);
+                session.projectId = conversation.projectId;
                 session.timestamp = conversation.updatedAt.toMSecsSinceEpoch();
                 list.append(std::move(session));
             }

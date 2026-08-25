@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QList>
+#include <QHash>
 #include "domain/conversation/Message.h"
 #include "application/ports/IChatModelGateway.h"
 
@@ -87,8 +88,7 @@ namespace application::usecase::chat {
         domain::model::ModelProvider m_currentProvider;
         domain::llm::ChatRequest m_requestTemplate;
         QString m_systemPrompt;
-        QString m_transientHistorySessionId;
-        QList<domain::conversation::Message> m_transientHistory;
+        QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
         int m_toolRound = 0;
         static constexpr int MaxToolRounds = 8;
     };

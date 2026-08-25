@@ -35,6 +35,7 @@ namespace app {
         m_messageTranscriptRepo = std::make_unique<data::repository::JsonlMessageRepository>(
             QDir::homePath() + QStringLiteral("/.forgeai/sessions"));
         m_modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
+        m_projectRepo = std::make_unique<data::repository::SqliteProjectRepository>();
         m_modelRegistry = std::make_shared<core::model::ModelRegistry>(m_modelRepo);
 
         // 1.5 设置系统持久化与 Providers 初始化
@@ -97,7 +98,9 @@ namespace app {
         );
         m_workAgentUseCase = std::make_unique<application::usecase::chat::SendMessageUseCase>(
             m_chatGateway.get(),
-            nullptr,
+            // Work conversations are ordinary persisted Conversation entities;
+            // project binding is metadata, not a second transient store.
+            m_conversationService.get(),
             m_modelService.get(),
             m_agentToolService.get()
         );
@@ -211,6 +214,10 @@ namespace app {
         return m_modelRepo.get();
     }
 
+    domain::repository::IProjectRepository *ApplicationContext::projectRepository() const {
+        return m_projectRepo.get();
+    }
+
     core::model::ModelRegistry *ApplicationContext::modelRegistry() const {
         return m_modelRegistry.get();
     }
@@ -261,6 +268,9 @@ namespace app {
         w.cancelTask = m_cancelTaskUseCase.get();
         w.agentConversation = m_workAgentUseCase.get();
         w.agentTools = m_workAgentToolService.get();
+        w.conversationService = m_conversationService.get();
+        w.conversationRepository = m_conversationRepo.get();
+        w.projectRepository = m_projectRepo.get();
         return w;
     }
 

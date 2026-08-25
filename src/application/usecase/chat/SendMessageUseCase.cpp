@@ -89,12 +89,9 @@ namespace application::usecase::chat {
             history.append(userMsg);
             m_conversationService->saveMessages(sessionId, history);
         } else {
-            if (m_transientHistorySessionId != sessionId) {
-                m_transientHistorySessionId = sessionId;
-                m_transientHistory.clear();
-            }
-            m_transientHistory.append(userMsg);
-            history = m_transientHistory;
+            auto& transientHistory = m_transientHistories[sessionId];
+            transientHistory.append(userMsg);
+            history = transientHistory;
         }
 
         m_currentOperationId = QStringLiteral("op_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
@@ -213,7 +210,7 @@ namespace application::usecase::chat {
     void SendMessageUseCase::saveMessage(const domain::conversation::Message& message) {
         if (m_currentSessionId.isEmpty()) return;
         if (!m_conversationService) {
-            m_transientHistory.append(message);
+            m_transientHistories[m_currentSessionId].append(message);
             return;
         }
         auto history = m_conversationService->loadMessages(m_currentSessionId);
@@ -293,7 +290,7 @@ namespace application::usecase::chat {
                     m_pendingToolResults.clear();
                     const auto history = m_conversationService
                         ? m_conversationService->loadMessages(m_currentSessionId)
-                        : m_transientHistory;
+                        : m_transientHistories.value(m_currentSessionId);
                     startRequest(m_currentProvider, requestForHistory(history));
                 } else {
                     completeGeneration();

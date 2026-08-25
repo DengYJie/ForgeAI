@@ -6,6 +6,7 @@
 #include "data/repository/SqliteConversationRepository.h"
 #include "data/repository/JsonlMessageRepository.h"
 #include "data/repository/SqliteModelRepository.h"
+#include "data/repository/SqliteProjectRepository.h"
 #include "core/model/ModelRegistry.h"
 #include "core/settings/SettingsRegistry.h"
 #include "core/settings/providers/AppearanceSettingsProvider.h"
@@ -54,6 +55,7 @@ namespace app {
         // 2. 仓储层
         domain::repository::IConversationRepository *conversationRepository() const;
         domain::repository::IModelRepository *modelRepository() const;
+        domain::repository::IProjectRepository *projectRepository() const;
 
         // 3. 全局核心注册中心
         core::model::ModelRegistry *modelRegistry() const;
@@ -89,6 +91,7 @@ namespace app {
         std::unique_ptr<data::repository::SqliteConversationRepository> m_conversationRepo;
         std::unique_ptr<data::repository::JsonlMessageRepository> m_messageTranscriptRepo;
         std::shared_ptr<data::repository::SqliteModelRepository> m_modelRepo;
+        std::unique_ptr<data::repository::SqliteProjectRepository> m_projectRepo;
         std::shared_ptr<core::model::ModelRegistry> m_modelRegistry;
 
         // 设置持久化与提供者

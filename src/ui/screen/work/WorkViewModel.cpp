@@ -3,11 +3,15 @@
 #include "application/usecase/chat/SendMessageUseCase.h"
 #include "domain/service/IProjectContextService.h"
 #include "services/agent/AgentToolService.h"
+#include "domain/service/IConversationService.h"
+#include "domain/repository/IConversationRepository.h"
+#include "domain/repository/IProjectRepository.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QUuid>
+#include <QTimer>
 #include <algorithm>
 
 namespace ui::screen::work {
@@ -30,9 +34,27 @@ domain::conversation::Message& ensureStreamingMessage(WorkState& state) {
 WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& useCases,
                              domain::service::IProjectContextService* projectContext, QObject* parent)
     : BaseViewModel<WorkViewModel, WorkState>(parent), m_useCases(useCases), m_projectContext(projectContext),
-      m_agentTools(useCases.agentTools), m_agentSessionId(QUuid::createUuid().toString(QUuid::WithoutBraces)) {
+      m_agentTools(useCases.agentTools), m_conversationService(useCases.conversationService),
+      m_conversationRepository(useCases.conversationRepository), m_projectRepository(useCases.projectRepository) {
     setupUseCaseConnections();
     setProjectRoot(QDir::currentPath());
+    if (m_projectRepository) {
+        auto projects = m_projectRepository->getAllProjects();
+        if (projects.isEmpty()) {
+            domain::project::Project project;
+            project.id = QUuid::createUuid(); project.rootPath = m_state.projectRoot;
+            project.name = m_state.projectName; project.createdAt = QDateTime::currentDateTime(); project.lastOpenedAt = project.createdAt;
+            m_projectRepository->saveProject(project); projects.append(project);
+        }
+        QList<ui::screen::chat::ChatSessionItemData> sessions;
+        if (m_conversationRepository) for (const auto& conversation : m_conversationRepository->getAllConversations()) {
+            if (!conversation.projectId.has_value()) continue;
+            sessions.append({conversation.id.toString(), conversation.title, conversation.isPinned, conversation.isArchived,
+                             conversation.updatedAt.toMSecsSinceEpoch(), conversation.projectId});
+        }
+        updateState([projects, sessions](WorkState& state) { state.projects = projects; state.sessions = sessions; });
+    }
+    // A project must be explicitly selected before creating a Work chat.
 }
 
 WorkViewModel::~WorkViewModel() = default;
@@ -43,8 +65,18 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::chat::SendMessageUseCase::userMessageCreated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
-            updateState([message](WorkState& state) {
+            updateState([this, message](WorkState& state) {
                 state.messages.append(message);
+                for (auto& item : state.sessions) {
+                    if (item.id != m_agentSessionId || item.title != QStringLiteral("新对话")) continue;
+                    const QString title = taskTitle(std::get<domain::conversation::TextBlock>(message.blocks.first().payload).text);
+                    item.title = title;
+                    if (m_conversationRepository) {
+                        const auto conversation = m_conversationRepository->getConversation(QUuid(m_agentSessionId));
+                        if (conversation) { auto updated = *conversation; updated.title = title; updated.updatedAt = QDateTime::currentDateTime(); m_conversationRepository->saveConversation(updated); }
+                    }
+                    break;
+                }
                 state.isProcessing = true;
                 state.statusMessage = QStringLiteral("项目 Agent 正在处理…");
             });
@@ -52,7 +84,7 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::chat::SendMessageUseCase::tokenReceived, this,
                 [this](const QString& sessionId, const QString& token) {
             if (sessionId != m_agentSessionId || token.isEmpty()) return;
-            updateState([token](WorkState& state) {
+            updateState([this, token](WorkState& state) {
                 auto& message = ensureStreamingMessage(state);
                 for (auto& block : message.blocks) {
                     if (block.isText()) { std::get<domain::conversation::TextBlock>(block.payload).text += token; return; }
@@ -63,7 +95,7 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::chat::SendMessageUseCase::thoughtReceived, this,
                 [this](const QString& sessionId, const QString& thought) {
             if (sessionId != m_agentSessionId || thought.isEmpty()) return;
-            updateState([thought](WorkState& state) {
+            updateState([this, thought](WorkState& state) {
                 auto& message = ensureStreamingMessage(state);
                 for (auto& block : message.blocks) {
                     if (block.isThought()) { std::get<domain::conversation::ThoughtBlock>(block.payload).thought += thought; return; }
@@ -74,7 +106,7 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::chat::SendMessageUseCase::toolCallReceived, this,
                 [this](const QString& sessionId, const domain::agent::ToolCall& call) {
             if (sessionId != m_agentSessionId) return;
-            updateState([call](WorkState& state) {
+            updateState([this, call](WorkState& state) {
                 auto& message = ensureStreamingMessage(state);
                 domain::conversation::ToolCallBlock calls; calls.calls.append(call);
                 message.blocks.append({domain::BlockType::ToolCall, calls});
@@ -83,7 +115,7 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::chat::SendMessageUseCase::toolResultReceived, this,
                 [this](const QString& sessionId, const domain::agent::ToolResult& result) {
             if (sessionId != m_agentSessionId) return;
-            updateState([result](WorkState& state) {
+            updateState([this, result](WorkState& state) {
                 auto& message = ensureStreamingMessage(state);
                 domain::conversation::ToolResultBlock results; results.results.append(result);
                 message.blocks.append({domain::BlockType::ToolResult, results});
@@ -92,7 +124,7 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::chat::SendMessageUseCase::replyGenerated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
-            updateState([message](WorkState& state) {
+            updateState([this, message](WorkState& state) {
                 if (!state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant
                     && state.messages.last().status == domain::MessageStatus::Sending) state.messages.last() = message;
                 else state.messages.append(message);
@@ -156,7 +188,7 @@ QString WorkViewModel::projectAgentPrompt() const {
 
 void WorkViewModel::startTask(const QString& task) {
     const QString trimmed = task.trimmed();
-    if (trimmed.isEmpty()) return;
+    if (trimmed.isEmpty() || m_currentProjectId.isNull() || m_agentSessionId.isEmpty()) return;
     updateState([trimmed](WorkState& state) { state.currentTask = taskTitle(trimmed); state.statusMessage.clear(); });
     if (m_useCases.agentConversation) {
         m_useCases.agentConversation->execute(m_agentSessionId, trimmed, {}, {}, false, false, {}, projectAgentPrompt());
@@ -186,6 +218,89 @@ void WorkViewModel::setProjectRoot(const QString& rootPath) {
         if (!context.agentsInstructions.isEmpty()) instructions.append(context.agentsInstructions);
         for (const auto& skill : context.skills) instructions.append(QStringLiteral("# Skill: %1\n%2").arg(skill.name, skill.instructions));
         state.agentInstructions = instructions.join(QStringLiteral("\n\n"));
+    });
+}
+
+void WorkViewModel::selectProject(const QUuid& projectId) {
+    if (projectId.isNull()) return;
+    const auto it = std::find_if(m_state.projects.cbegin(), m_state.projects.cend(), [projectId](const auto& project) { return project.id == projectId; });
+    if (it == m_state.projects.cend()) return;
+    m_currentProjectId = projectId;
+    setProjectRoot(it->rootPath);
+    updateState([projectId](WorkState& state) { state.currentProjectId = projectId; });
+}
+
+void WorkViewModel::addProject(const QString& rootPath, const QString& displayName) {
+    if (!m_projectRepository) return;
+    const QString canonical = QDir(rootPath).canonicalPath();
+    if (canonical.isEmpty()) return;
+    auto project = m_projectRepository->getProjectByPath(canonical);
+    if (!project) {
+        domain::project::Project created;
+        created.id = QUuid::createUuid(); created.rootPath = canonical;
+        created.name = displayName.trimmed().isEmpty() ? QFileInfo(canonical).fileName() : displayName.trimmed();
+        created.createdAt = QDateTime::currentDateTime(); created.lastOpenedAt = created.createdAt;
+        m_projectRepository->saveProject(created); project = created;
+        updateState([created](WorkState& state) { state.projects.append(created); });
+    }
+    selectProject(project->id);
+}
+
+
+void WorkViewModel::newSession() {
+    if (m_currentProjectId.isNull()) return;
+    cancelTask();
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_agentSessionId = id;
+    if (m_conversationRepository) {
+        domain::conversation::Conversation conversation;
+        conversation.id = QUuid(id); conversation.title = QStringLiteral("新对话");
+        conversation.projectId = m_currentProjectId; conversation.createdAt = QDateTime::currentDateTime(); conversation.updatedAt = conversation.createdAt;
+        m_conversationRepository->saveConversation(conversation);
+    }
+    updateState([this, id](WorkState& state) {
+        state.currentSessionId = id;
+        state.currentTask.clear();
+        state.messages.clear();
+        state.sessions.prepend({id, QStringLiteral("新对话"), false, false, QDateTime::currentMSecsSinceEpoch(), m_currentProjectId});
+    });
+}
+
+void WorkViewModel::loadSession(const QString& sessionId) {
+    if (sessionId == m_agentSessionId) return;
+    cancelTask();
+    if (m_conversationRepository && m_projectRepository) {
+        const auto conversation = m_conversationRepository->getConversation(QUuid(sessionId));
+        if (conversation && conversation->projectId.has_value()) {
+            const auto project = m_projectRepository->getProject(*conversation->projectId);
+            if (project) {
+                m_currentProjectId = project->id;
+                setProjectRoot(project->rootPath);
+            }
+        }
+    }
+    m_agentSessionId = sessionId;
+    updateState([this, sessionId](WorkState& state) {
+        state.currentProjectId = m_currentProjectId;
+        state.currentSessionId = sessionId;
+        state.currentTask = QStringLiteral("新对话");
+        for (const auto& item : state.sessions) if (item.id == sessionId) { state.currentTask = item.title; break; }
+        state.messages = m_conversationService ? m_conversationService->loadMessages(sessionId) : QList<domain::conversation::Message>{};
+    });
+}
+
+void WorkViewModel::setSessionPinned(const QString& sessionId, bool pinned) {
+    updateState([sessionId, pinned](WorkState& state) { for (auto& item : state.sessions) if (item.id == sessionId) item.isPinned = pinned; });
+}
+
+void WorkViewModel::setSessionArchived(const QString& sessionId, bool archived) {
+    updateState([this, sessionId, archived](WorkState& state) {
+        for (auto& item : state.sessions) if (item.id == sessionId) item.isArchived = archived;
+        if (archived && state.currentSessionId == sessionId) {
+            const auto it = std::find_if(state.sessions.cbegin(), state.sessions.cend(), [](const auto& item) { return !item.isArchived; });
+            if (it != state.sessions.cend()) { const QString next = it->id; QTimer::singleShot(0, this, [this, next] { loadSession(next); }); }
+            else QTimer::singleShot(0, this, &WorkViewModel::newSession);
+        }
     });
 }
 

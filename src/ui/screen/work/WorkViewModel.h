@@ -5,7 +5,12 @@
 #include <QString>
 #include <QList>
 #include "domain/conversation/Message.h"
+#include "ui/screen/chat/ChatSessionListModel.h"
+#include <QHash>
+#include "domain/project/Project.h"
 namespace domain::service { class IProjectContextService; }
+namespace domain::service { class IConversationService; }
+namespace domain::repository { class IConversationRepository; class IProjectRepository; }
 namespace services::agent { class AgentToolService; }
 
 namespace ui::screen::work {
@@ -22,6 +27,10 @@ namespace ui::screen::work {
         QString statusMessage;
         QList<ToolEvent> toolEvents;
         QList<domain::conversation::Message> messages;
+        QList<ui::screen::chat::ChatSessionItemData> sessions;
+        QList<domain::project::Project> projects;
+        QString currentSessionId;
+        QUuid currentProjectId;
         QString projectRoot;
         QString projectName;
         int skillCount = 0;
@@ -58,6 +67,12 @@ namespace ui::screen::work {
          */
         void cancelTask();
         void setProjectRoot(const QString& rootPath);
+        void selectProject(const QUuid& projectId);
+        void addProject(const QString& rootPath, const QString& displayName = {});
+        void newSession();
+        void loadSession(const QString& sessionId);
+        void setSessionPinned(const QString& sessionId, bool pinned);
+        void setSessionArchived(const QString& sessionId, bool archived);
 
     Q_SIGNALS:
         void stateChanged(const ui::screen::work::WorkState &state);
@@ -74,5 +89,9 @@ namespace ui::screen::work {
         domain::service::IProjectContextService* m_projectContext = nullptr;
         domain::service::IAgentToolService* m_agentTools = nullptr;
         QString m_agentSessionId;
+        domain::service::IConversationService* m_conversationService = nullptr;
+        domain::repository::IConversationRepository* m_conversationRepository = nullptr;
+        domain::repository::IProjectRepository* m_projectRepository = nullptr;
+        QUuid m_currentProjectId;
     };
 } // namespace ui::screen::work

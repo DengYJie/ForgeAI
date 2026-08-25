@@ -64,6 +64,8 @@ namespace ui::screen::chat {
         updateState([this](ChatState &s) {
             if (m_useCases.loadSessions) {
                 s.sessions = m_useCases.loadSessions->execute();
+                s.sessions.erase(std::remove_if(s.sessions.begin(), s.sessions.end(),
+                    [](const ChatSessionItemData& session) { return session.projectId.has_value(); }), s.sessions.end());
             }
             if (!s.sessions.isEmpty()) {
                 s.currentSessionId = s.sessions.first().id;

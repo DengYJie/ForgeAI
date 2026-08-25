@@ -4,6 +4,7 @@
 #include "core/settings/SettingsRegistry.h"
 #include "data/repository/SqliteConversationRepository.h"
 #include "data/repository/SqliteModelRepository.h"
+#include "data/repository/SqliteProjectRepository.h"
 #include "core/model/ModelRegistry.h"
 
 namespace app {
@@ -41,6 +42,11 @@ namespace app {
         m_context->dbManager().initialize();
         if (auto *repo = dynamic_cast<data::repository::SqliteConversationRepository *>(m_context->conversationRepository())) {
             repo->initializeDatabase();
+        }
+        // Project repository is composed for WorkPage's project/session tree.
+        // It shares the same initialized connection as conversations.
+        if (auto *projectRepo = dynamic_cast<data::repository::SqliteProjectRepository *>(m_context->projectRepository())) {
+            projectRepo->initializeDatabase();
         }
         if (auto *modelRepo = dynamic_cast<data::repository::SqliteModelRepository *>(m_context->modelRepository())) {
             modelRepo->initializeDatabase(QStringLiteral(":/config/api.json"), QStringLiteral(":/config/models.json"));

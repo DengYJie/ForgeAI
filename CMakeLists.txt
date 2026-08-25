@@ -265,6 +265,8 @@ set(PROJECT_SOURCES
         src/ui/screen/work/WorkViewModel.cpp
         src/ui/screen/work/WorkPage.h
         src/ui/screen/work/WorkPage.cpp
+        src/ui/screen/work/ProjectSessionTreeDelegate.h
+        src/ui/screen/work/ProjectSessionTreeDelegate.cpp
 
         src/ui/screen/knowledge/KnowledgeViewModel.h
         src/ui/screen/knowledge/KnowledgeViewModel.cpp
@@ -361,6 +363,7 @@ set(PROJECT_SOURCES
         src/data/repository/SqliteConversationRepository.h
         src/data/repository/SqliteConversationRepository.cpp
         src/data/repository/SqliteProjectRepository.h
+        src/data/repository/SqliteProjectRepository.cpp
         src/data/repository/SqliteModelRepository.h
         src/data/repository/SqliteModelRepository.cpp
         src/data/repository/JsonlMessageRepository.h

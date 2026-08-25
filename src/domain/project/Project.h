@@ -22,5 +22,7 @@ namespace domain::project {
 
         QDateTime createdAt; ///< 项目添加时间
         QDateTime lastOpenedAt; ///< 最近一次打开时间
+
+        bool operator==(const Project&) const = default;
     };
 } // namespace domain::project

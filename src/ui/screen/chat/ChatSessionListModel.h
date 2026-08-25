@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QString>
+#include <optional>
 
 namespace ui::screen::chat {
     struct ChatSessionItemData {
@@ -11,6 +12,7 @@ namespace ui::screen::chat {
         bool isPinned = false;
         bool isArchived = false;
         qint64 timestamp = 0;
+        std::optional<QUuid> projectId;
 
         bool operator==(const ChatSessionItemData &other) const {
             return id == other.id && title == other.title && isPinned == other.isPinned
