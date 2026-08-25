@@ -110,6 +110,7 @@ private slots:
     void testAgentRuntimeSingleSlowToolTimeoutProtection();
     void testAgentRuntimeCancelRunPropagatesToTools();
     void testAgentRuntimeUncooperativeToolRuntimeDestructionSafety();
+    void testAgentRuntimeImmediateToolCheckpointRecovery();
 
 private:
     QTemporaryDir m_tempDir;
@@ -1251,6 +1252,99 @@ void WorkIntegrationTests::testAgentRuntimeUncooperativeToolRuntimeDestructionSa
 
     // 如果运行到这里没有崩溃，说明后台线程捕获的是 std::shared_ptr<ITool>，与 Runtime 解耦了，安全过关
     QVERIFY(true);
+}
+
+void WorkIntegrationTests::testAgentRuntimeImmediateToolCheckpointRecovery() {
+    MockChatGateway mockGateway;
+
+    // 模型返回 2 个工具调用
+    QList<domain::llm::ChatEvent> r1;
+    r1.append(domain::llm::EventStarted{});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_a"), QStringLiteral("write_file")});
+    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_a"), QStringLiteral(R"({"path":"file_a.txt","content":"data A"})")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_a")});
+    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_b"), QStringLiteral("write_file")});
+    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_b"), QStringLiteral(R"({"path":"file_b.txt","content":"data B"})")});
+    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_b")});
+    r1.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r1);
+
+    // 恢复后的第 2 轮回答
+    QList<domain::llm::ChatEvent> r2;
+    r2.append(domain::llm::EventStarted{});
+    r2.append(domain::llm::EventTextDelta{QStringLiteral("全部写入完成")});
+    r2.append(domain::llm::EventFinished{});
+    mockGateway.enqueueResponse(r2);
+
+    auto workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
+    auto builtinProvider = std::make_shared<agent::tool::BuiltinToolProvider>(workspaceFs);
+    agent::tool::ToolRegistry toolRegistry;
+    toolRegistry.registerProvider(builtinProvider);
+
+    data::repository::SqliteAgentCheckpointRepository cpRepo;
+
+    agent::runtime::AgentRunContext context;
+    context.sessionId = QStringLiteral("sess_crash_rec_test");
+    context.workspaceRoot = m_tempDir.path();
+    context.policy.autoApproveWriteWorkspace = true;
+    context.policy.allowParallelToolExecution = false; // 串行执行便于拦截中途状态
+
+    // 实例 1：执行第一个工具后立即模拟崩溃销毁
+    {
+        auto* runtime1 = new agent::runtime::AgentRuntime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+        QEventLoop loop1;
+        int toolResultsReceived = 0;
+        connect(runtime1, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+            ++toolResultsReceived;
+            if (res.toolCallId == QStringLiteral("call_a")) {
+                // 第一个工具一执行完，立刻模拟崩溃销毁 runtime1
+                runtime1->deleteLater();
+                loop1.quit();
+            }
+        });
+
+        runtime1->startRun(context, QStringLiteral("写两个文件"));
+        QTimer::singleShot(2000, &loop1, &QEventLoop::quit);
+        loop1.exec();
+
+        QCOMPARE(toolResultsReceived, 1);
+    }
+
+    // 校验：此时 Checkpoint 已经即刻持久化了 call_a 的执行结果！
+    auto cpOpt = cpRepo.getLatestCheckpoint(QStringLiteral("sess_crash_rec_test"));
+    QVERIFY(cpOpt.has_value());
+    QCOMPARE(cpOpt->pendingToolCalls.size(), 2);
+    QCOMPARE(cpOpt->pendingToolResults.size(), 1);
+    QCOMPARE(cpOpt->pendingToolResults.first().toolCallId, QStringLiteral("call_a"));
+
+    // 实例 2：模拟应用重启恢复
+    {
+        agent::runtime::AgentRuntime runtime2(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+        bool completed = false;
+        QList<QString> executedToolIds;
+        QEventLoop loop2;
+
+        connect(&runtime2, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+            executedToolIds.append(res.toolCallId);
+        });
+        connect(&runtime2, &agent::runtime::AgentRuntime::runCompleted, [&]() {
+            completed = true;
+            loop2.quit();
+        });
+
+        runtime2.resumeRun(context);
+        QTimer::singleShot(3000, &loop2, &QEventLoop::quit);
+        loop2.exec();
+
+        QVERIFY2(completed, "Runtime2 should complete execution after resuming");
+        // 恢复后只重新执行未完成的 call_b，已经完成并持久化的 call_a 绝对不重复执行！
+        QCOMPARE(executedToolIds.size(), 1);
+        QCOMPARE(executedToolIds.first(), QStringLiteral("call_b"));
+    }
+
+    // 最终两个文件都成功落盘
+    QVERIFY(QFile::exists(QDir(m_tempDir.path()).filePath(QStringLiteral("file_a.txt"))));
+    QVERIFY(QFile::exists(QDir(m_tempDir.path()).filePath(QStringLiteral("file_b.txt"))));
 }
 
 QTEST_GUILESS_MAIN(WorkIntegrationTests)

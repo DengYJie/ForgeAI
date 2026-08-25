@@ -432,6 +432,7 @@ namespace agent::runtime {
             m_state.results = m_pendingToolResults;
             emit toolResultReady(m_context.sessionId, result);
             emit stateChanged(m_state);
+            saveCheckpoint();
 
             if (m_pendingPermissions.isEmpty() && m_activeOperations.empty() && m_pendingBatches.isEmpty()) {
                 finishToolExecutionRound();
@@ -509,6 +510,7 @@ namespace agent::runtime {
                 m_pendingToolResults.append(result);
                 m_state.results = m_pendingToolResults;
                 emit toolResultReady(m_context.sessionId, result);
+                saveCheckpoint();
             } else if (decision == domain::agent::PermissionDecision::AskUser) {
                 m_pendingPermissions[call.id] = {call, requiredPerm};
                 hasPendingPermission = true;
@@ -528,6 +530,9 @@ namespace agent::runtime {
             finishToolExecutionRound();
             return;
         }
+
+        setState(domain::agent::AgentRunStatus::ExecutingTool);
+        saveCheckpoint();
 
         m_pendingBatches = ToolExecutionScheduler::scheduleBatches(
             executableCalls,
@@ -597,6 +602,7 @@ namespace agent::runtime {
         m_state.results = m_pendingToolResults;
         emit toolResultReady(m_context.sessionId, result);
         emit stateChanged(m_state);
+        saveCheckpoint();
 
         for (auto it = m_activeOperations.begin(); it != m_activeOperations.end(); ++it) {
             if ((*it) && (*it)->operationId() == toolCallId) {
