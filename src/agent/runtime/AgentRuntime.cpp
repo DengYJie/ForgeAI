@@ -387,11 +387,13 @@ namespace agent::runtime {
         application::ports::ToolExecutionContext execContext{
             m_context.workspaceRoot,
             m_context.sessionId,
-            m_context.projectId
+            m_context.projectId,
+            m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000
         };
 
         bool hasPendingPermission = false;
-        QList<domain::agent::ToolCall> allowedCalls;
+        QList<domain::agent::ToolCall> parallelCalls;
+        QList<domain::agent::ToolCall> serialCalls;
 
         for (const auto& call : m_activeToolCalls) {
             // 如果该工具调用已存在执行结果，跳过避免重复执行
@@ -419,10 +421,12 @@ namespace agent::runtime {
 
             domain::agent::ToolPermission requiredPerm;
             domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
+            bool isToolThreadSafe = true;
 
             if (m_toolRegistry) {
                 auto tool = m_toolRegistry->findTool(call.name);
                 if (tool) {
+                    isToolThreadSafe = tool->isThreadSafe();
                     for (const auto& perm : tool->permissions()) {
                         auto d = m_context.policy.evaluatePermission(perm.type);
                         if (d == domain::agent::PermissionDecision::Deny) {
@@ -451,40 +455,58 @@ namespace agent::runtime {
                 hasPendingPermission = true;
                 emit permissionRequested(m_context.sessionId, call, requiredPerm);
             } else {
-                allowedCalls.append(call);
+                if (m_context.policy.allowParallelToolExecution && isToolThreadSafe) {
+                    parallelCalls.append(call);
+                } else {
+                    serialCalls.append(call);
+                }
             }
         }
 
-        if (!allowedCalls.isEmpty()) {
-            if (m_context.policy.allowParallelToolExecution && allowedCalls.size() > 1) {
-                std::vector<std::future<domain::agent::ToolResult>> futures;
-                for (const auto& call : allowedCalls) {
-                    futures.push_back(std::async(std::launch::async, [this, call, execContext]() {
-                        if (m_toolRegistry) {
-                            return m_toolRegistry->execute(call, execContext);
-                        }
-                        return domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
-                    }));
-                }
-                for (auto& fut : futures) {
+        // 2. 并发执行线程安全的工具（如纯文件 IO/计算）
+        if (parallelCalls.size() > 1) {
+            const int timeoutMs = execContext.timeoutMs;
+            std::vector<std::pair<domain::agent::ToolCall, std::future<domain::agent::ToolResult>>> futures;
+            for (const auto& call : parallelCalls) {
+                futures.emplace_back(call, std::async(std::launch::async, [this, call, execContext]() {
+                    if (m_toolRegistry) {
+                        return m_toolRegistry->execute(call, execContext);
+                    }
+                    return domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+                }));
+            }
+            for (auto& [call, fut] : futures) {
+                if (fut.wait_for(std::chrono::milliseconds(timeoutMs)) == std::future_status::ready) {
                     auto result = fut.get();
                     m_pendingToolResults.append(result);
                     m_state.results = m_pendingToolResults;
                     emit toolResultReady(m_context.sessionId, result);
-                }
-            } else {
-                for (const auto& call : allowedCalls) {
-                    domain::agent::ToolResult result;
-                    if (m_toolRegistry) {
-                        result = m_toolRegistry->execute(call, execContext);
-                    } else {
-                        result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
-                    }
+                } else {
+                    domain::agent::ToolResult result{
+                        call.id,
+                        QStringLiteral("工具执行超时（%1 ms）").arg(timeoutMs),
+                        true
+                    };
                     m_pendingToolResults.append(result);
                     m_state.results = m_pendingToolResults;
                     emit toolResultReady(m_context.sessionId, result);
                 }
             }
+        } else if (parallelCalls.size() == 1) {
+            serialCalls.append(parallelCalls.first());
+        }
+
+        // 3. 在主线程顺序执行需保证 QObject 亲和性的工具（如 MCP / UI 交互）
+        for (const auto& call : serialCalls) {
+            domain::agent::ToolResult result;
+            if (m_toolRegistry) {
+                result = m_toolRegistry->execute(call, execContext);
+            } else {
+                result = domain::agent::ToolResult{call.id, QStringLiteral("ToolRegistry 未就绪"), true};
+            }
+            m_pendingToolResults.append(result);
+            m_state.results = m_pendingToolResults;
+            emit toolResultReady(m_context.sessionId, result);
         }
 
         if (hasPendingPermission) {
