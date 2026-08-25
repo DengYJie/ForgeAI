@@ -2,6 +2,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QThread>
 
 #include "llm/protocol/anthropic/AnthropicProtocolAdapter.h"
 #include "llm/protocol/anthropic/AnthropicStreamParser.h"

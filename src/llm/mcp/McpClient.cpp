@@ -27,7 +27,19 @@ namespace llm::mcp {
         }
     }
 
-    QJsonObject McpClient::sendRequestSync(const QString& method, const QJsonObject& params, int timeoutMs) {
+    QJsonObject McpClient::sendRequestSync(
+        const QString& method,
+        const QJsonObject& params,
+        int timeoutMs,
+        application::ports::CancellationToken cancellationToken
+    ) {
+        if (cancellationToken.isCanceled()) {
+            return QJsonObject{{QStringLiteral("error"), QJsonObject{
+                {QStringLiteral("code"), -32000},
+                {QStringLiteral("message"), QStringLiteral("操作已在调用前取消")}
+            }}};
+        }
+
         if (!m_transport || !m_transport->isConnected()) {
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
                 {QStringLiteral("code"), -32000},
@@ -53,6 +65,14 @@ namespace llm::mcp {
         connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
         timer.start(timeoutMs);
 
+        QTimer pollTimer;
+        connect(&pollTimer, &QTimer::timeout, [&loop, cancellationToken]() {
+            if (cancellationToken.isCanceled()) {
+                loop.quit();
+            }
+        });
+        pollTimer.start(20);
+
         if (!m_transport->sendJson(req)) {
             m_activeLoops.remove(requestId);
             return QJsonObject{{QStringLiteral("error"), QJsonObject{
@@ -63,6 +83,13 @@ namespace llm::mcp {
 
         loop.exec();
         m_activeLoops.remove(requestId);
+
+        if (cancellationToken.isCanceled()) {
+            return QJsonObject{{QStringLiteral("error"), QJsonObject{
+                {QStringLiteral("code"), -32000},
+                {QStringLiteral("message"), QStringLiteral("MCP 请求已取消")}
+            }}};
+        }
 
         if (m_pendingResponses.contains(requestId)) {
             return m_pendingResponses.take(requestId);
@@ -135,12 +162,13 @@ namespace llm::mcp {
         const QString& toolCallId,
         const QString& name,
         const QString& argumentsJson,
-        int timeoutMs
+        int timeoutMs,
+        application::ports::CancellationToken cancellationToken
     ) {
         if (thread() && QThread::currentThread() != thread()) {
             domain::agent::ToolResult crossThreadRes{toolCallId, QStringLiteral("跨线程调用失败"), true};
-            QMetaObject::invokeMethod(this, [this, toolCallId, name, argumentsJson, timeoutMs, &crossThreadRes]() {
-                crossThreadRes = this->callTool(toolCallId, name, argumentsJson, timeoutMs);
+            QMetaObject::invokeMethod(this, [this, toolCallId, name, argumentsJson, timeoutMs, cancellationToken, &crossThreadRes]() {
+                crossThreadRes = this->callTool(toolCallId, name, argumentsJson, timeoutMs, cancellationToken);
             }, Qt::BlockingQueuedConnection);
             return crossThreadRes;
         }
@@ -153,7 +181,7 @@ namespace llm::mcp {
             {QStringLiteral("arguments"), argsObj}
         };
 
-        const auto resp = sendRequestSync(QStringLiteral("tools/call"), params, timeoutMs);
+        const auto resp = sendRequestSync(QStringLiteral("tools/call"), params, timeoutMs, cancellationToken);
         if (resp.contains(QStringLiteral("error"))) {
             const auto errObj = resp.value(QStringLiteral("error")).toObject();
             result.content = errObj.value(QStringLiteral("message")).toString(QStringLiteral("MCP 工具调用错误"));

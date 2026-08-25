@@ -39,9 +39,9 @@ namespace llm::mcp {
             };
         }
 
-        // 统一转发给底层客户端时使用 MCP 服务的原始工具名，并透传超时控制
+        // 统一转发给底层客户端时使用 MCP 服务的原始工具名，并在主线程事件循环中完成超时与取消
         const int timeoutMs = context.timeoutMs > 0 ? context.timeoutMs : 30000;
-        return m_session->client()->callTool(call.id, m_originalToolName, call.arguments, timeoutMs);
+        return m_session->client()->callTool(call.id, m_originalToolName, call.arguments, timeoutMs, context.cancellationToken);
     }
 
 } // namespace llm::mcp

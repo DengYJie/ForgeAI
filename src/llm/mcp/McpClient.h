@@ -10,6 +10,7 @@
 #include "IMcpTransport.h"
 #include "domain/agent/ToolDefinition.h"
 #include "domain/agent/ToolExecution.h"
+#include "application/ports/ITool.h"
 
 namespace llm::mcp {
 
@@ -33,19 +34,25 @@ namespace llm::mcp {
         QList<domain::agent::ToolDefinition> listTools(int timeoutMs = 5000);
 
         /**
-         * @brief 调用指定 MCP 工具并获取执行结果
+         * @brief 调用指定 MCP 工具并获取执行结果（在主线程事件循环中非阻塞限时与取消）
          */
         domain::agent::ToolResult callTool(
             const QString& toolCallId,
             const QString& name,
             const QString& argumentsJson,
-            int timeoutMs = 30000
+            int timeoutMs = 30000,
+            application::ports::CancellationToken cancellationToken = {}
         );
 
         /**
          * @brief 发送通用 JSON-RPC 请求并同步等待回复
          */
-        QJsonObject sendRequestSync(const QString& method, const QJsonObject& params, int timeoutMs = 5000);
+        QJsonObject sendRequestSync(
+            const QString& method,
+            const QJsonObject& params,
+            int timeoutMs = 5000,
+            application::ports::CancellationToken cancellationToken = {}
+        );
 
         /**
          * @brief 发送通知（无需对端回复）
