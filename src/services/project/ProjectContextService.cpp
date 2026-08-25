@@ -22,7 +22,7 @@ domain::project::ProjectContext ProjectContextService::load(const QString& rootP
     context.agentsInstructions = readText(root.filePath(QStringLiteral("AGENTS.md")));
 
     agent::skill::SkillLoader skillLoader;
-    context.skills = skillLoader.scanDirectory(context.rootPath, true);
+    context.skills = skillLoader.scanDirectory(context.rootPath, false);
 
     const QString mcpJson = root.filePath(QStringLiteral(".mcp.json"));
     const QString mcpJsonc = root.filePath(QStringLiteral("mcp.json"));
