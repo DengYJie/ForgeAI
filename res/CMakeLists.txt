@@ -1,9 +1,9 @@
 set(API_JSON_TARGET "${CMAKE_CURRENT_SOURCE_DIR}/config/api.json")
 set(MODELS_JSON_TARGET "${CMAKE_CURRENT_SOURCE_DIR}/config/models.json")
 
-# Refreshing external model metadata is a deliberate operation, never an
-# implicit side effect of configure.  Run:
-#   cmake --build --preset debug --target update-model-catalog
+# Automatically synchronize models.dev metadata on every CMake configuration
+include("${CMAKE_CURRENT_SOURCE_DIR}/UpdateModelCatalog.cmake")
+
 add_custom_target(update-model-catalog
     COMMAND "${CMAKE_COMMAND}"
         -DAPI_JSON_TARGET="${API_JSON_TARGET}"
