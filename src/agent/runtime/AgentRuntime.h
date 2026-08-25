@@ -1,0 +1,65 @@
+#pragma once
+
+#include "application/ports/IAgentRuntime.h"
+#include "application/ports/IChatModelGateway.h"
+#include "domain/service/IConversationService.h"
+#include "domain/repository/IAgentCheckpointRepository.h"
+#include "agent/tool/ToolRegistry.h"
+#include <QMap>
+#include <QHash>
+
+namespace agent::runtime {
+
+    /**
+     * @brief Agent 核心运行时引擎
+     * @details 负责 Agent 多轮工具循环、ToolCall-Result 累加调度、状态机转换与持久化。
+     */
+    class AgentRuntime final : public application::ports::IAgentRuntime {
+        Q_OBJECT
+    public:
+        explicit AgentRuntime(
+            application::ports::IChatModelGateway* chatGateway,
+            domain::service::IConversationService* conversationService,
+            agent::tool::ToolRegistry* toolRegistry,
+            domain::repository::IAgentCheckpointRepository* checkpointRepo = nullptr,
+            QObject* parent = nullptr
+        );
+        ~AgentRuntime() override;
+
+        void startRun(const AgentRunContext& context, const QString& prompt) override;
+        void cancelRun() override;
+        void suspendRun() override;
+        void resumeRun(const AgentRunContext& context) override;
+
+        bool isRunning() const override;
+        domain::agent::AgentRunState currentState() const override;
+
+    private Q_SLOTS:
+        void onChatEventReceived(const domain::llm::ChatEvent& event);
+
+    private:
+        void setState(domain::agent::AgentRunStatus status, const QString& errorMessage = {});
+        void startNextModelRequest();
+        domain::llm::ChatRequest buildChatRequest(const QList<domain::conversation::Message>& history) const;
+        domain::conversation::Message makeAssistantMessage() const;
+        void saveMessage(const domain::conversation::Message& message);
+        void cleanupCurrentOp();
+        void saveCheckpoint();
+
+        application::ports::IChatModelGateway* m_chatGateway = nullptr;
+        domain::service::IConversationService* m_conversationService = nullptr;
+        agent::tool::ToolRegistry* m_toolRegistry = nullptr;
+        domain::repository::IAgentCheckpointRepository* m_checkpointRepo = nullptr;
+
+        AgentRunContext m_context;
+        domain::agent::AgentRunState m_state;
+        application::ports::IChatOperation* m_currentOp = nullptr;
+
+        QString m_replyBuffer;
+        QString m_thoughtBuffer;
+        QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
+        QList<domain::agent::ToolResult> m_pendingToolResults;
+        QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
+    };
+
+} // namespace agent::runtime

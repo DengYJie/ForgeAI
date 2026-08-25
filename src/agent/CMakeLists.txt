@@ -1,0 +1,23 @@
+target_sources(ForgeAICore PRIVATE
+    runtime/AgentRunContext.h
+    runtime/AgentRuntime.h
+    runtime/AgentRuntime.cpp
+    runtime/AgentContextBuilder.h
+    runtime/AgentContextBuilder.cpp
+    skill/SkillLoader.h
+    skill/SkillLoader.cpp
+    skill/SkillRegistry.h
+    skill/SkillRegistry.cpp
+    tool/ToolRegistry.h
+    tool/ToolRegistry.cpp
+    tool/BuiltinToolProvider.h
+    tool/BuiltinToolProvider.cpp
+    tool/builtin/ReadFileTool.h
+    tool/builtin/ReadFileTool.cpp
+    tool/builtin/WriteFileTool.h
+    tool/builtin/WriteFileTool.cpp
+    tool/builtin/ListFilesTool.h
+    tool/builtin/ListFilesTool.cpp
+    tool/builtin/SearchTextTool.h
+    tool/builtin/SearchTextTool.cpp
+)

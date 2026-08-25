@@ -7,6 +7,4 @@ target_sources(ForgeAICore PRIVATE
     settings/SettingsService.cpp
     project/ProjectContextService.h
     project/ProjectContextService.cpp
-    agent/AgentToolService.h
-    agent/AgentToolService.cpp
 )
