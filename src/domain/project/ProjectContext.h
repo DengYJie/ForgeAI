@@ -1,20 +1,22 @@
 #pragma once
+
 #include <QString>
 #include <QList>
+#include "domain/agent/Skill.h"
 
 namespace domain::project {
-struct ProjectSkill {
-    QString name;
-    QString path;
-    QString instructions;
-    bool operator==(const ProjectSkill&) const = default;
-};
-struct ProjectContext {
-    QString rootPath;
-    QString agentsInstructions;
-    QList<ProjectSkill> skills;
-    QString mcpConfigPath;
-    QString mcpConfigContent;
-    bool operator==(const ProjectContext&) const = default;
-};
+
+    /**
+     * @brief 项目上下文结构
+     */
+    struct ProjectContext {
+        QString rootPath;
+        QString agentsInstructions;
+        QList<domain::agent::Skill> skills;
+        QString mcpConfigPath;
+        QString mcpConfigContent;
+
+        bool operator==(const ProjectContext &other) const = default;
+    };
+
 } // namespace domain::project

@@ -4,9 +4,13 @@ target_sources(ForgeAICore PRIVATE
     conversation/MessageBlock.h
     conversation/Message.h
     agent/Agent.h
+    agent/Skill.h
     agent/ToolDefinition.h
+    agent/ToolPermission.h
     agent/ToolExecution.h
-    service/IAgentToolService.h
+    agent/AgentRunState.h
+    agent/AgentPolicy.h
+    agent/AgentCheckpoint.h
     agent/RuntimeCheckpoint.h
     project/Project.h
     project/ProjectContext.h
@@ -25,6 +29,8 @@ target_sources(ForgeAICore PRIVATE
     repository/IMessageTranscriptRepository.h
     repository/IProjectRepository.h
     repository/IModelRepository.h
+    repository/IAgentRepository.h
+    repository/IAgentCheckpointRepository.h
     service/IConversationService.h
     service/IProjectContextService.h
     service/IModelService.h
