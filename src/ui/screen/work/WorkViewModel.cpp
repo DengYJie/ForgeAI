@@ -338,17 +338,15 @@ void WorkViewModel::toggleProjectPinned(const QUuid& projectId) {
 
 void WorkViewModel::archiveProjectSessions(const QUuid& projectId) {
     updateState([this, projectId](WorkState& state) {
-        for (auto& s : state.sessions) {
-            if (s.projectId == projectId) {
-                s.isArchived = true;
-                if (m_conversationRepository) {
-                    auto conv = m_conversationRepository->getConversation(QUuid(s.id));
-                    if (conv) {
-                        auto updated = *conv;
-                        updated.isArchived = true;
-                        m_conversationRepository->saveConversation(updated);
-                    }
-                }
+        QList<QString> sessionsToArchive;
+        for (const auto& s : state.sessions) {
+            if (s.projectId == projectId && !s.isArchived) {
+                sessionsToArchive.append(s.id);
+            }
+        }
+        for (const auto& id : sessionsToArchive) {
+            if (m_conversationService) {
+                m_conversationService->setSessionArchived(state.sessions, id, true);
             }
         }
         if (state.currentProjectId == projectId && !state.currentSessionId.isEmpty()) {
@@ -416,9 +414,18 @@ void WorkViewModel::setSessionArchived(const QString& sessionId, bool archived) 
             m_conversationService->setSessionArchived(state.sessions, sessionId, archived);
         }
         if (archived && state.currentSessionId == sessionId) {
-            const auto it = std::find_if(state.sessions.cbegin(), state.sessions.cend(), [](const auto& item) { return !item.isArchived; });
-            if (it != state.sessions.cend()) { const QString next = it->id; QTimer::singleShot(0, this, [this, next] { loadSession(next); }); }
-            else QTimer::singleShot(0, this, &WorkViewModel::newSession);
+            cancelTask();
+            m_agentSessionId.clear();
+            const auto projId = state.currentProjectId;
+            const auto it = std::find_if(state.sessions.cbegin(), state.sessions.cend(), [projId](const auto& item) { 
+                return !item.isArchived && item.projectId == projId; 
+            });
+            if (it != state.sessions.cend()) { 
+                const QString next = it->id; 
+                QTimer::singleShot(0, this, [this, next] { loadSession(next); }); 
+            } else {
+                QTimer::singleShot(0, this, &WorkViewModel::newSession);
+            }
         }
     });
 }

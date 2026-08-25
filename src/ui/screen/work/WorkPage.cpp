@@ -277,16 +277,20 @@ namespace ui::screen::work {
             }
             
             const bool isExpanded = m_expandedProjects.contains(projectData.id);
-            int totalSessions = 0;
+            QList<ui::screen::chat::ChatSessionItemData> projectSessions;
             for (const auto& session : state.sessions) {
-                if (session.isArchived || session.projectId != projectData.id) continue;
-                totalSessions++;
+                if (!session.isArchived && session.projectId == projectData.id) {
+                    projectSessions.append(session);
+                }
             }
+            std::stable_sort(projectSessions.begin(), projectSessions.end(), [](const auto& a, const auto& b) {
+                if (a.isPinned != b.isPinned) return a.isPinned;
+                return a.timestamp > b.timestamp;
+            });
             
+            const int totalSessions = projectSessions.size();
             int count = 0;
-            for (const auto& session : state.sessions) {
-                if (session.isArchived || session.projectId != projectData.id) continue;
-                
+            for (const auto& session : projectSessions) {
                 if (!isExpanded && count >= 5 && totalSessions > 5) {
                     auto* showMore = new QStandardItem(tr("展开显示"));
                     showMore->setData(projectData.id, Qt::UserRole + 2);

@@ -341,6 +341,9 @@ namespace ui::screen::chat {
             if (m_useCases.setSessionArchived)
                 m_useCases.setSessionArchived->execute(s.sessions, sessionId, archived);
             if (archived && s.currentSessionId == sessionId) {
+                if (s.isGenerating) {
+                    QTimer::singleShot(0, this, &ChatViewModel::stopGeneration);
+                }
                 const auto next = std::find_if(s.sessions.cbegin(), s.sessions.cend(),
                     [](const ChatSessionItemData& item) { return !item.isArchived; });
                 if (next != s.sessions.cend()) {
