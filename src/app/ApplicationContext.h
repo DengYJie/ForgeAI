@@ -10,6 +10,7 @@
 #include "data/repository/SqliteAgentRepository.h"
 #include "data/repository/SqliteAgentCheckpointRepository.h"
 #include "llm/mcp/McpManager.h"
+#include "llm/mcp/McpProjectRuntimeCoordinator.h"
 #include "core/model/ModelRegistry.h"
 #include "core/settings/SettingsRegistry.h"
 #include "core/settings/providers/AppearanceSettingsProvider.h"
@@ -140,6 +141,7 @@ namespace app {
         std::unique_ptr<application::usecase::agent::RunAgentUseCase> m_runAgentUseCase;
         std::unique_ptr<application::usecase::agent::CancelAgentRunUseCase> m_cancelAgentRunUseCase;
         std::unique_ptr<application::usecase::agent::ResumeAgentRunUseCase> m_resumeAgentRunUseCase;
+        std::unique_ptr<llm::mcp::McpProjectRuntimeCoordinator> m_mcpProjectRuntimeCoordinator;
         std::unique_ptr<application::usecase::work::SwitchProjectUseCase> m_switchProjectUseCase;
 
         // 对话业务用例

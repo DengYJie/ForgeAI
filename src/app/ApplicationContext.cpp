@@ -115,8 +115,11 @@ namespace app {
         m_resumeAgentRunUseCase = std::make_unique<application::usecase::agent::ResumeAgentRunUseCase>(
             m_agentRuntime.get()
         );
+        m_mcpProjectRuntimeCoordinator = std::make_unique<llm::mcp::McpProjectRuntimeCoordinator>(
+            m_mcpManager.get()
+        );
         m_switchProjectUseCase = std::make_unique<application::usecase::work::SwitchProjectUseCase>(
-            m_mcpManager.get(),
+            m_mcpProjectRuntimeCoordinator.get(),
             m_projectContextService.get()
         );
 

@@ -1,20 +1,18 @@
 #include "SwitchProjectUseCase.h"
-#include "llm/mcp/McpManager.h"
 #include "domain/service/IProjectContextService.h"
-#include <QDir>
 
 namespace application::usecase::work {
 
     SwitchProjectUseCase::SwitchProjectUseCase(
-        llm::mcp::McpManager* mcpManager,
+        application::ports::IProjectRuntimeCoordinator* runtimeCoordinator,
         domain::service::IProjectContextService* projectContextService
-    ) : m_mcpManager(mcpManager),
+    ) : m_runtimeCoordinator(runtimeCoordinator),
         m_projectContextService(projectContextService) {
     }
 
     void SwitchProjectUseCase::stopProjectRuntime(const QString& projectRoot) const {
-        if (!projectRoot.isEmpty() && m_mcpManager) {
-            m_mcpManager->stopServersForProject(projectRoot);
+        if (!projectRoot.isEmpty() && m_runtimeCoordinator) {
+            m_runtimeCoordinator->unloadProject(projectRoot);
         }
     }
 
@@ -22,11 +20,8 @@ namespace application::usecase::work {
         const QString& previousProjectRoot,
         const QString& newProjectRoot
     ) const {
-        const QString canonicalNew = QDir(newProjectRoot).canonicalPath();
-        const QString canonicalPrev = QDir(previousProjectRoot).canonicalPath();
-
-        if (!canonicalPrev.isEmpty() && canonicalPrev != canonicalNew) {
-            stopProjectRuntime(previousProjectRoot);
+        if (m_runtimeCoordinator) {
+            m_runtimeCoordinator->switchProject(previousProjectRoot, newProjectRoot);
         }
 
         if (m_projectContextService && !newProjectRoot.isEmpty()) {

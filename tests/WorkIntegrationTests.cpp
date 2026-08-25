@@ -26,6 +26,7 @@
 #include "application/ports/IChatModelGateway.h"
 #include "application/usecase/agent/RunAgentUseCase.h"
 #include "application/usecase/work/SwitchProjectUseCase.h"
+#include "llm/mcp/McpProjectRuntimeCoordinator.h"
 #include "llm/mcp/McpManager.h"
 
 // 模拟 ChatOperation
@@ -828,9 +829,10 @@ void WorkIntegrationTests::testWorkViewModelMcpProjectSwitchUnload() {
     mcpManager.registerServer(cfg);
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) != nullptr);
 
-    // 通过 SwitchProjectUseCase 和 WorkViewModel 触发项目切换
+    // 通过 McpProjectRuntimeCoordinator + SwitchProjectUseCase + WorkViewModel 触发项目切换
+    llm::mcp::McpProjectRuntimeCoordinator coordinator(&mcpManager);
     services::project::ProjectContextService projectCtxService;
-    application::usecase::work::SwitchProjectUseCase switchUseCase(&mcpManager, &projectCtxService);
+    application::usecase::work::SwitchProjectUseCase switchUseCase(&coordinator, &projectCtxService);
 
     application::usecase::work::WorkUseCases useCases;
     useCases.switchProject = &switchUseCase;

@@ -65,4 +65,6 @@ target_sources(ForgeAICore PRIVATE
     mcp/McpPromptProvider.cpp
     mcp/McpManager.h
     mcp/McpManager.cpp
+    mcp/McpProjectRuntimeCoordinator.h
+    mcp/McpProjectRuntimeCoordinator.cpp
 )

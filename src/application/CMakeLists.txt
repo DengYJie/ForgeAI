@@ -4,6 +4,7 @@ target_sources(ForgeAICore PRIVATE
     ports/ITool.h
     ports/IToolProvider.h
     ports/IAgentRuntime.h
+    ports/IProjectRuntimeCoordinator.h
     usecase/chat/ChatUseCases.h
     usecase/chat/SendMessageUseCase.h
     usecase/chat/SendMessageUseCase.cpp
