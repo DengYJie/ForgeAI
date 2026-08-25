@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ui/base/BasePage.h"
+#include <QSet>
+#include <QUuid>
 
 class QVBoxLayout;
 
@@ -19,6 +21,7 @@ namespace ui::widget::message { class MessageListView; }
 namespace ui::screen::work {
     class WorkViewModel;
     struct WorkState;
+    class ProjectHeader;
 
     /**
      * @brief 工作流主界面 (纯 View)，接收注入的 WorkViewModel
@@ -38,6 +41,7 @@ namespace ui::screen::work {
         void setupUi();
 
         void render(const WorkState &state);
+        void showProjectContextMenu(const QUuid &projectId, const QPoint &globalPos);
 
         WorkViewModel *m_viewModel = nullptr;
         QVBoxLayout *m_rootLayout = nullptr;
@@ -45,9 +49,10 @@ namespace ui::screen::work {
         ui::widget::CollapsibleSplitView *m_splitView = nullptr;
         fluent::collections::TreeView *m_sessionTree = nullptr;
         QStandardItemModel *m_sessionTreeModel = nullptr;
+        QSet<QUuid> m_expandedProjects;
+        QSet<QUuid> m_collapsedProjects;
         fluent::basicinput::Button *m_newConversationButton = nullptr;
-        fluent::basicinput::Button *m_newConversationAddButton = nullptr;
-        fluent::basicinput::Button *m_addProjectButton = nullptr;
+        ProjectHeader *m_treeHeader = nullptr;
         QStyledItemDelegate *m_sessionTreeDelegate = nullptr;
         QWidget *m_workAreaWidget = nullptr;
 

@@ -4,8 +4,15 @@
 #include <QHBoxLayout>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QIconEngine>
 #include <QStandardItemModel>
 #include <FluentQt/TextFields.h>
+#include <FluentQt/Collections.h>
+#include <FluentQt/BasicInput.h>
+#include <FluentQt/DialogsFlyouts.h>
+#include <FluentQt/MenusToolbars.h>
 
 #include "ui/widget/CollapsibleSplitView.h"
 #include "WorkViewModel.h"
@@ -13,65 +20,84 @@
 #include "ui/widget/chat/ChatInputBox.h"
 #include "ui/widget/chat/ChatHeader.h"
 #include "ui/widget/message/MessageListView.h"
-#include <FluentQt/Collections.h>
-#include <FluentQt/BasicInput.h>
-#include <FluentQt/DialogsFlyouts.h>
 
-namespace ui::screen::work {
+#include "LeftAlignedButton.h"
+#include "ProjectHeader.h"
+#include "CreateProjectDialog.h"
+
 namespace {
-class CreateProjectDialog final : public fluent::dialogs_flyouts::ContentDialog {
+class EditProjectDialog final : public ::fluent::dialogs_flyouts::ContentDialog {
 public:
-    explicit CreateProjectDialog(QWidget* parent) : ContentDialog(parent) {
-        setTitle(tr("创建项目"));
-        setPrimaryButtonText(tr("添加项目"));
+    explicit EditProjectDialog(const QString& currentName, QWidget* parent = nullptr)
+        : ContentDialog(parent) {
+        setTitle(tr("编辑项目"));
+        setPrimaryButtonText(tr("保存"));
         setCloseButtonText(tr("取消"));
         setDefaultButton(Primary);
 
         auto* content = new QWidget(this);
         auto* layout = new QVBoxLayout(content);
         layout->setContentsMargins(0, 8, 0, 8);
-        layout->setSpacing(12);
-        auto* description = new fluent::textfields::Label(
-            tr("添加一个本地文件夹作为项目工作区。项目 Agent 只能读取和修改该文件夹中的文件。"), content);
-        description->setWordWrap(true);
-        description->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
-        layout->addWidget(description);
-        auto addLabel = [content, layout](const QString& text) {
-            auto* label = new fluent::textfields::Label(text, content);
-            label->setFluentTypography(Typography::FontRole::Caption);
-            label->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
-            layout->addWidget(label);
-        };
-        addLabel(tr("项目名称（可选）"));
+        layout->setSpacing(8);
+
+        auto* label = new fluent::textfields::Label(tr("项目名称"), content);
+        label->setFluentTypography(Typography::FontRole::Caption);
+        label->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
+        layout->addWidget(label);
+
         m_name = new fluent::textfields::LineEdit(content);
-        m_name->setPlaceholderText(tr("默认使用文件夹名称"));
+        m_name->setText(currentName);
         layout->addWidget(m_name);
-        addLabel(tr("工作区文件夹"));
-        m_path = new fluent::textfields::LineEdit(content);
-        m_path->setReadOnly(true);
-        m_path->setPlaceholderText(tr("选择 Codex 可以读取和编辑的文件夹"));
-        layout->addWidget(m_path);
-        auto* choose = new fluent::basicinput::Button(tr("浏览…"), content);
-        choose->setFluentStyle(fluent::basicinput::Button::Subtle);
-        layout->addWidget(choose, 0, Qt::AlignLeft);
+
         setContent(content);
-        connect(choose, &QPushButton::clicked, this, [this] {
-            const QString path = QFileDialog::getExistingDirectory(this, tr("选择项目文件夹"));
-            if (path.isEmpty()) return;
-            m_path->setText(path);
-            if (m_name->text().isEmpty()) m_name->setText(QFileInfo(path).fileName());
-        });
     }
-    QString name() const { return m_name->text(); } QString path() const { return m_path->text(); }
-protected:
-    void accept() override {
-        if (!m_path->text().trimmed().isEmpty()) ContentDialog::accept();
-    }
+
+    QString name() const { return m_name->text().trimmed(); }
+
 private:
     fluent::textfields::LineEdit* m_name = nullptr;
-    fluent::textfields::LineEdit* m_path = nullptr;
 };
+
+class FluentGlyphIconEngine : public QIconEngine, public fluent::FluentElement {
+public:
+    FluentGlyphIconEngine(const QString& glyph, int pixelSize = 16, const fluent::FluentElement* themeSource = nullptr)
+        : m_glyph(glyph), m_pixelSize(pixelSize), m_themeSource(themeSource) {}
+
+    void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State) override {
+        painter->save();
+        const auto& colors = m_themeSource ? m_themeSource->themeColorsRef() : themeColorsRef();
+        const QColor iconColor = (mode == QIcon::Disabled) ? colors.textDisabled : colors.textPrimary;
+        painter->setPen(iconColor);
+        Typography::Icons::paintGlyph(*painter, rect, m_glyph, m_pixelSize, Qt::AlignCenter);
+        painter->restore();
+    }
+
+    QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override {
+        QPixmap pix(size);
+        pix.fill(Qt::transparent);
+        QPainter p(&pix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setRenderHint(QPainter::TextAntialiasing);
+        paint(&p, QRect(QPoint(0, 0), size), mode, state);
+        return pix;
+    }
+
+    QIconEngine* clone() const override {
+        return new FluentGlyphIconEngine(m_glyph, m_pixelSize, m_themeSource);
+    }
+
+private:
+    QString m_glyph;
+    int m_pixelSize;
+    const fluent::FluentElement* m_themeSource = nullptr;
+};
+
+inline QIcon makeFluentIcon(const QString& glyph, int pixelSize = 16, const fluent::FluentElement* themeSource = nullptr) {
+    return QIcon(new FluentGlyphIconEngine(glyph, pixelSize, themeSource));
 }
+} // namespace
+
+namespace ui::screen::work {
     WorkPage::WorkPage(
         WorkViewModel *viewModel,
         QWidget *parent
@@ -95,53 +121,23 @@ private:
         auto* treeLayout = new QVBoxLayout(treeHost);
         treeLayout->setContentsMargins(8, 10, 8, 10);
         treeLayout->setSpacing(6);
-        auto* newConversationRow = new QWidget(treeHost);
-        auto* newConversationLayout = new QHBoxLayout(newConversationRow);
-        newConversationLayout->setContentsMargins(8, 0, 4, 0);
-        newConversationLayout->setSpacing(6);
-        m_newConversationButton = new fluent::basicinput::Button(newConversationRow);
-        m_newConversationButton->setFluentStyle(fluent::basicinput::Button::Subtle);
-        m_newConversationButton->setFluentLayout(fluent::basicinput::Button::IconOnly);
-        m_newConversationButton->setIconGlyph(Typography::Icons::Edit, 14);
-        m_newConversationButton->setFixedSize(30, 30);
+        m_newConversationButton = new LeftAlignedButton(treeHost);
+        m_newConversationButton->setFluentStyle(::fluent::basicinput::Button::Subtle);
+        m_newConversationButton->setFluentLayout(::fluent::basicinput::Button::IconBefore);
+        m_newConversationButton->setFluentSize(::fluent::basicinput::Button::Small);
+        m_newConversationButton->setIconGlyph(Typography::Icons::Edit, 13);
+        QFont btnFont = themeFont(Typography::FontRole::Body).toQFont();
+        btnFont.setPixelSize(Typography::FontSize::Caption);
+        m_newConversationButton->setFont(btnFont);
+        m_newConversationButton->setText(tr("新对话"));
+        m_newConversationButton->setCursor(Qt::PointingHandCursor);
+        m_newConversationButton->setFixedHeight(32);
         m_newConversationButton->setToolTip(tr("新建对话"));
-        newConversationLayout->addWidget(m_newConversationButton);
-        auto* newConversationLabel = new fluent::textfields::Label(tr("新对话"), newConversationRow);
-        newConversationLayout->addWidget(newConversationLabel);
-        newConversationLayout->addStretch(1);
-        m_newConversationAddButton = new fluent::basicinput::Button(newConversationRow);
-        m_newConversationAddButton->setFluentStyle(fluent::basicinput::Button::Subtle);
-        m_newConversationAddButton->setFluentLayout(fluent::basicinput::Button::IconOnly);
-        m_newConversationAddButton->setIconGlyph(Typography::Icons::Add, 14);
-        m_newConversationAddButton->setFixedSize(30, 30);
-        m_newConversationAddButton->setToolTip(tr("新建对话"));
-        newConversationLayout->addWidget(m_newConversationAddButton);
-        treeLayout->addWidget(newConversationRow);
+        treeLayout->addWidget(m_newConversationButton);
 
-        auto* treeHeader = new QWidget(treeHost);
-        auto* treeHeaderLayout = new QHBoxLayout(treeHeader);
-        treeHeaderLayout->setContentsMargins(8, 0, 4, 0);
-        treeHeaderLayout->setSpacing(4);
-        auto* projectLabel = new fluent::textfields::Label(tr("项目"), treeHeader);
-        projectLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
-        treeHeaderLayout->addWidget(projectLabel);
-        treeHeaderLayout->addStretch(1);
-        auto* moreProjects = new fluent::basicinput::Button(treeHeader);
-        moreProjects->setFluentStyle(fluent::basicinput::Button::Subtle);
-        moreProjects->setFluentLayout(fluent::basicinput::Button::IconOnly);
-        moreProjects->setIconGlyph(Typography::Icons::More, 14);
-        moreProjects->setFixedSize(30, 30);
-        moreProjects->setToolTip(tr("项目操作"));
-        moreProjects->setEnabled(false);
-        treeHeaderLayout->addWidget(moreProjects);
-        m_addProjectButton = new fluent::basicinput::Button(treeHeader);
-        m_addProjectButton->setFluentStyle(fluent::basicinput::Button::Subtle);
-        m_addProjectButton->setFluentLayout(fluent::basicinput::Button::IconOnly);
-        m_addProjectButton->setIconGlyph(Typography::Icons::Add, 14);
-        m_addProjectButton->setFixedSize(30, 30);
-        m_addProjectButton->setToolTip(tr("添加项目"));
-        treeHeaderLayout->addWidget(m_addProjectButton);
-        treeLayout->addWidget(treeHeader);
+        m_treeHeader = new ProjectHeader(treeHost);
+        treeLayout->addWidget(m_treeHeader);
+
         m_sessionTree = new fluent::collections::TreeView(treeHost);
         m_sessionTree->setBackgroundVisible(false);
         m_sessionTree->setBorderVisible(false);
@@ -160,20 +156,38 @@ private:
         m_sessionTree->setModel(m_sessionTreeModel);
         m_sessionTreeDelegate = new ProjectSessionTreeDelegate(m_sessionTree);
         m_sessionTree->setItemDelegate(m_sessionTreeDelegate);
-        treeLayout->addWidget(m_sessionTree);
+        treeLayout->addWidget(m_sessionTree, 1);
+        treeLayout->addStretch(0);
+
+        connect(m_treeHeader, &ProjectHeader::expandToggled, this, [this](bool expanded) {
+            m_sessionTree->setHidden(!expanded);
+        });
+
         if (m_viewModel) {
-            connect(m_addProjectButton, &QPushButton::clicked, this, [this] {
+            connect(m_treeHeader, &ProjectHeader::addProjectClicked, this, [this] {
                 CreateProjectDialog dialog(this);
                 if (dialog.exec() == QDialog::Accepted) m_viewModel->addProject(dialog.path(), dialog.name());
             });
             connect(m_newConversationButton, &QPushButton::clicked, m_viewModel, &WorkViewModel::newSession);
-            connect(m_newConversationAddButton, &QPushButton::clicked, m_viewModel, &WorkViewModel::newSession);
             connect(m_sessionTree, &QTreeView::clicked, this, [this](const QModelIndex& index) {
+                if (index.data(Qt::UserRole + 3).toInt() == ProjectSessionTreeDelegate::ShowMoreItem) {
+                    m_expandedProjects.insert(index.data(Qt::UserRole + 2).toUuid());
+                    if (m_viewModel) render(m_viewModel->state());
+                    return;
+                }
                 const QString sessionId = index.data(Qt::UserRole + 1).toString();
                 if (!sessionId.isEmpty()) { m_viewModel->loadSession(sessionId); return; }
                 const QUuid projectId = index.data(Qt::UserRole + 2).toUuid();
-                if (!projectId.isNull()) m_viewModel->selectProject(projectId);
+                if (!projectId.isNull()) {
+                    bool willExpand = !m_sessionTree->isExpanded(index);
+                    m_sessionTree->setExpanded(index, willExpand);
+                    if (willExpand) m_collapsedProjects.remove(projectId);
+                    else m_collapsedProjects.insert(projectId);
+                    m_viewModel->selectProject(projectId);
+                }
             });
+            connect(static_cast<ProjectSessionTreeDelegate*>(m_sessionTreeDelegate),
+                    &ProjectSessionTreeDelegate::projectMoreRequested, this, &WorkPage::showProjectContextMenu);
             connect(static_cast<ProjectSessionTreeDelegate*>(m_sessionTreeDelegate),
                     &ProjectSessionTreeDelegate::newConversationRequested, this, [this](const QUuid& projectId) {
                         m_viewModel->selectProject(projectId);
@@ -242,24 +256,61 @@ private:
             : (state.currentTask.isEmpty() ? tr("新对话") : state.currentTask));
         const bool canCreateConversation = !state.currentProjectId.isNull();
         m_newConversationButton->setEnabled(canCreateConversation);
-        m_newConversationAddButton->setEnabled(canCreateConversation);
         m_sessionTreeModel->clear();
-        for (const auto& projectData : state.projects) {
+
+        auto sortedProjects = state.projects;
+        std::stable_sort(sortedProjects.begin(), sortedProjects.end(), [&](const auto& a, const auto& b) {
+            bool aPinned = state.pinnedProjects.contains(a.id);
+            bool bPinned = state.pinnedProjects.contains(b.id);
+            if (aPinned != bPinned) return aPinned > bPinned;
+            return false;
+        });
+
+        for (const auto& projectData : sortedProjects) {
             auto* project = new QStandardItem(projectData.name);
             project->setEditable(false);
+            project->setFlags(project->flags() & ~Qt::ItemIsSelectable);
             project->setData(projectData.id, Qt::UserRole + 2);
             project->setData(ProjectSessionTreeDelegate::ProjectItem, Qt::UserRole + 3);
+            if (state.pinnedProjects.contains(projectData.id)) {
+                project->setData(true, Qt::UserRole + 4);
+            }
+            
+            const bool isExpanded = m_expandedProjects.contains(projectData.id);
+            int totalSessions = 0;
             for (const auto& session : state.sessions) {
                 if (session.isArchived || session.projectId != projectData.id) continue;
+                totalSessions++;
+            }
+            
+            int count = 0;
+            for (const auto& session : state.sessions) {
+                if (session.isArchived || session.projectId != projectData.id) continue;
+                
+                if (!isExpanded && count >= 5 && totalSessions > 5) {
+                    auto* showMore = new QStandardItem(tr("展开显示"));
+                    showMore->setData(projectData.id, Qt::UserRole + 2);
+                    showMore->setData(ProjectSessionTreeDelegate::ShowMoreItem, Qt::UserRole + 3);
+                    showMore->setEditable(false);
+                    showMore->setFlags(showMore->flags() & ~Qt::ItemIsSelectable);
+                    project->appendRow(showMore);
+                    break;
+                }
+                
                 auto* leaf = new QStandardItem(session.title);
                 leaf->setData(session.id, Qt::UserRole + 1);
                 leaf->setData(ProjectSessionTreeDelegate::ConversationItem, Qt::UserRole + 3);
                 leaf->setData(session.isPinned, Qt::UserRole + 4);
+                const bool isProcessing = (state.isProcessing && session.id == state.currentSessionId);
+                leaf->setData(isProcessing, Qt::UserRole + 5);
                 leaf->setEditable(false);
                 project->appendRow(leaf);
+                count++;
             }
             m_sessionTreeModel->appendRow(project);
-            m_sessionTree->expand(project->index());
+            if (!m_collapsedProjects.contains(projectData.id)) {
+                m_sessionTree->expand(project->index());
+            }
         }
         if (!state.currentSessionId.isEmpty()) {
             const auto matches = m_sessionTreeModel->match(
@@ -275,5 +326,63 @@ private:
         m_messageList->syncMessages(state.messages);
         m_agentInput->setEnabled(!state.currentSessionId.isEmpty());
         m_agentInput->setSendState(state.isProcessing ? ui::widget::chat::ChatInputBox::SendState::Generating : ui::widget::chat::ChatInputBox::SendState::Idle);
+    }
+
+    void WorkPage::showProjectContextMenu(const QUuid &projectId, const QPoint &globalPos) {
+        if (!m_viewModel) return;
+        const auto state = m_viewModel->state();
+        auto it = std::find_if(state.projects.cbegin(), state.projects.cend(),
+                               [&](const auto& p) { return p.id == projectId; });
+        if (it == state.projects.cend()) return;
+        const auto project = *it;
+        const bool isPinned = state.pinnedProjects.contains(projectId);
+
+        auto* menu = new fluent::menus_toolbars::FluentMenu(QString(), this);
+        menu->setMinimumWidth(180);
+
+        // 1. 置顶 / 取消置顶
+        QAction* pinAction = menu->addAction(
+            makeFluentIcon(isPinned ? Typography::Icons::PinFill : Typography::Icons::Pin, 16, menu),
+            isPinned ? tr("取消置顶") : tr("置顶")
+        );
+        connect(pinAction, &QAction::triggered, this, [this, projectId] {
+            m_viewModel->toggleProjectPinned(projectId);
+        });
+
+        // 2. 编辑
+        QAction* editAction = menu->addAction(makeFluentIcon(Typography::Icons::Edit, 16, menu), tr("编辑"));
+        connect(editAction, &QAction::triggered, this, [this, project] {
+            EditProjectDialog dialog(project.name, this);
+            if (dialog.exec() == QDialog::Accepted && !dialog.name().isEmpty()) {
+                m_viewModel->renameProject(project.id, dialog.name());
+            }
+        });
+
+        menu->addSeparator();
+
+        // 3. 在资源管理器中打开
+        QAction* openExplorerAction = menu->addAction(makeFluentIcon(Typography::Icons::Folder, 16, menu), tr("在资源管理器中打开"));
+        connect(openExplorerAction, &QAction::triggered, this, [project] {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(project.rootPath));
+        });
+
+        menu->addSeparator();
+
+        // 4. 归档聊天
+        QAction* archiveAction = menu->addAction(makeFluentIcon(QString(QChar(0xE7B8)), 16, menu), tr("归档聊天"));
+        connect(archiveAction, &QAction::triggered, this, [this, projectId] {
+            m_viewModel->archiveProjectSessions(projectId);
+        });
+
+        menu->addSeparator();
+
+        // 5. 移除项目
+        QAction* removeAction = menu->addAction(makeFluentIcon(Typography::Icons::Dismiss, 16, menu), tr("移除项目"));
+        connect(removeAction, &QAction::triggered, this, [this, projectId] {
+            m_viewModel->removeProject(projectId);
+        });
+
+        menu->exec(globalPos);
+        menu->deleteLater();
     }
 } // namespace ui::screen::work
