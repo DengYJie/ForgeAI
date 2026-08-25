@@ -16,6 +16,7 @@
 
 #include "ui/widget/CollapsibleSplitView.h"
 #include "ui/widget/chat/ChatHeader.h"
+#include "ui/widget/chat/ConversationPane.h"
 #include "ui/widget/chat/ChatAnchorBar.h"
 #include "ui/widget/chat/ChatInputBox.h"
 #include "ui/widget/message/MessageListView.h"
@@ -100,86 +101,40 @@ namespace ui::screen::chat {
         chatAreaLayout->setContentsMargins(0, 0, 0, 16);
         chatAreaLayout->setSpacing(0);
 
-        // 2.1 顶部栏
-        m_header = new ChatHeader(m_chatAreaWidget);
-        connect(m_header, &ChatHeader::toggleSidebarRequested, this, [this]() {
+        m_pane = new widget::chat::ConversationPane(m_chatAreaWidget);
+        m_pane->emptyStateLabel()->setText(tr("开始新对话\n\n选择模型，然后输入你的问题。"));
+        m_pane->setAnchorBarVisible(true);
+        chatAreaLayout->addWidget(m_pane);
+
+        connect(m_pane->header(), &ChatHeader::toggleSidebarRequested, this, [this]() {
             m_splitView->togglePane(0, true);
-            m_header->setSidebarExpanded(m_splitView->isPaneExpanded(0));
+            m_pane->header()->setSidebarExpanded(m_splitView->isPaneExpanded(0));
         });
         if (m_viewModel) {
-            connect(m_header, &ChatHeader::clearChatRequested, m_viewModel, &ChatViewModel::clearCurrentSession);
+            connect(m_pane->header(), &ChatHeader::clearChatRequested, m_viewModel, &ChatViewModel::clearCurrentSession);
         }
-        chatAreaLayout->addWidget(m_header);
-
-        // 2.2 中部区域（左侧对话锚点 + 中央消息列表 + 右侧占位）
-        auto *middleRow = new QWidget(m_chatAreaWidget);
-        auto *middleLayout = new QHBoxLayout(middleRow);
-        middleLayout->setContentsMargins(4, 6, 8, 6);
-        middleLayout->setSpacing(8);
-
-        // 左侧对话锚点条
-        m_anchorBar = new ChatAnchorBar(middleRow);
-        middleLayout->addWidget(m_anchorBar, 0);
-
-        // 中央消息表面：列表与轻量空态叠放，保持输入区始终可用。
-        auto* messageSurface = new QWidget(middleRow);
-        auto* messageStack = new QStackedLayout(messageSurface);
-        messageStack->setContentsMargins(0, 0, 0, 0);
-        messageStack->setStackingMode(QStackedLayout::StackAll);
-        m_messageListView = new MessageListView(messageSurface);
-        m_messageListView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        messageStack->addWidget(m_messageListView);
-        m_emptyStateLabel = new fluent::textfields::Label(tr("开始新对话\n\n选择模型，然后输入你的问题。"), messageSurface);
-        m_emptyStateLabel->setFluentTypography(Typography::FontRole::Body);
-        m_emptyStateLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
-        m_emptyStateLabel->setAlignment(Qt::AlignCenter);
-        m_emptyStateLabel->setWordWrap(true);
-        m_emptyStateLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-        messageStack->addWidget(m_emptyStateLabel);
-        middleLayout->addWidget(messageSurface, 1);
-
-        chatAreaLayout->addWidget(middleRow, 1);
-
-        // 2.3 底部输入框容器
-        auto *inputContainer = new QWidget(m_chatAreaWidget);
-        auto *inputLayout = new QVBoxLayout(inputContainer);
-        inputLayout->setContentsMargins(20, 0, 20, 0);
-        inputLayout->setSpacing(4);
-
-        m_inputBox = new ChatInputBox(inputContainer);
-        inputLayout->addWidget(m_inputBox, 0, Qt::AlignHCenter);
-
-        m_statusLabel = new fluent::textfields::Label(inputContainer);
-        m_statusLabel->setFluentTypography(Typography::FontRole::Caption);
-        m_statusLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
-        m_statusLabel->setAlignment(Qt::AlignHCenter);
-        m_statusLabel->hide();
-        inputLayout->addWidget(m_statusLabel);
-
-        chatAreaLayout->addWidget(inputContainer);
-
         // 点击锚点瞬间定位到目标消息
         if (m_viewModel) {
-            connect(m_anchorBar, &ChatAnchorBar::anchorClicked, this, [this](int index, const QString &id) {
-                m_messageListView->scrollToMessage(id);
+            connect(m_pane->anchorBar(), &ChatAnchorBar::anchorClicked, this, [this](int index, const QString &id) {
+                m_pane->messageList()->scrollToMessage(id);
                 m_viewModel->setActiveAnchorIndex(index);
             });
 
             // 视口滚动检测：通知 ViewModel 激活对应锚点
-            connect(m_messageListView, &MessageListView::topVisibleMessageChanged, m_viewModel, &ChatViewModel::setActiveAnchorByMessageId);
+            connect(m_pane->messageList(), &MessageListView::topVisibleMessageChanged, m_viewModel, &ChatViewModel::setActiveAnchorByMessageId);
 
             // 输入框动作：发送消息与停止生成
-            connect(m_inputBox, &ChatInputBox::sendRequested, this, [this](const QString &text) {
+            connect(m_pane->inputBox(), &ChatInputBox::sendRequested, this, [this](const QString &text) {
                 m_viewModel->sendMessage(text);
             });
-            connect(m_inputBox, &ChatInputBox::stopRequested, m_viewModel, &ChatViewModel::stopGeneration);
-            connect(m_inputBox, &ChatInputBox::modelButtonClicked, this, &ChatPage::showModelPicker);
-            connect(m_inputBox, &ChatInputBox::attachClicked, this, [this] {
-                m_statusLabel->setText(tr("当前模型协议仅支持文本消息，附件功能尚不可用。"));
-                m_statusLabel->show();
+            connect(m_pane->inputBox(), &ChatInputBox::stopRequested, m_viewModel, &ChatViewModel::stopGeneration);
+            connect(m_pane->inputBox(), &ChatInputBox::modelButtonClicked, this, &ChatPage::showModelPicker);
+            connect(m_pane->inputBox(), &ChatInputBox::attachClicked, this, [this] {
+                m_pane->statusLabel()->setText(tr("当前模型协议仅支持文本消息，附件功能尚不可用。"));
+                m_pane->statusLabel()->show();
             });
-            connect(m_inputBox, &ChatInputBox::webSearchToggled, m_viewModel, &ChatViewModel::setWebSearchEnabled);
-            connect(m_inputBox, &ChatInputBox::deepThinkToggled, m_viewModel, &ChatViewModel::setDeepThinkingEnabled);
+            connect(m_pane->inputBox(), &ChatInputBox::webSearchToggled, m_viewModel, &ChatViewModel::setWebSearchEnabled);
+            connect(m_pane->inputBox(), &ChatInputBox::deepThinkToggled, m_viewModel, &ChatViewModel::setDeepThinkingEnabled);
         }
 
         fluent::collections::SplitViewPaneOptions chatPaneOptions;
@@ -202,34 +157,34 @@ namespace ui::screen::chat {
         m_sidebar->setSessions(visibleSessions, state.currentSessionId);
 
         // 1. 顶部会话标题
-        m_header->setTitle(state.sessionTitle);
+        m_pane->header()->setTitle(state.sessionTitle);
 
         // 2. 输入控制台状态与模型
         updateModelChoices(state);
-        m_inputBox->setModelPresentation(state.currentModelName, state.useDeepThinking ? state.reasoningEffort : QString());
+        m_pane->inputBox()->setModelPresentation(state.currentModelName, state.useDeepThinking ? state.reasoningEffort : QString());
         const auto selected = std::find_if(state.availableModels.cbegin(), state.availableModels.cend(), [&state](const ChatModelOption& model) {
             return model.providerId == state.currentModelProviderId && model.modelId == state.currentModelId;
         });
-        m_inputBox->setToolAvailability(selected != state.availableModels.cend() && selected->supportsAttachments,
+        m_pane->inputBox()->setToolAvailability(selected != state.availableModels.cend() && selected->supportsAttachments,
                                         selected != state.availableModels.cend() && selected->supportsWebSearch,
                                         selected != state.availableModels.cend() && selected->supportsDeepThinking);
         if (state.isGenerating) {
-            m_inputBox->setSendState(ChatInputBox::SendState::Generating);
+            m_pane->inputBox()->setSendState(ChatInputBox::SendState::Generating);
         } else {
-            m_inputBox->setSendState(m_inputBox->text().trimmed().isEmpty()
+            m_pane->inputBox()->setSendState(m_pane->inputBox()->text().trimmed().isEmpty()
                 ? ChatInputBox::SendState::Idle
                 : ChatInputBox::SendState::Ready);
         }
-        m_statusLabel->setText(state.statusMessage);
-        m_statusLabel->setVisible(!state.statusMessage.isEmpty());
+        m_pane->statusLabel()->setText(state.statusMessage);
+        m_pane->statusLabel()->setVisible(!state.statusMessage.isEmpty());
 
         // 3. 消息列表全量同步 (MessageListView 内部执行增量 Diff)
-        m_messageListView->syncMessages(state.messages);
-        m_emptyStateLabel->setVisible(state.messages.isEmpty());
+        m_pane->messageList()->syncMessages(state.messages);
+        m_pane->emptyStateLabel()->setVisible(state.messages.isEmpty());
 
         // 4. 侧边时间线锚点同步
-        m_anchorBar->setAnchors(state.anchors);
-        m_anchorBar->setActiveIndex(state.activeAnchorIndex);
+        m_pane->anchorBar()->setAnchors(state.anchors);
+        m_pane->anchorBar()->setActiveIndex(state.activeAnchorIndex);
     }
 
     void ChatPage::updateModelChoices(const ChatState& state) {
@@ -244,12 +199,12 @@ namespace ui::screen::chat {
     }
 
     void ChatPage::showModelPicker() {
-        if (!m_inputBox || !m_inputBox->modelAnchor()) return;
+        if (!m_pane->inputBox() || !m_pane->inputBox()->modelAnchor()) return;
         auto* menu = new fluent::menus_toolbars::FluentMenu(QString(), this);
         menu->setMinimumWidth(220);
         auto* modelMenu = new fluent::menus_toolbars::FluentMenu(tr("模型"), menu);
         modelMenu->setMinimumWidth(260);
-        modelMenu->menuAction()->setText(tr("模型\t%1").arg(m_inputBox->modelName()));
+        modelMenu->menuAction()->setText(tr("模型\t%1").arg(m_pane->inputBox()->modelName()));
         QString previousProvider;
         for (const auto& choice : m_modelChoices) {
             if (choice.providerName != previousProvider) {
@@ -286,11 +241,11 @@ namespace ui::screen::chat {
             }
             if (!effortMenu->actions().isEmpty()) menu->addMenu(effortMenu);
         }
-        menu->popup(m_inputBox->modelAnchor()->mapToGlobal(QPoint(0, -menu->sizeHint().height())));
+        menu->popup(m_pane->inputBox()->modelAnchor()->mapToGlobal(QPoint(0, -menu->sizeHint().height())));
     }
 
     void ChatPage::showFullModelPicker(const QPoint& globalOrigin) {
-        if (!m_inputBox || !m_inputBox->modelAnchor()) return;
+        if (!m_pane->inputBox() || !m_pane->inputBox()->modelAnchor()) return;
         if (m_modelPickerPopup) m_modelPickerPopup->close();
         auto* popup = new ModelPickerPopup(nullptr);
         m_modelPickerPopup = popup;
@@ -318,7 +273,7 @@ namespace ui::screen::chat {
         });
         rebuildModelPicker({});
         const QPoint global = globalOrigin.isNull()
-            ? m_inputBox->modelAnchor()->mapToGlobal(QPoint(m_inputBox->modelAnchor()->width() - popup->width(), 0))
+            ? m_pane->inputBox()->modelAnchor()->mapToGlobal(QPoint(m_pane->inputBox()->modelAnchor()->width() - popup->width(), 0))
             : globalOrigin;
         m_modelPickerOrigin = globalOrigin;
         popup->move(globalOrigin.isNull() ? global - QPoint(0, popup->height() + 8) : global);
@@ -382,8 +337,8 @@ namespace ui::screen::chat {
             m_modelPickerPopup->setFixedHeight(qBound(120, rowsHeight + 54, 280));
             if (m_modelPickerPopup->isVisible() && !m_modelPickerOrigin.isNull()) {
                 m_modelPickerPopup->move(m_modelPickerOrigin);
-            } else if (m_modelPickerPopup->isVisible() && m_inputBox && m_inputBox->modelAnchor()) {
-                const QPoint global = m_inputBox->modelAnchor()->mapToGlobal(QPoint(m_inputBox->modelAnchor()->width() - m_modelPickerPopup->width(), 0));
+            } else if (m_modelPickerPopup->isVisible() && m_pane->inputBox() && m_pane->inputBox()->modelAnchor()) {
+                const QPoint global = m_pane->inputBox()->modelAnchor()->mapToGlobal(QPoint(m_pane->inputBox()->modelAnchor()->width() - m_modelPickerPopup->width(), 0));
                 m_modelPickerPopup->move(global - QPoint(0, m_modelPickerPopup->height() + 8));
             }
         }

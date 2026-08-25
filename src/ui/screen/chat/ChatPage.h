@@ -15,13 +15,7 @@ namespace ui::widget {
 }
 
 namespace ui::widget::chat {
-    class ChatHeader;
-    class ChatAnchorBar;
-    class ChatInputBox;
-}
-
-namespace ui::widget::message {
-    class MessageListView;
+    class ConversationPane;
 }
 
 namespace ui::screen::chat {
@@ -69,13 +63,7 @@ namespace ui::screen::chat {
         ChatSidebar *m_sidebar = nullptr;
         QWidget *m_chatAreaWidget = nullptr;
 
-        ui::widget::chat::ChatHeader *m_header = nullptr;
-        ui::widget::chat::ChatAnchorBar *m_anchorBar = nullptr;
-        ui::widget::message::MessageListView *m_messageListView = nullptr;
-        fluent::textfields::Label* m_emptyStateLabel = nullptr;
-        QWidget *m_mainRight = nullptr;
-        ui::widget::chat::ChatInputBox *m_inputBox = nullptr;
-        fluent::textfields::Label* m_statusLabel = nullptr;
+        ui::widget::chat::ConversationPane *m_pane = nullptr;
         QVector<ModelChoice> m_modelChoices;
         QString m_currentModelProviderId;
         QString m_currentModelId;

@@ -9,7 +9,7 @@ class QVBoxLayout;
 namespace ui::widget {
     class CollapsibleSplitView;
 }
-namespace ui::widget::chat { class ChatInputBox; class ChatHeader; }
+namespace ui::widget::chat { class ConversationPane; }
 namespace ui::screen::chat { class ChatSidebar; }
 namespace fluent::collections { class TreeView; }
 namespace fluent::basicinput { class Button; }
@@ -55,9 +55,6 @@ namespace ui::screen::work {
         ProjectHeader *m_treeHeader = nullptr;
         QStyledItemDelegate *m_sessionTreeDelegate = nullptr;
         QWidget *m_workAreaWidget = nullptr;
-
-        ui::widget::chat::ChatHeader *m_header = nullptr;
-        ui::widget::chat::ChatInputBox *m_agentInput = nullptr;
-        ui::widget::message::MessageListView *m_messageList = nullptr;
+        ui::widget::chat::ConversationPane *m_pane = nullptr;
     };
 } // namespace ui::screen::work

@@ -19,6 +19,7 @@
 #include "ProjectSessionTreeDelegate.h"
 #include "ui/widget/chat/ChatInputBox.h"
 #include "ui/widget/chat/ChatHeader.h"
+#include "ui/widget/chat/ConversationPane.h"
 #include "ui/widget/message/MessageListView.h"
 
 #include "ui/widget/basic/LeftAlignedButton.h"
@@ -214,35 +215,21 @@ using widget::basic::LeftAlignedButton;
         auto *workAreaLayout = new QVBoxLayout(m_workAreaWidget);
         workAreaLayout->setContentsMargins(0, 0, 0, 16);
         workAreaLayout->setSpacing(0);
-        m_header = new ui::widget::chat::ChatHeader(m_workAreaWidget);
-        m_header->setTitle(tr("新任务"));
-        connect(m_header, &ui::widget::chat::ChatHeader::toggleSidebarRequested, this, [this] {
+        m_pane = new widget::chat::ConversationPane(m_workAreaWidget);
+        m_pane->header()->setTitle(tr("新任务"));
+        m_pane->setAnchorBarVisible(false);
+        m_pane->messageList()->setHeaderVisible(true);
+        m_pane->messageList()->setAvatarVisible(true);
+        m_pane->inputBox()->setModelPresentation(tr("项目 Agent"), QString());
+        workAreaLayout->addWidget(m_pane);
+
+        connect(m_pane->header(), &ui::widget::chat::ChatHeader::toggleSidebarRequested, this, [this] {
             m_splitView->togglePane(0, true);
-            m_header->setSidebarExpanded(m_splitView->isPaneExpanded(0));
+            m_pane->header()->setSidebarExpanded(m_splitView->isPaneExpanded(0));
         });
-        workAreaLayout->addWidget(m_header);
-
-        auto* messageSurface = new QWidget(m_workAreaWidget);
-        auto* messageLayout = new QVBoxLayout(messageSurface);
-        messageLayout->setContentsMargins(24, 6, 24, 6);
-        messageLayout->setSpacing(0);
-        m_messageList = new ui::widget::message::MessageListView(messageSurface);
-        m_messageList->setHeaderVisible(true);
-        m_messageList->setAvatarVisible(true);
-        messageLayout->addWidget(m_messageList);
-        workAreaLayout->addWidget(messageSurface, 1);
-
-        auto* inputContainer = new QWidget(m_workAreaWidget);
-        auto* inputLayout = new QVBoxLayout(inputContainer);
-        inputLayout->setContentsMargins(20, 0, 20, 0);
-        inputLayout->setSpacing(0);
-        m_agentInput = new ui::widget::chat::ChatInputBox(inputContainer);
-        m_agentInput->setModelPresentation(tr("项目 Agent"), QString());
-        inputLayout->addWidget(m_agentInput, 0, Qt::AlignHCenter);
-        workAreaLayout->addWidget(inputContainer);
         if (m_viewModel) {
-            connect(m_agentInput, &ui::widget::chat::ChatInputBox::sendRequested, this, [this](const QString& text) { m_viewModel->startTask(text); });
-            connect(m_agentInput, &ui::widget::chat::ChatInputBox::stopRequested, m_viewModel, &WorkViewModel::cancelTask);
+            connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::sendRequested, this, [this](const QString& text) { m_viewModel->startTask(text); });
+            connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::stopRequested, m_viewModel, &WorkViewModel::cancelTask);
         }
 
         fluent::collections::SplitViewPaneOptions workPaneOptions;
@@ -252,8 +239,8 @@ using widget::basic::LeftAlignedButton;
     }
 
     void WorkPage::render(const WorkState &state) {
-        if (!m_messageList) return;
-        m_header->setTitle(state.currentSessionId.isEmpty()
+        if (!m_pane->messageList()) return;
+        m_pane->header()->setTitle(state.currentSessionId.isEmpty()
             ? tr("选择项目以新建对话")
             : (state.currentTask.isEmpty() ? tr("新对话") : state.currentTask));
         const bool canCreateConversation = !state.currentProjectId.isNull();
@@ -329,9 +316,9 @@ using widget::basic::LeftAlignedButton;
                 Qt::MatchExactly | Qt::MatchRecursive);
             if (!matches.isEmpty()) m_sessionTree->setCurrentIndex(matches.first());
         }
-        m_messageList->syncMessages(state.messages);
-        m_agentInput->setEnabled(!state.currentSessionId.isEmpty());
-        m_agentInput->setSendState(state.isProcessing ? ui::widget::chat::ChatInputBox::SendState::Generating : ui::widget::chat::ChatInputBox::SendState::Idle);
+        m_pane->messageList()->syncMessages(state.messages);
+        m_pane->inputBox()->setEnabled(!state.currentSessionId.isEmpty());
+        m_pane->inputBox()->setSendState(state.isProcessing ? ui::widget::chat::ChatInputBox::SendState::Generating : ui::widget::chat::ChatInputBox::SendState::Idle);
     }
 
     void WorkPage::showProjectContextMenu(const QUuid &projectId, const QPoint &globalPos) {

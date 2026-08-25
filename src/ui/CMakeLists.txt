@@ -43,6 +43,8 @@ target_sources(ForgeAICore PRIVATE
     widget/chat/ChatInputBox.cpp
     widget/chat/ConversationRowActions.h
     widget/chat/ConversationRowActions.cpp
+    widget/chat/ConversationPane.h
+    widget/chat/ConversationPane.cpp
     widget/message/MessageCardWidget.h
     widget/message/MessageCardWidget.cpp
     widget/message/MessageListView.h

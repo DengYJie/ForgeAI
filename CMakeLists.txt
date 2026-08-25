@@ -53,6 +53,8 @@ if (TARGET libcmark-gfm-extensions_static AND NOT TARGET cmark-gfm::cmark-gfm-ex
     add_library(cmark-gfm::cmark-gfm-extensions ALIAS libcmark-gfm-extensions_static)
 endif ()
 
+find_program(WINDEPLOYQT_EXECUTABLE NAMES windeployqt HINTS "${QT_DIR}/bin" "${Qt6_DIR}/../../../bin" "${CMAKE_PREFIX_PATH}/bin")
+
 macro(deploy_qt_application target)
     if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
         add_custom_command(TARGET ${target} POST_BUILD
@@ -62,14 +64,16 @@ macro(deploy_qt_application target)
             COMMAND_EXPAND_LISTS
             COMMENT "Deploying Qt runtime DLLs for ${target}..."
         )
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe"
-                --verbose 0
-                --no-compiler-runtime
-                --no-opengl-sw
-                "$<TARGET_FILE:${target}>"
-            COMMENT "Running windeployqt to copy dependencies for ${target}..."
-        )
+        if (WINDEPLOYQT_EXECUTABLE)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                    --verbose 0
+                    --no-compiler-runtime
+                    --no-opengl-sw
+                    "$<TARGET_FILE:${target}>"
+                COMMENT "Running windeployqt to copy dependencies for ${target}..."
+            )
+        endif()
     endif()
 endmacro()
 
@@ -122,11 +126,12 @@ if (BUILD_TESTING)
     qt_add_executable(MarkdownCoreTests tests/MarkdownCoreTests.cpp)
     target_link_libraries(MarkdownCoreTests PRIVATE ForgeAICore Qt::Test)
     deploy_qt_application(MarkdownCoreTests)
-    if (WIN32)
+    find_file(QT_QOFFSCREEN_DLL NAMES qoffscreend.dll qoffscreen.dll HINTS "${QT_DIR}/plugins/platforms" "${Qt6_DIR}/../../../plugins/platforms" "${CMAKE_PREFIX_PATH}/plugins/platforms")
+    if (WIN32 AND QT_QOFFSCREEN_DLL)
         add_custom_command(TARGET MarkdownCoreTests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:MarkdownCoreTests>/platforms"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_PREFIX_PATH}/plugins/platforms/qoffscreend.dll"
+                "${QT_QOFFSCREEN_DLL}"
                 "$<TARGET_FILE_DIR:MarkdownCoreTests>/platforms/qoffscreend.dll"
             COMMENT "Deploying Qt offscreen platform plugin for MarkdownCoreTests..."
         )
