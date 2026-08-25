@@ -8,7 +8,7 @@
 namespace agent::skill {
 
     /**
-     * @brief Skill 解析加载器（负责从 SKILL.md 或目录中解析 Frontmatter 与 Instructions）
+     * @brief SKILL.md 文件与 Frontmatter 解析加载器
      */
     class SkillLoader {
     public:
@@ -16,19 +16,26 @@ namespace agent::skill {
         ~SkillLoader() = default;
 
         /**
-         * @brief 从 SKILL.md 文件中解析并加载 Skill
+         * @brief 仅解析 SKILL.md 的 Frontmatter 元数据（延迟加载指令内容）
+         */
+        std::optional<domain::agent::Skill> loadMetadataFromFile(const QString& filePath) const;
+
+        /**
+         * @brief 加载指定文件的全部内容（含元数据与指令体）
          */
         std::optional<domain::agent::Skill> loadFromFile(const QString& filePath) const;
+        std::optional<domain::agent::Skill> loadFromFile(const QString& filePath, bool loadInstructionsImmediately) const;
 
         /**
-         * @brief 从包含 SKILL.md 的目录中加载 Skill
+         * @brief 为指定 Skill 实体按需延迟加载完整 Instructions 内容
          */
-        std::optional<domain::agent::Skill> loadFromDirectory(const QString& dirPath) const;
+        bool loadInstructions(domain::agent::Skill& skill) const;
 
         /**
-         * @brief 扫描目标根目录（如 .agents/skills 或 .skills）下的全部子目录加载 Skills
+         * @brief 扫描指定目录（如工作区根目录）下所有 .agents/skills/ 与 .skills/ 子目录中的 SKILL.md
          */
-        QList<domain::agent::Skill> scanDirectory(const QString& baseSkillsDirPath) const;
+        QList<domain::agent::Skill> scanDirectory(const QString& rootPath) const;
+        QList<domain::agent::Skill> scanDirectory(const QString& rootPath, bool loadInstructionsImmediately) const;
     };
 
 } // namespace agent::skill

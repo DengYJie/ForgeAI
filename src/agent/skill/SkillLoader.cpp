@@ -3,87 +3,142 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QDirIterator>
 
 namespace agent::skill {
 
+    std::optional<domain::agent::Skill> SkillLoader::loadMetadataFromFile(const QString& filePath) const {
+        return loadFromFile(filePath, false);
+    }
+
     std::optional<domain::agent::Skill> SkillLoader::loadFromFile(const QString& filePath) const {
+        return loadFromFile(filePath, false);
+    }
+
+    std::optional<domain::agent::Skill> SkillLoader::loadFromFile(const QString& filePath, bool loadInstructionsImmediately) const {
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
             return std::nullopt;
         }
 
-        const QString rawContent = QString::fromUtf8(file.readAll());
+        const QString fullContent = QString::fromUtf8(file.readAll());
         file.close();
 
         domain::agent::Skill skill;
-        skill.path = filePath;
-        const QString dirName = QFileInfo(filePath).dir().dirName();
-        skill.name = dirName;
-        skill.id = dirName;
+        skill.path = QFileInfo(filePath).canonicalFilePath();
+        if (skill.path.isEmpty()) skill.path = filePath;
+        skill.id = QFileInfo(filePath).dir().dirName();
+        skill.name = skill.id;
 
-        // 解析 YAML Frontmatter (若存在)
-        if (rawContent.startsWith(QStringLiteral("---"))) {
-            const int secondMarker = rawContent.indexOf(QStringLiteral("---"), 3);
-            if (secondMarker != -1) {
-                const QString frontmatter = rawContent.mid(3, secondMarker - 3);
-                skill.instructions = rawContent.mid(secondMarker + 3).trimmed();
+        if (fullContent.startsWith(QStringLiteral("---"))) {
+            int secondDash = fullContent.indexOf(QStringLiteral("---"), 3);
+            if (secondDash != -1) {
+                const QString header = fullContent.mid(3, secondDash - 3);
+                if (loadInstructionsImmediately) {
+                    skill.instructions = fullContent.mid(secondDash + 3).trimmed();
+                    skill.instructionsLoaded = true;
+                } else {
+                    skill.instructionsLoaded = false;
+                }
 
-                const auto lines = frontmatter.split(QLatin1Char('\n'));
+                const auto lines = header.split(QLatin1Char('\n'));
                 for (const auto& line : lines) {
                     const QString trimmed = line.trimmed();
                     if (trimmed.startsWith(QStringLiteral("name:"))) {
-                        skill.name = trimmed.mid(5).trimmed();
-                        if (skill.name.startsWith(QLatin1Char('"')) && skill.name.endsWith(QLatin1Char('"'))) {
-                            skill.name = skill.name.mid(1, skill.name.length() - 2);
-                        }
+                        skill.name = trimmed.mid(5).trimmed().remove(QLatin1Char('"')).remove(QLatin1Char('\''));
                     } else if (trimmed.startsWith(QStringLiteral("description:"))) {
-                        skill.description = trimmed.mid(12).trimmed();
-                        if (skill.description.startsWith(QLatin1Char('"')) && skill.description.endsWith(QLatin1Char('"'))) {
-                            skill.description = skill.description.mid(1, skill.description.length() - 2);
-                        }
+                        skill.description = trimmed.mid(12).trimmed().remove(QLatin1Char('"')).remove(QLatin1Char('\''));
                     } else if (trimmed.startsWith(QStringLiteral("id:"))) {
-                        skill.id = trimmed.mid(3).trimmed();
+                        skill.id = trimmed.mid(3).trimmed().remove(QLatin1Char('"')).remove(QLatin1Char('\''));
+                    } else if (trimmed.startsWith(QStringLiteral("tags:"))) {
+                        QString tagStr = trimmed.mid(5).trimmed().remove(QLatin1Char('[')).remove(QLatin1Char(']'));
+                        const auto tags = tagStr.split(QLatin1Char(','));
+                        for (const auto& t : tags) {
+                            const QString cleanTag = t.trimmed().remove(QLatin1Char('"')).remove(QLatin1Char('\''));
+                            if (!cleanTag.isEmpty()) skill.tags.append(cleanTag);
+                        }
                     }
                 }
-            } else {
-                skill.instructions = rawContent.trimmed();
+                return skill;
             }
+        }
+
+        if (loadInstructionsImmediately) {
+            skill.instructions = fullContent.trimmed();
+            skill.instructionsLoaded = true;
         } else {
-            skill.instructions = rawContent.trimmed();
+            skill.instructionsLoaded = false;
         }
-
-        if (skill.name.isEmpty()) {
-            skill.name = dirName;
-        }
-        if (skill.id.isEmpty()) {
-            skill.id = skill.name;
-        }
-
         return skill;
     }
 
-    std::optional<domain::agent::Skill> SkillLoader::loadFromDirectory(const QString& dirPath) const {
-        const QDir dir(dirPath);
-        const QString skillFile = dir.filePath(QStringLiteral("SKILL.md"));
-        if (QFile::exists(skillFile)) {
-            return loadFromFile(skillFile);
+    bool SkillLoader::loadInstructions(domain::agent::Skill& skill) const {
+        if (skill.instructionsLoaded && !skill.instructions.isEmpty()) {
+            return true;
         }
-        return std::nullopt;
-    }
 
-    QList<domain::agent::Skill> SkillLoader::scanDirectory(const QString& baseSkillsDirPath) const {
-        QList<domain::agent::Skill> result;
-        const QDir dir(baseSkillsDirPath);
-        if (!dir.exists()) return result;
+        if (skill.path.isEmpty()) return false;
 
-        const auto subDirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const auto& subDir : subDirs) {
-            const QString subDirPath = dir.filePath(subDir);
-            auto skillOpt = loadFromDirectory(subDirPath);
-            if (skillOpt.has_value()) {
-                result.append(skillOpt.value());
+        QFile file(skill.path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            return false;
+        }
+
+        const QString fullContent = QString::fromUtf8(file.readAll());
+        file.close();
+
+        if (fullContent.startsWith(QStringLiteral("---"))) {
+            int secondDash = fullContent.indexOf(QStringLiteral("---"), 3);
+            if (secondDash != -1) {
+                skill.instructions = fullContent.mid(secondDash + 3).trimmed();
+                skill.instructionsLoaded = true;
+                return true;
             }
         }
+
+        skill.instructions = fullContent.trimmed();
+        skill.instructionsLoaded = true;
+        return true;
+    }
+
+    QList<domain::agent::Skill> SkillLoader::scanDirectory(const QString& rootPath) const {
+        return scanDirectory(rootPath, false);
+    }
+
+    QList<domain::agent::Skill> SkillLoader::scanDirectory(const QString& rootPath, bool loadInstructionsImmediately) const {
+        QList<domain::agent::Skill> result;
+        if (rootPath.isEmpty()) return result;
+
+        const QStringList candidateDirs = {
+            QDir(rootPath).filePath(QStringLiteral(".agents/skills")),
+            QDir(rootPath).filePath(QStringLiteral(".skills"))
+        };
+
+        for (const auto& searchPath : candidateDirs) {
+            QDir dir(searchPath);
+            if (!dir.exists()) continue;
+
+            const auto subDirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const auto& subDirName : subDirs) {
+                const QString skillFile = dir.filePath(subDirName + QStringLiteral("/SKILL.md"));
+                if (QFile::exists(skillFile)) {
+                    auto skillOpt = loadFromFile(skillFile, loadInstructionsImmediately);
+                    if (skillOpt.has_value()) {
+                        bool duplicate = false;
+                        for (const auto& existing : result) {
+                            if (existing.id == skillOpt->id || existing.path == skillOpt->path) {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            result.append(*skillOpt);
+                        }
+                    }
+                }
+            }
+        }
+
         return result;
     }
 

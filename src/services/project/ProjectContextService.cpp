@@ -22,20 +22,7 @@ domain::project::ProjectContext ProjectContextService::load(const QString& rootP
     context.agentsInstructions = readText(root.filePath(QStringLiteral("AGENTS.md")));
 
     agent::skill::SkillLoader skillLoader;
-    // 扫描 .agents/skills
-    const QString agentsSkillsPath = root.filePath(QStringLiteral(".agents/skills"));
-    auto skills = skillLoader.scanDirectory(agentsSkillsPath);
-
-    // 扫描 .skills
-    const QString dotSkillsPath = root.filePath(QStringLiteral(".skills"));
-    const auto extraSkills = skillLoader.scanDirectory(dotSkillsPath);
-    for (const auto& s : extraSkills) {
-        if (!std::any_of(skills.cbegin(), skills.cend(), [&](const auto& existing) { return existing.name == s.name; })) {
-            skills.append(s);
-        }
-    }
-
-    context.skills = skills;
+    context.skills = skillLoader.scanDirectory(context.rootPath, true);
 
     const QString mcpJson = root.filePath(QStringLiteral(".mcp.json"));
     const QString mcpJsonc = root.filePath(QStringLiteral("mcp.json"));

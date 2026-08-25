@@ -1,4 +1,5 @@
 #include "AgentContextBuilder.h"
+#include "agent/skill/SkillLoader.h"
 
 namespace agent::runtime {
 
@@ -18,9 +19,15 @@ namespace agent::runtime {
                 .arg(projectContext.agentsInstructions.trimmed());
         }
 
+        skill::SkillLoader loader;
         const auto& skillsToInclude = !activeSkills.isEmpty() ? activeSkills : projectContext.skills;
-        for (const auto& skill : skillsToInclude) {
+        for (auto skill : skillsToInclude) {
             if (!skill.isEnabled) continue;
+
+            if (skill.instructions.isEmpty() && !skill.path.isEmpty()) {
+                loader.loadInstructions(skill);
+            }
+
             if (!skill.instructions.trimmed().isEmpty()) {
                 prompt += QStringLiteral("\n\n# Skill: %1\n%2")
                     .arg(skill.name, skill.instructions.trimmed());
