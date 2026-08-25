@@ -15,6 +15,11 @@ namespace llm::mcp {
         explicit McpProjectRuntimeCoordinator(McpManager* mcpManager = nullptr);
         ~McpProjectRuntimeCoordinator() override = default;
 
+        void loadProject(
+            const QString& projectRoot,
+            const QStringList& enabledServers = {}
+        ) override;
+
         void switchProject(
             const QString& previousProjectRoot,
             const QString& newProjectRoot

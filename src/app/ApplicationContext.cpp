@@ -101,11 +101,14 @@ namespace app {
             m_toolRegistry.get(),
             m_agentCheckpointRepo.get()
         );
+        m_mcpProjectRuntimeCoordinator = std::make_unique<llm::mcp::McpProjectRuntimeCoordinator>(
+            m_mcpManager.get()
+        );
         m_runAgentUseCase = std::make_unique<application::usecase::agent::RunAgentUseCase>(
             m_agentRuntime.get(),
             m_modelService.get(),
             m_projectContextService.get(),
-            m_mcpManager.get(),
+            m_mcpProjectRuntimeCoordinator.get(),
             m_agentRepo.get(),
             m_skillRegistry.get()
         );
@@ -114,9 +117,6 @@ namespace app {
         );
         m_resumeAgentRunUseCase = std::make_unique<application::usecase::agent::ResumeAgentRunUseCase>(
             m_agentRuntime.get()
-        );
-        m_mcpProjectRuntimeCoordinator = std::make_unique<llm::mcp::McpProjectRuntimeCoordinator>(
-            m_mcpManager.get()
         );
         m_switchProjectUseCase = std::make_unique<application::usecase::work::SwitchProjectUseCase>(
             m_mcpProjectRuntimeCoordinator.get(),

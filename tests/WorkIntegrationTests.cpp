@@ -826,17 +826,13 @@ void WorkIntegrationTests::testWorkViewModelMcpProjectSwitchUnload() {
     mcpFile1.close();
 
     llm::mcp::McpManager mcpManager;
-    llm::mcp::McpServerConfig cfg;
-    cfg.name = QStringLiteral("proj1_server");
-    cfg.command = QStringLiteral("cmd.exe");
-    cfg.args = {QStringLiteral("/c"), QStringLiteral("echo {}")};
-    cfg.cwd = proj1Dir.path();
+    llm::mcp::McpProjectRuntimeCoordinator coordinator(&mcpManager);
 
-    mcpManager.registerServer(cfg);
+    // 验证通过 coordinator.loadProject 动态挂载并解析 .mcp.json
+    coordinator.loadProject(proj1Dir.path());
     QVERIFY(mcpManager.getSession(QStringLiteral("proj1_server")) != nullptr);
 
     // 通过 McpProjectRuntimeCoordinator + SwitchProjectUseCase + WorkViewModel 触发项目切换
-    llm::mcp::McpProjectRuntimeCoordinator coordinator(&mcpManager);
     services::project::ProjectContextService projectCtxService;
     application::usecase::work::SwitchProjectUseCase switchUseCase(&coordinator, &projectCtxService);
 

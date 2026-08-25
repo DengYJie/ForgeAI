@@ -243,7 +243,7 @@ void WorkViewModel::setProjectRoot(const QString& rootPath) {
         return;
     }
 
-    updateState([&](WorkState& state) {
+    updateState([context](WorkState& state) {
         state.projectRoot = context.rootPath;
         state.projectName = QFileInfo(context.rootPath).fileName();
         state.skillCount = context.skills.size();

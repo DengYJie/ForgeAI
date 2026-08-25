@@ -10,7 +10,7 @@ namespace application::usecase::agent {
         ports::IAgentRuntime* runtime,
         domain::service::IModelService* modelService,
         domain::service::IProjectContextService* projectContextService,
-        llm::mcp::McpManager* mcpManager,
+        ports::IProjectRuntimeCoordinator* runtimeCoordinator,
         domain::repository::IAgentRepository* agentRepository,
         ::agent::skill::SkillRegistry* skillRegistry,
         QObject* parent
@@ -18,7 +18,7 @@ namespace application::usecase::agent {
         m_runtime(runtime),
         m_modelService(modelService),
         m_projectContextService(projectContextService),
-        m_mcpManager(mcpManager),
+        m_runtimeCoordinator(runtimeCoordinator),
         m_agentRepository(agentRepository),
         m_skillRegistry(skillRegistry) {
 
@@ -149,25 +149,9 @@ namespace application::usecase::agent {
             return;
         }
 
-        // 项目级 MCP 服务自动挂载与启动
-        if (m_mcpManager && !workspaceRoot.isEmpty()) {
-            const QStringList candidateConfigFiles = {
-                QDir(workspaceRoot).filePath(QStringLiteral(".mcp.json")),
-                QDir(workspaceRoot).filePath(QStringLiteral("mcp.json"))
-            };
-            for (const auto& cfgPath : candidateConfigFiles) {
-                if (QFile::exists(cfgPath)) {
-                    const auto serverConfigs = m_mcpManager->parseConfigFile(cfgPath);
-                    for (auto sCfg : serverConfigs) {
-                        if (!enabledMcpServers.isEmpty() && !enabledMcpServers.contains(sCfg.name)) {
-                            continue;
-                        }
-                        if (sCfg.cwd.isEmpty()) sCfg.cwd = workspaceRoot;
-                        m_mcpManager->registerServer(sCfg);
-                        m_mcpManager->startServer(sCfg.name);
-                    }
-                }
-            }
+        // 通过项目运行时协调器挂载项目关联资源（如 MCP 外部扩展）
+        if (m_runtimeCoordinator && !workspaceRoot.isEmpty()) {
+            m_runtimeCoordinator->loadProject(workspaceRoot, enabledMcpServers);
         }
 
         ::agent::runtime::AgentRunContext context;

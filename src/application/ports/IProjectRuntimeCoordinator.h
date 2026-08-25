@@ -1,16 +1,25 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 namespace application::ports {
 
     /**
      * @brief 项目运行时协调器抽象接口
-     * @details 负责在应用层调度项目切换与资源释放，屏蔽底层 MCP、索引与监听器等具体基础设施。
+     * @details 负责在应用层调度项目挂载、切换与资源释放，屏蔽底层 MCP、索引与监听器等具体基础设施。
      */
     class IProjectRuntimeCoordinator {
     public:
         virtual ~IProjectRuntimeCoordinator() = default;
+
+        /**
+         * @brief 挂载并启动指定工作区项目的运行时服务（如 MCP 外部扩展）
+         */
+        virtual void loadProject(
+            const QString& projectRoot,
+            const QStringList& enabledServers = {}
+        ) = 0;
 
         /**
          * @brief 响应工作区项目切换，释放旧项目关联资源

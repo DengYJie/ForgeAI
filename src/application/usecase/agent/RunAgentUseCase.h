@@ -9,7 +9,7 @@
 #include "domain/repository/IAgentRepository.h"
 #include "agent/skill/SkillRegistry.h"
 #include "agent/runtime/AgentContextBuilder.h"
-#include "llm/mcp/McpManager.h"
+#include "application/ports/IProjectRuntimeCoordinator.h"
 
 namespace application::usecase::agent {
 
@@ -23,7 +23,7 @@ namespace application::usecase::agent {
             ports::IAgentRuntime* runtime,
             domain::service::IModelService* modelService,
             domain::service::IProjectContextService* projectContextService = nullptr,
-            llm::mcp::McpManager* mcpManager = nullptr,
+            ports::IProjectRuntimeCoordinator* runtimeCoordinator = nullptr,
             domain::repository::IAgentRepository* agentRepository = nullptr,
             ::agent::skill::SkillRegistry* skillRegistry = nullptr,
             QObject* parent = nullptr
@@ -66,7 +66,7 @@ namespace application::usecase::agent {
         ports::IAgentRuntime* m_runtime = nullptr;
         domain::service::IModelService* m_modelService = nullptr;
         domain::service::IProjectContextService* m_projectContextService = nullptr;
-        llm::mcp::McpManager* m_mcpManager = nullptr;
+        ports::IProjectRuntimeCoordinator* m_runtimeCoordinator = nullptr;
         domain::repository::IAgentRepository* m_agentRepository = nullptr;
         ::agent::skill::SkillRegistry* m_skillRegistry = nullptr;
         ::agent::runtime::AgentContextBuilder m_contextBuilder;
