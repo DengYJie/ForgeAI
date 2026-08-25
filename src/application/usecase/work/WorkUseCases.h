@@ -5,6 +5,7 @@
 
 namespace domain::service { class IConversationService; }
 namespace domain::repository { class IConversationRepository; class IProjectRepository; }
+namespace llm::mcp { class McpManager; }
 
 namespace application::usecase::work {
     /**
@@ -16,5 +17,6 @@ namespace application::usecase::work {
         domain::service::IConversationService *conversationService = nullptr;
         domain::repository::IConversationRepository *conversationRepository = nullptr;
         domain::repository::IProjectRepository *projectRepository = nullptr;
+        llm::mcp::McpManager *mcpManager = nullptr;
     };
 } // namespace application::usecase::work

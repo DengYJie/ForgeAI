@@ -298,6 +298,7 @@ namespace app {
         w.conversationService = m_conversationService.get();
         w.conversationRepository = m_conversationRepo.get();
         w.projectRepository = m_projectRepo.get();
+        w.mcpManager = m_mcpManager.get();
         return w;
     }
 

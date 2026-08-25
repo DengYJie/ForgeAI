@@ -4,6 +4,7 @@
 #include "domain/service/IConversationService.h"
 #include "domain/repository/IConversationRepository.h"
 #include "domain/repository/IProjectRepository.h"
+#include "llm/mcp/McpManager.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -233,6 +234,11 @@ void WorkViewModel::cancelTask() {
 }
 
 void WorkViewModel::setProjectRoot(const QString& rootPath) {
+    const QString canonical = QDir(rootPath).canonicalPath();
+    if (!m_state.projectRoot.isEmpty() && m_state.projectRoot != canonical && m_useCases.mcpManager) {
+        m_useCases.mcpManager->stopServersForProject(m_state.projectRoot);
+    }
+
     if (!m_projectContext) return;
     const auto context = m_projectContext->load(rootPath);
     updateState([&](WorkState& state) {
@@ -275,6 +281,17 @@ void WorkViewModel::addProject(const QString& rootPath, const QString& displayNa
 }
 
 void WorkViewModel::removeProject(const QUuid& projectId) {
+    QString targetRoot;
+    for (const auto& p : m_state.projects) {
+        if (p.id == projectId) {
+            targetRoot = p.rootPath;
+            break;
+        }
+    }
+    if (m_useCases.mcpManager && !targetRoot.isEmpty()) {
+        m_useCases.mcpManager->stopServersForProject(targetRoot);
+    }
+
     if (m_projectRepository) {
         m_projectRepository->deleteProject(projectId);
     }
