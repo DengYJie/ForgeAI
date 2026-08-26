@@ -733,7 +733,8 @@ void MarkdownView::paintViewport(QPaintEvent* event)
                                                     m_eventFilter->hoveredCopyBlock(),
                                                     m_blockScrollOffsets,
                                                     m_resources.images(),
-                                                    m_eventFilter->copiedBlock());
+                                                    m_eventFilter->copiedBlock(),
+                                                    m_eventFilter->hoveredLinkUrl());
     painter.restore();
     m_metrics.lastPaintMs = paintTimer.elapsed();
 }

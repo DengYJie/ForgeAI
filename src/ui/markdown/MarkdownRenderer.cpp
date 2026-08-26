@@ -5,7 +5,8 @@
 namespace ui::markdown {
 
 void MarkdownRenderer::paintInline(QPainter& painter, const InlineLayout& inlineLayout, const QPointF& origin,
-                                   const MarkdownTheme& theme, int documentOffset, const TextSelection& selection) const
+                                   const MarkdownTheme& theme, int documentOffset, const TextSelection& selection,
+                                   const QString& hoveredLinkUrl) const
 {
     if (!inlineLayout.codeSpans.isEmpty()) {
         painter.save();
@@ -33,7 +34,19 @@ void MarkdownRenderer::paintInline(QPainter& painter, const InlineLayout& inline
         painter.restore();
     }
 
-    QVector<QTextLayout::FormatRange> selections;
+    QVector<QTextLayout::FormatRange> formats;
+
+    if (!hoveredLinkUrl.isEmpty()) {
+        for (const auto& link : inlineLayout.links) {
+            if (link.url == hoveredLinkUrl) {
+                QTextCharFormat linkFmt;
+                linkFmt.setForeground(theme.linkHover);
+                linkFmt.setFontUnderline(true);
+                formats.push_back({link.start, link.length, linkFmt});
+            }
+        }
+    }
+
     if (selection.isValid()) {
         const int first = qMin(selection.anchor, selection.position);
         const int last = qMax(selection.anchor, selection.position);
@@ -41,16 +54,17 @@ void MarkdownRenderer::paintInline(QPainter& painter, const InlineLayout& inline
         const int end = qMin(inlineLayout.text.size(), last - documentOffset);
         if (end > begin) {
             QTextCharFormat format; format.setBackground(theme.selection); format.setForeground(theme.text);
-            selections.push_back({begin, end - begin, format});
+            formats.push_back({begin, end - begin, format});
         }
     }
-    inlineLayout.layout.draw(&painter, origin, selections);
+    inlineLayout.layout.draw(&painter, origin, formats);
 }
 
 int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, const MarkdownTheme& theme,
                             const QRectF& exposedDocumentRect, const TextSelection& selection, int hoveredBlock,
                             int hoveredCopyBlock, const QHash<int, BlockScrollOffset>& scrollOffsets,
-                            const QHash<QString, QImage>& images, int copiedBlock) const
+                            const QHash<QString, QImage>& images, int copiedBlock,
+                            const QString& hoveredLinkUrl) const
 {
     const int first = document.firstVisibleBlock(exposedDocumentRect.top() - 80);
     const int last = document.lastVisibleBlock(exposedDocumentRect.bottom() + 80);
@@ -142,7 +156,7 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
                 if (block.table->headerRows.value(row)) painter.fillRect(QRectF(block.rect.left(), y, block.rect.width(), h), theme.tableHeader);
                 qreal x = block.rect.left();
                 for (int col = 0; col < block.table->columnWidths.size(); ++col) {
-                    paintInline(painter, *block.table->cells[row][col], QPointF(x + 8, y + 8), theme, block.documentTextOffset, selection);
+                    paintInline(painter, *block.table->cells[row][col], QPointF(x + 8, y + 8), theme, block.documentTextOffset, selection, hoveredLinkUrl);
                     x += block.table->columnWidths[col];
                 }
                 if (row + 1 < block.table->cells.size()) {
@@ -174,7 +188,7 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
             }
             break;
         case BlockKind::ListItem:
-            painter.setPen(theme.text); painter.setFont(theme.bodyFont); painter.drawText(QRectF(block.rect.left(), block.rect.top(), block.contentX - block.rect.left() - 6, block.rect.height()), Qt::AlignTop | Qt::AlignRight, block.marker);
+            painter.setPen(theme.secondaryText); painter.setFont(theme.bodyFont); painter.drawText(QRectF(block.rect.left(), block.rect.top(), block.contentX - block.rect.left() - 6, block.rect.height()), Qt::AlignTop | Qt::AlignRight, block.marker);
             if (block.taskItem) {
                 painter.setPen(QPen(block.taskChecked ? theme.link : theme.tableBorder, 1));
                 painter.setBrush(block.taskChecked ? theme.link : Qt::transparent);
@@ -194,7 +208,7 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
             }
             [[fallthrough]];
         default:
-            if (block.inlineLayout) paintInline(painter, *block.inlineLayout, QPointF(block.contentX, block.rect.top()), theme, block.documentTextOffset, selection);
+            if (block.inlineLayout) paintInline(painter, *block.inlineLayout, QPointF(block.contentX, block.rect.top()), theme, block.documentTextOffset, selection, hoveredLinkUrl);
             break;
         }
     }

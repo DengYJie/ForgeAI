@@ -49,6 +49,8 @@ private slots:
     void heightForWidthRespondsToWrappingWidth();
     void autoFitHeightContractIsRespected();
     void inlineCodeSelectionPaintsSelectionBackground();
+    void headingThemeColorIsApplied();
+    void linkHoverHighlightIsApplied();
 };
 
 void MarkdownCoreTests::parsesCommonMarkAndGfm()
@@ -511,6 +513,51 @@ void MarkdownCoreTests::inlineCodeSelectionPaintsSelectionBackground()
     p2.end();
 
     QVERIFY(unselected != selected);
+}
+
+void MarkdownCoreTests::headingThemeColorIsApplied()
+{
+    MarkdownParser parser;
+    const MarkdownDocument document = parser.parse(QStringLiteral("# Custom Heading\n\nRegular text"));
+    MarkdownTheme theme = MarkdownTheme::light();
+    theme.heading = QColor("#ff0000");
+    theme.text = QColor("#0000ff");
+    const DocumentLayout layout = MarkdownLayoutEngine{}.layout(document, 400, theme);
+    QVERIFY(layout.blocks.size() >= 2);
+    QVERIFY(layout.blocks[0].inlineLayout);
+    QVERIFY(layout.blocks[1].inlineLayout);
+
+    const auto formats0 = layout.blocks[0].inlineLayout->layout.formats();
+    QVERIFY(!formats0.isEmpty());
+    QCOMPARE(formats0[0].format.foreground().color(), QColor("#ff0000"));
+
+    const auto formats1 = layout.blocks[1].inlineLayout->layout.formats();
+    QVERIFY(!formats1.isEmpty());
+    QCOMPARE(formats1[0].format.foreground().color(), QColor("#0000ff"));
+}
+
+void MarkdownCoreTests::linkHoverHighlightIsApplied()
+{
+    MarkdownParser parser;
+    const MarkdownDocument document = parser.parse(QStringLiteral("Visit [ForgeAI](https://forge.ai) for more"));
+    MarkdownTheme theme = MarkdownTheme::light();
+    theme.link = QColor("#0000ff");
+    theme.linkHover = QColor("#ff00ff");
+    const DocumentLayout layout = MarkdownLayoutEngine{}.layout(document, 400, theme);
+
+    QImage normal(400, 40, QImage::Format_ARGB32_Premultiplied);
+    normal.fill(Qt::white);
+    QPainter p1(&normal);
+    MarkdownRenderer{}.paint(p1, layout, theme, QRectF(0, 0, 400, 40), {}, -1, -1, {}, {}, -1, QString());
+    p1.end();
+
+    QImage hovered(400, 40, QImage::Format_ARGB32_Premultiplied);
+    hovered.fill(Qt::white);
+    QPainter p2(&hovered);
+    MarkdownRenderer{}.paint(p2, layout, theme, QRectF(0, 0, 400, 40), {}, -1, -1, {}, {}, -1, QStringLiteral("https://forge.ai"));
+    p2.end();
+
+    QVERIFY(normal != hovered);
 }
 
 int main(int argc, char** argv)

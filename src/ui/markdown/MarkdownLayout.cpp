@@ -153,7 +153,7 @@ std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNod
     for (const auto& child : node.children) builder.add(*child);
     if (!builder.text.isEmpty()) {
         QTextCharFormat base;
-        base.setForeground(theme.text);
+        base.setForeground(node.type == MarkdownNodeType::Heading ? theme.heading : theme.text);
         builder.formats.prepend({0, static_cast<int>(builder.text.size()), base});
     }
     return std::make_shared<InlineLayout>(builder.text, font, builder.formats, builder.links, builder.codeSpans, width);

@@ -68,6 +68,7 @@ void MarkdownViewEventFilter::clearSelection()
 int MarkdownViewEventFilter::hoveredBlock() const { return m_hoveredBlock; }
 int MarkdownViewEventFilter::hoveredCopyBlock() const { return m_hoveredCopyBlock; }
 int MarkdownViewEventFilter::copiedBlock() const { return m_copiedBlock; }
+QString MarkdownViewEventFilter::hoveredLinkUrl() const { return m_hoveredLinkUrl; }
 bool MarkdownViewEventFilter::isSelectable() const { return m_selectable; }
 bool MarkdownViewEventFilter::isTaskListInteractive() const { return m_taskListInteractive; }
 
@@ -87,6 +88,7 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
     if (event->type() == QEvent::Leave) {
         m_hoveredBlock = -1;
         m_hoveredCopyBlock = -1;
+        m_hoveredLinkUrl.clear();
         emit cursorChanged(Qt::ArrowCursor);
         emit repaintRequested();
         return true;
@@ -98,8 +100,10 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
         const auto hit = m_renderer.hitTest(*m_layout, docPos, offsets);
         const int prevHovered = m_hoveredBlock;
         const int prevCopy = m_hoveredCopyBlock;
+        const QString prevLinkUrl = m_hoveredLinkUrl;
         m_hoveredBlock = hit.blockIndex;
         m_hoveredCopyBlock = (hit.kind == ui::markdown::HitKind::CodeCopy) ? hit.blockIndex : -1;
+        m_hoveredLinkUrl = (hit.kind == ui::markdown::HitKind::Link) ? hit.value : QString();
         Qt::CursorShape cursor = Qt::ArrowCursor;
         if (hit.kind == ui::markdown::HitKind::Link || hit.kind == ui::markdown::HitKind::CodeCopy) {
             cursor = Qt::PointingHandCursor;
@@ -111,7 +115,7 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
         emit cursorChanged(cursor);
         if (m_selecting && hit.textOffset >= 0) setSelectionPosition(hit.textOffset, true);
         if (hit.kind == ui::markdown::HitKind::Link) emit linkHighlighted(QUrl(hit.value));
-        if (m_hoveredBlock != prevHovered || m_hoveredCopyBlock != prevCopy) emit repaintRequested();
+        if (m_hoveredBlock != prevHovered || m_hoveredCopyBlock != prevCopy || m_hoveredLinkUrl != prevLinkUrl) emit repaintRequested();
         else if (m_selecting) emit repaintRequested();
         return true;
     }

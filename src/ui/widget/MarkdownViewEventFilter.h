@@ -36,6 +36,7 @@ public:
     int hoveredBlock() const;
     int hoveredCopyBlock() const;
     int copiedBlock() const;
+    QString hoveredLinkUrl() const;
 
     QPointF toDocument(const QPointF& viewportPos, int scrollBarValue) const;
 
@@ -67,6 +68,7 @@ private:
     int m_hoveredBlock = -1;
     int m_hoveredCopyBlock = -1;
     int m_copiedBlock = -1;
+    QString m_hoveredLinkUrl;
     bool m_selecting = false;
     bool m_selectable = true;
     bool m_taskListInteractive = false;
