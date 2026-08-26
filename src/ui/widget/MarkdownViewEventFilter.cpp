@@ -174,11 +174,11 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
             QAction* copyText = menu.addAction(QObject::tr("复制"));
             copyText->setEnabled(m_selection.isValid());
             connect(copyText, &QAction::triggered, this, [this] {
-                emit copyCodeRequested({}, -1);
+                emit copySelectionRequested();
             });
             QAction* selectAll = menu.addAction(QObject::tr("全选"));
             connect(selectAll, &QAction::triggered, this, [this] {
-                emit taskToggleRequested(-2);
+                emit selectAllRequested();
             });
         }
         menu.exec(context->globalPos());

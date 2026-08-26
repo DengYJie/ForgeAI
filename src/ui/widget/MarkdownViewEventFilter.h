@@ -47,6 +47,8 @@ signals:
     void imageActivated(const QUrl& url);
     void contextMenuRequested(const QPoint& pos, const QUrl& linkUrl, const QUrl& imageUrl);
     void copyCodeRequested(const QString& code, int blockIndex);
+    void copySelectionRequested();
+    void selectAllRequested();
     void taskToggleRequested(int blockIndex);
     void blockScrollRequested(int blockIndex, qreal dx, qreal dy, bool smooth);
     void cursorChanged(Qt::CursorShape shape);

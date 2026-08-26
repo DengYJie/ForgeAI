@@ -34,6 +34,7 @@ MarkdownView::MarkdownView(QWidget *parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     m_layoutCache->setTheme(m_theme);
+    m_layoutCache->setImages(&m_resources.images());
 
     connect(m_controller, &MarkdownDocumentController::streamingChanged, this, &MarkdownView::streamingChanged);
     connect(m_controller, &MarkdownDocumentController::streamingFinished, this, &MarkdownView::streamingFinished);
@@ -47,6 +48,8 @@ MarkdownView::MarkdownView(QWidget *parent)
     connect(m_eventFilter, &MarkdownViewEventFilter::selectionChanged, this, &MarkdownView::selectionChanged);
     connect(m_eventFilter, &MarkdownViewEventFilter::imageActivated, this, &MarkdownView::imageActivated);
     connect(m_eventFilter, &MarkdownViewEventFilter::contextMenuRequested, this, &MarkdownView::contextMenuRequested);
+    connect(m_eventFilter, &MarkdownViewEventFilter::copySelectionRequested, this, &MarkdownView::copy);
+    connect(m_eventFilter, &MarkdownViewEventFilter::selectAllRequested, this, &MarkdownView::selectAll);
     connect(m_eventFilter, &MarkdownViewEventFilter::taskToggleRequested, this, &MarkdownView::onTaskToggleRequested);
     connect(m_eventFilter, &MarkdownViewEventFilter::cursorChanged, this, [this](Qt::CursorShape shape) {
         viewport()->setCursor(shape);
@@ -56,7 +59,7 @@ MarkdownView::MarkdownView(QWidget *parent)
     });
 
     connect(&m_resources, &ui::markdown::MarkdownImageResourceManager::imageUpdated, this, [this] {
-        viewport()->update();
+        m_layoutCache->forceRelayout();
     });
 
     m_eventFilter->setDocumentLayout(&m_documentLayout);
@@ -76,10 +79,6 @@ QString MarkdownView::markdown() const { return m_controller->markdown(); }
 
 void MarkdownView::clear() { setMarkdown({}); }
 
-void MarkdownView::setHtml(const QString &html) { m_controller->setMarkdown(html); }
-
-QString MarkdownView::html() const { return m_controller->markdown(); }
-
 void MarkdownView::beginStream()
 {
     m_metrics = {};
@@ -89,7 +88,6 @@ void MarkdownView::beginStream()
 
 void MarkdownView::appendMarkdown(const QString &chunk) { m_controller->appendMarkdown(chunk); }
 void MarkdownView::appendStreamingText(const QString &chunk) { m_controller->appendMarkdown(chunk); }
-void MarkdownView::appendHtml(const QString &htmlFragment) { m_controller->appendMarkdown(htmlFragment); }
 void MarkdownView::finishStream() { m_controller->finishStream(); }
 void MarkdownView::finishStreaming() { m_controller->finishStream(); }
 bool MarkdownView::isStreaming() const { return m_controller->isStreaming(); }
@@ -341,7 +339,7 @@ int MarkdownView::heightForWidth(int width) const
     const qreal cw = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
     if (qAbs(m_documentLayout.width - cw) < 1.0 && m_autoFitContentHeight > 0) return m_autoFitContentHeight;
     ui::markdown::MarkdownLayoutEngine tmp;
-    const auto docLayout = tmp.layout(m_controller->stableDocument(), cw, m_theme);
+    const auto docLayout = tmp.layout(m_controller->stableDocument(), cw, m_theme, m_resources.images());
     return qMax(16, qCeil(docLayout.size.height()));
 }
 
@@ -410,10 +408,6 @@ void MarkdownView::onLayoutReady(const ui::markdown::DocumentLayout& layout)
 
 void MarkdownView::onTaskToggleRequested(int blockIndex)
 {
-    if (blockIndex == -2) {
-        selectAll();
-        return;
-    }
     if (blockIndex < 0 || blockIndex >= m_documentLayout.blocks.size()) return;
     const auto& block = m_documentLayout.blocks.at(blockIndex);
     m_controller->toggleTaskAtLine(block.taskSourceLine, block.taskChecked);

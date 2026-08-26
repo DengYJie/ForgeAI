@@ -31,6 +31,19 @@ void MarkdownDocumentLayout::setTheme(const ui::markdown::MarkdownTheme& theme)
     relayout();
 }
 
+void MarkdownDocumentLayout::setImages(const QHash<QString, QImage>* images)
+{
+    m_images = images;
+    m_stableLayoutDirty = true;
+    relayout();
+}
+
+void MarkdownDocumentLayout::forceRelayout()
+{
+    m_stableLayoutDirty = true;
+    relayout();
+}
+
 const ui::markdown::DocumentLayout& MarkdownDocumentLayout::currentLayout() const
 {
     return m_currentLayout;
@@ -59,15 +72,18 @@ void MarkdownDocumentLayout::onTailDocumentChanged()
 
 void MarkdownDocumentLayout::relayout()
 {
+    static const QHash<QString, QImage> emptyImages;
+    const auto& images = m_images ? *m_images : emptyImages;
+
     if (!m_controller->isStreaming()) {
-        m_currentLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme);
+        m_currentLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images);
         emit layoutReady(m_currentLayout);
         return;
     }
 
     if (m_stableLayoutDirty || !qFuzzyCompare(m_stableLayoutWidth, m_width) || m_stableLayoutThemeVersion != m_theme.version) {
         QElapsedTimer t; t.start();
-        m_stableLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme);
+        m_stableLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images);
         m_metrics.lastStableLayoutMs = t.elapsed();
         ++m_metrics.stableLayoutCount;
         m_stableLayoutDirty = false;
@@ -76,7 +92,7 @@ void MarkdownDocumentLayout::relayout()
     }
 
     QElapsedTimer t; t.start();
-    const ui::markdown::DocumentLayout tail = m_engine.layout(m_controller->tailDocument(), m_width, m_theme);
+    const ui::markdown::DocumentLayout tail = m_engine.layout(m_controller->tailDocument(), m_width, m_theme, images);
     m_metrics.lastTailLayoutMs = t.elapsed();
     ++m_metrics.tailLayoutCount;
 

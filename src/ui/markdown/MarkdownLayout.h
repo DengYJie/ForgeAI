@@ -4,6 +4,8 @@
 #include "MarkdownTheme.h"
 #include "ui/markdown/syntax/MarkdownSyntaxHighlighter.h"
 
+#include <QHash>
+#include <QImage>
 #include <QRectF>
 #include <QTextLayout>
 #include <memory>
@@ -64,6 +66,7 @@ struct BlockLayout {
     QRectF copyButtonRect;
     QString imageUrl;
     QString imageAlt;
+    QSizeF imageIntrinsicSize;
     std::shared_ptr<InlineLayout> inlineLayout;
     QVector<std::shared_ptr<InlineLayout>> codeLines;
     QVector<int> codeLineOffsets;
@@ -84,14 +87,17 @@ struct DocumentLayout {
 
 class MarkdownLayoutEngine final {
 public:
-    DocumentLayout layout(const MarkdownDocument& document, qreal width, const MarkdownTheme& theme) const;
+    DocumentLayout layout(const MarkdownDocument& document, qreal width, const MarkdownTheme& theme,
+                          const QHash<QString, QImage>& images = {}) const;
     DocumentLayout layout(const MarkdownDocument& stableDocument, const MarkdownDocument& activeTail,
-                          qreal width, const MarkdownTheme& theme) const;
+                          qreal width, const MarkdownTheme& theme,
+                          const QHash<QString, QImage>& images = {}) const;
 
 private:
     void appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,
                      qreal& y, qreal width, qreal indent, int quoteDepth, int listDepth,
-                     const MarkdownTheme& theme, int& textOffset) const;
+                     const MarkdownTheme& theme, int& textOffset,
+                     const QHash<QString, QImage>& images) const;
     std::shared_ptr<InlineLayout> makeInline(const MarkdownNode& node, const QFont& font,
                                               const MarkdownTheme& theme, qreal width) const;
     MarkdownSyntaxHighlighter m_syntaxHighlighter;

@@ -144,13 +144,14 @@ std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNod
 
 void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,
                                        qreal& y, qreal width, qreal indent, int quoteDepth, int listDepth,
-                                       const MarkdownTheme& theme, int& textOffset) const
+                                       const MarkdownTheme& theme, int& textOffset,
+                                       const QHash<QString, QImage>& images) const
 {
     const qreal right = width - theme.contentMargins.right();
     for (const auto& nodePtr : nodes) {
         const MarkdownNode& node = *nodePtr;
         if (node.type == MarkdownNodeType::BlockQuote) {
-            appendNodes(node.children, result, y, width, indent + 18, quoteDepth + 1, listDepth, theme, textOffset);
+            appendNodes(node.children, result, y, width, indent + 18, quoteDepth + 1, listDepth, theme, textOffset, images);
             continue;
         }
         // ListItem can arrive here from a nested list. Its parent marker policy is
@@ -171,7 +172,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                     if (block.taskItem) block.taskCheckRect = QRectF(indent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
                     result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + 3; first = false;
                 } else if (child->type == MarkdownNodeType::List) {
-                    appendNodes(child->children, result, y, width, indent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset);
+                    appendNodes(child->children, result, y, width, indent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset, images);
                 }
             }
             continue;
@@ -197,7 +198,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                         if (block.taskItem) block.taskCheckRect = QRectF(markerIndent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
                         result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + 3; first = false;
                     } else {
-                        appendNodes(child->children, result, y, width, markerIndent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset);
+                        appendNodes(child->children, result, y, width, markerIndent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset, images);
                     }
                 }
             }
@@ -278,13 +279,40 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
             BlockLayout block; block.kind = BlockKind::Image; block.imageUrl = imageNode.attributes.url;
             block.imageAlt = makeInline(imageNode, theme.bodyFont, theme, right - indent)->text;
             block.documentTextOffset = textOffset++;
-            block.rect = QRectF(indent, y, qMin<qreal>(right - indent, 360), 180);
-            result.blocks.push_back(std::move(block)); y += 180 + theme.blockGap; continue;
+            QSizeF intrinsic(360, 180);
+            if (const auto imgIt = images.constFind(block.imageUrl); imgIt != images.constEnd() && !imgIt->isNull()) {
+                intrinsic = imgIt->size();
+            }
+            const qreal maxW = right - indent;
+            const qreal maxH = 600;
+            qreal w = qMin<qreal>(intrinsic.width(), maxW);
+            qreal h = intrinsic.height() * (w / qMax<qreal>(1.0, intrinsic.width()));
+            if (h > maxH) {
+                h = maxH;
+                w = intrinsic.width() * (h / qMax<qreal>(1.0, intrinsic.height()));
+            }
+            block.rect = QRectF(indent, y, w, h);
+            block.imageIntrinsicSize = intrinsic;
+            result.blocks.push_back(std::move(block)); y += h + theme.blockGap; continue;
         }
         if (node.type == MarkdownNodeType::Image) {
             BlockLayout block; block.kind = BlockKind::Image; block.imageUrl = node.attributes.url; block.imageAlt = node.literal;
             block.documentTextOffset = textOffset++;
-            block.rect = QRectF(indent, y, qMin<qreal>(right - indent, 360), 180); result.blocks.push_back(std::move(block)); y += 180 + theme.blockGap; continue;
+            QSizeF intrinsic(360, 180);
+            if (const auto imgIt = images.constFind(block.imageUrl); imgIt != images.constEnd() && !imgIt->isNull()) {
+                intrinsic = imgIt->size();
+            }
+            const qreal maxW = right - indent;
+            const qreal maxH = 600;
+            qreal w = qMin<qreal>(intrinsic.width(), maxW);
+            qreal h = intrinsic.height() * (w / qMax<qreal>(1.0, intrinsic.width()));
+            if (h > maxH) {
+                h = maxH;
+                w = intrinsic.width() * (h / qMax<qreal>(1.0, intrinsic.height()));
+            }
+            block.rect = QRectF(indent, y, w, h);
+            block.imageIntrinsicSize = intrinsic;
+            result.blocks.push_back(std::move(block)); y += h + theme.blockGap; continue;
         }
         if (node.type != MarkdownNodeType::Paragraph && node.type != MarkdownNodeType::Heading && node.type != MarkdownNodeType::Html) continue;
         BlockLayout block; block.kind = node.type == MarkdownNodeType::Heading ? BlockKind::Heading : (node.type == MarkdownNodeType::Html ? BlockKind::Html : (quoteDepth ? BlockKind::QuoteContent : BlockKind::Paragraph));
@@ -296,11 +324,12 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
     }
 }
 
-DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qreal width, const MarkdownTheme& theme) const
+DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qreal width, const MarkdownTheme& theme,
+                                            const QHash<QString, QImage>& images) const
 {
     DocumentLayout result; result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
-    appendNodes(document.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset);
+    appendNodes(document.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
         if (b.inlineLayout) {
@@ -317,12 +346,13 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
 }
 
 DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocument, const MarkdownDocument& activeTail,
-                                            qreal width, const MarkdownTheme& theme) const
+                                            qreal width, const MarkdownTheme& theme,
+                                            const QHash<QString, QImage>& images) const
 {
     DocumentLayout result; result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
-    appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset);
-    appendNodes(activeTail.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset);
+    appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
+    appendNodes(activeTail.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
         if (b.inlineLayout) {

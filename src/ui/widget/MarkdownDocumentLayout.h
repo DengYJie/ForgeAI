@@ -26,6 +26,8 @@ public:
 
     void setWidth(qreal width);
     void setTheme(const ui::markdown::MarkdownTheme& theme);
+    void setImages(const QHash<QString, QImage>* images);
+    void forceRelayout();
 
     const ui::markdown::DocumentLayout& currentLayout() const;
     MarkdownDocumentLayoutMetrics metrics() const;
@@ -48,6 +50,7 @@ private:
     bool m_stableLayoutDirty = true;
     qreal m_stableLayoutWidth = -1;
     quint64 m_stableLayoutThemeVersion = 0;
+    const QHash<QString, QImage>* m_images = nullptr;
     MarkdownDocumentLayoutMetrics m_metrics;
 };
 

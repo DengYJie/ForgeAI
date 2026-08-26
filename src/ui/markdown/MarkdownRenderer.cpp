@@ -218,6 +218,33 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
                 return {HitKind::Text, i, block.documentTextOffset + cursor, {}};
             }
         }
+        if (block.kind == BlockKind::Table && block.table) {
+            qreal rowY = block.rect.top();
+            for (int row = 0; row < block.table->cells.size(); ++row) {
+                const qreal h = block.table->rowHeights.value(row);
+                qreal colX = block.rect.left();
+                for (int col = 0; col < block.table->columnWidths.size(); ++col) {
+                    const qreal w = block.table->columnWidths.value(col);
+                    const QRectF cellRect(colX, rowY, w, h);
+                    if (cellRect.contains(position) && row < block.table->cells.size() && col < block.table->cells[row].size()) {
+                        const auto& cell = block.table->cells[row][col];
+                        if (cell) {
+                            const int cursor = cell->cursorAt(position.x() - (colX + 8), position.y() - (rowY + 8));
+                            if (cursor >= 0) {
+                                for (const LinkRange& link : cell->links) {
+                                    if (cursor >= link.start && cursor <= link.start + link.length) {
+                                        return {HitKind::Link, i, block.documentTextOffset + cursor, link.url};
+                                    }
+                                }
+                                return {HitKind::Text, i, block.documentTextOffset + cursor, {}};
+                            }
+                        }
+                    }
+                    colX += w;
+                }
+                rowY += h;
+            }
+        }
         if (block.kind == BlockKind::CodeBlock) {
             const BlockScrollOffset scroll = scrollOffsets.value(i);
             qreal lineY = block.rect.top() + 42;

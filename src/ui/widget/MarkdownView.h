@@ -48,13 +48,10 @@ public:
     void setMarkdown(const QString &markdown);
     QString markdown() const;
     void clear();
-    void setHtml(const QString &html);
-    QString html() const;
 
     void beginStream();
     void appendMarkdown(const QString &chunk);
     void appendStreamingText(const QString &chunk);
-    void appendHtml(const QString &htmlFragment);
     void finishStream();
     void finishStreaming();
     bool isStreaming() const;
