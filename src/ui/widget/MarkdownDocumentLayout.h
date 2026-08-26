@@ -29,6 +29,7 @@ public:
     void setImages(const QHash<QString, QImage>* images);
     void forceRelayout();
     bool updateImageSize(const QString& source, const QSize& newSize);
+    ui::markdown::DocumentLayout measure(qreal maxWidth) const;
 
     const ui::markdown::DocumentLayout& currentLayout() const;
     MarkdownDocumentLayoutMetrics metrics() const;

@@ -61,7 +61,10 @@ QString languageName(QString fence)
 
 InlineLayout::InlineLayout(QString value, const QFont& baseFont, const QVector<QTextLayout::FormatRange>& formats,
                            QVector<LinkRange> linkRanges, qreal availableWidth, bool wrap)
-    : text(std::move(value)), layout(text, baseFont), links(std::move(linkRanges)), width(qMax<qreal>(1, availableWidth))
+    : text(std::move(value))
+    , layout(text, baseFont)
+    , links(std::move(linkRanges))
+    , availableWidth(qMax<qreal>(1, availableWidth))
 {
     QTextOption option;
     option.setWrapMode(wrap ? QTextOption::WrapAtWordBoundaryOrAnywhere : QTextOption::NoWrap);
@@ -74,14 +77,14 @@ InlineLayout::InlineLayout(QString value, const QFont& baseFont, const QVector<Q
     while (true) {
         QTextLine line = layout.createLine();
         if (!line.isValid()) break;
-        line.setLineWidth(width);
+        line.setLineWidth(this->availableWidth);
         line.setPosition(QPointF(0, y));
         y += line.height();
         maxLineWidth = qMax(maxLineWidth, line.naturalTextWidth());
     }
     layout.endLayout();
     height = y;
-    width = maxLineWidth;
+    usedWidth = maxLineWidth;
     if (height <= 0) height = QFontMetricsF(baseFont).height();
 }
 
@@ -225,7 +228,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                 QVector<QTextLayout::FormatRange> formats{{0, static_cast<int>(line.size()), base}};
                 formats += m_syntaxHighlighter.highlightLine(line, block.language, theme);
                 auto l = std::make_shared<InlineLayout>(line, theme.codeFont, formats, QVector<LinkRange>{}, 4096, false);
-                maxLineWidth = qMax(maxLineWidth, l->width);
+                maxLineWidth = qMax(maxLineWidth, l->usedWidth);
                 codeHeight += l->height; block.codeLines.push_back(l); block.codeLineOffsets.push_back(codeOffset);
                 codeOffset += static_cast<int>(line.size()) + 1;
             }
@@ -333,7 +336,7 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
         if (b.inlineLayout) {
-            maxContentWidth = qMax(maxContentWidth, b.contentX + b.inlineLayout->width + theme.contentMargins.right());
+            maxContentWidth = qMax(maxContentWidth, b.contentX + b.inlineLayout->usedWidth + theme.contentMargins.right());
         } else {
             maxContentWidth = qMax(maxContentWidth, b.rect.right() + theme.contentMargins.right());
         }
@@ -358,7 +361,7 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
         if (b.inlineLayout) {
-            maxContentWidth = qMax(maxContentWidth, b.contentX + b.inlineLayout->width + theme.contentMargins.right());
+            maxContentWidth = qMax(maxContentWidth, b.contentX + b.inlineLayout->usedWidth + theme.contentMargins.right());
         } else {
             maxContentWidth = qMax(maxContentWidth, b.rect.right() + theme.contentMargins.right());
         }

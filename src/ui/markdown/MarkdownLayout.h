@@ -18,8 +18,9 @@ struct InlineLayout {
     QString text;
     QTextLayout layout;
     QVector<LinkRange> links;
+    qreal availableWidth = 0;
+    qreal usedWidth = 0;
     qreal height = 0;
-    qreal width = 0;
 
     InlineLayout(QString value, const QFont& baseFont, const QVector<QTextLayout::FormatRange>& formats,
                  QVector<LinkRange> linkRanges, qreal availableWidth, bool wrap = true);

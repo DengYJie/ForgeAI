@@ -109,6 +109,17 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
     return false;
 }
 
+ui::markdown::DocumentLayout MarkdownDocumentLayout::measure(qreal maxWidth) const
+{
+    const qreal w = qMax<qreal>(1, maxWidth);
+    static const QHash<QString, QImage> emptyImages;
+    const auto& images = m_images ? *m_images : emptyImages;
+    if (m_controller->isStreaming()) {
+        return m_engine.layout(m_controller->stableDocument(), m_controller->tailDocument(), w, m_theme, images);
+    }
+    return m_engine.layout(m_controller->stableDocument(), w, m_theme, images);
+}
+
 const ui::markdown::DocumentLayout& MarkdownDocumentLayout::currentLayout() const
 {
     return m_currentLayout;

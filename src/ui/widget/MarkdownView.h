@@ -71,10 +71,19 @@ public:
     void setContentMargins(const QMarginsF& margins);
     void setTransparentBackground(bool transparent);
     bool isTransparentBackground() const;
+    enum class HorizontalSizingMode {
+        FillAvailable,
+        FitContent
+    };
+
+    void setHorizontalSizingMode(HorizontalSizingMode mode);
+    HorizontalSizingMode horizontalSizingMode() const;
+
+    void setPreferredWidthLimit(qreal width);
+    qreal preferredWidthLimit() const;
+
     void setAutoFitHeight(bool enable);
     bool isAutoFitHeight() const;
-    void setMaxContentWidth(qreal maxWidth);
-    qreal maxContentWidth() const;
 
     ui::markdown::BlockScrollOffset blockScrollOffset(int blockIndex) const;
     void setBlockScrollOffset(int blockIndex, const ui::markdown::BlockScrollOffset& offset);
@@ -147,6 +156,9 @@ private:
     QString documentPlainText() const;
     void requestImageResources();
     bool handleBlockWheel(QWheelEvent* event);
+    void invalidatePreferredSize();
+    void recalculatePreferredSize();
+    void updateActualLayoutWidth();
 
     MarkdownDocumentController* m_controller;
     MarkdownDocumentLayout* m_layoutCache;
@@ -159,11 +171,14 @@ private:
     QUrl m_baseUrl;
     MarkdownStyleSheet m_styleSheet;
     std::optional<QMarginsF> m_customContentMargins;
+    HorizontalSizingMode m_horizontalSizingMode = HorizontalSizingMode::FillAvailable;
+    qreal m_preferredWidthLimit = 0;
+    QSizeF m_preferredContentSize;
+    bool m_preferredSizeDirty = true;
     bool m_usesThemeStyleSheet = true;
     bool m_transparentBackground = true;
     bool m_autoFitHeight = false;
     int m_autoFitContentHeight = 1;
-    qreal m_maxContentWidth = 0;
     qreal m_zoomFactor = 1.0;
     bool m_allowNetworkAccess = true;
 

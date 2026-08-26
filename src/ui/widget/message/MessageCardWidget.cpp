@@ -181,7 +181,7 @@ namespace ui::widget::message {
             if (m_userBubbleCard) m_userBubbleCard->setMaximumWidth(maxBubbleWidth);
             const QMargins margins = m_bubbleLayout ? m_bubbleLayout->contentsMargins() : QMargins(10, 6, 10, 6);
             const int horizontalMargins = margins.left() + margins.right();
-            if (m_markdownView) m_markdownView->setMaxContentWidth(qMax(0, maxBubbleWidth - horizontalMargins));
+            if (m_markdownView) m_markdownView->setPreferredWidthLimit(qMax(0, maxBubbleWidth - horizontalMargins));
         }
     }
 
@@ -367,15 +367,17 @@ namespace ui::widget::message {
         }
 
         if (newMessage.role == domain::MessageRole::User) {
+            m_markdownView->setHorizontalSizingMode(ui::widget::MarkdownView::HorizontalSizingMode::FitContent);
             m_markdownView->setContentMargins(QMarginsF(0, 0, 0, 0));
             const int availableCardWidth = width() > 100 ? width() : 800;
             const int maxBubbleWidth = qMax(200, static_cast<int>(availableCardWidth * 0.85));
             const QMargins margins = m_bubbleLayout ? m_bubbleLayout->contentsMargins() : QMargins(10, 6, 10, 6);
             const int horizontalMargins = margins.left() + margins.right();
-            m_markdownView->setMaxContentWidth(qMax(0, maxBubbleWidth - horizontalMargins));
+            m_markdownView->setPreferredWidthLimit(qMax(0, maxBubbleWidth - horizontalMargins));
         } else {
+            m_markdownView->setHorizontalSizingMode(ui::widget::MarkdownView::HorizontalSizingMode::FillAvailable);
             m_markdownView->setContentMargins(QMarginsF(0, 2, 0, 2));
-            m_markdownView->setMaxContentWidth(0);
+            m_markdownView->setPreferredWidthLimit(0);
         }
 
         if (m_markdownView->markdown() != fullMarkdown) {
@@ -425,7 +427,7 @@ namespace ui::widget::message {
         m_message = {};
         if (m_markdownView) {
             m_markdownView->clear();
-            m_markdownView->setMaxContentWidth(0);
+            m_markdownView->setPreferredWidthLimit(0);
             m_markdownView->setContentMargins(QMarginsF(0, 2, 0, 2));
         }
         updateVisuals();
@@ -509,24 +511,22 @@ namespace ui::widget::message {
             }
         }
 
-        auto policy = m_markdownView->sizePolicy();
         if (isUser) {
-            policy.setHorizontalPolicy(QSizePolicy::Preferred);
+            m_markdownView->setHorizontalSizingMode(ui::widget::MarkdownView::HorizontalSizingMode::FitContent);
             m_markdownView->setContentMargins(QMarginsF(0, 0, 0, 0));
             const int availableCardWidth = width() > 100 ? width() : 800;
             const int maxBubbleWidth = qMax(200, static_cast<int>(availableCardWidth * 0.85));
             m_userBubbleCard->setMaximumWidth(maxBubbleWidth);
             const QMargins margins = m_bubbleLayout ? m_bubbleLayout->contentsMargins() : QMargins(10, 6, 10, 6);
             const int horizontalMargins = margins.left() + margins.right();
-            m_markdownView->setMaxContentWidth(qMax(0, maxBubbleWidth - horizontalMargins));
+            m_markdownView->setPreferredWidthLimit(qMax(0, maxBubbleWidth - horizontalMargins));
         }
         else {
-            policy.setHorizontalPolicy(QSizePolicy::Expanding);
+            m_markdownView->setHorizontalSizingMode(ui::widget::MarkdownView::HorizontalSizingMode::FillAvailable);
             m_markdownView->setContentMargins(QMarginsF(0, 2, 0, 2));
-            m_markdownView->setMaxContentWidth(0);
+            m_markdownView->setPreferredWidthLimit(0);
             m_headerWidget->setVisible(m_headerVisible);
         }
-        m_markdownView->setSizePolicy(policy);
 
         updateActionBarVisibility();
     }
