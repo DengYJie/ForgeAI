@@ -65,6 +65,19 @@ void MessageListView::setupUi()
     m_virtualRefreshTimer->setSingleShot(true);
     connect(m_virtualRefreshTimer, &QTimer::timeout, this, &MessageListView::updateVisibleCards);
 
+    m_resizeFrameTimer = new QTimer(this);
+    m_resizeFrameTimer->setSingleShot(true);
+    m_resizeFrameTimer->setInterval(16);
+    connect(m_resizeFrameTimer, &QTimer::timeout, this, &MessageListView::performResizeLayout);
+
+    m_resizeEndTimer = new QTimer(this);
+    m_resizeEndTimer->setSingleShot(true);
+    m_resizeEndTimer->setInterval(150);
+    connect(m_resizeEndTimer, &QTimer::timeout, this, [this] {
+        m_isResizing = false;
+        updateVisibleCards();
+    });
+
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         scheduleVirtualRefresh();
         if (!m_visibleCheckTimer->isActive()) m_visibleCheckTimer->start();
@@ -208,7 +221,8 @@ void MessageListView::updateVisibleCards()
     if (!viewport() || m_isRefreshingCards) return;
     m_isRefreshingCards = true;
     const int top = verticalScrollBar()->value();
-    const int preload = viewport()->height() * kPreloadViewports;
+    const qreal preloadFactor = m_isResizing ? 0.25 : kPreloadViewports;
+    const int preload = static_cast<int>(viewport()->height() * preloadFactor);
     const int first = findItemAtY(qMax(0, top - preload));
     const int last = findItemAtY(top + viewport()->height() + preload);
     QSet<QUuid> required;
@@ -227,14 +241,15 @@ void MessageListView::updateVisibleCards()
     bool heightsChanged = false;
     const int width = qMax(1, m_container->width() - 2 * kHorizontalMargin);
     const int x = kHorizontalMargin;
+
+    // Pass 1: Bind and measure with setAvailableWidth (no setGeometry yet)
     for (int index = first; index >= 0 && index <= end; ++index) {
         Item& item = m_items[index];
         MessageCardWidget* card = m_cardMap.value(item.message.id);
         const bool isNewCard = (card == nullptr);
         if (!card) { card = acquireCard(); m_cardMap.insert(item.message.id, card); }
-        // Width must be known before syncMessage() constructs Markdown layouts;
-        // otherwise a pooled card can measure at 1px and poison the height cache.
-        card->setGeometry(x, item.y, width, qMax(item.height, 1));
+
+        card->setAvailableWidth(width);
         const bool needsRebind = isNewCard
             || (card->message() != item.message)
             || (card->isAvatarVisible() != m_avatarVisible)
@@ -243,8 +258,14 @@ void MessageListView::updateVisibleCards()
             bindCard(card, item);
         }
         const int measured = qMax(1, card->heightForWidth(width));
-        if (measured != item.height) { item.height = measured; m_heightCache.insert(item.message.id, measured); heightsChanged = true; }
+        if (measured != item.height) {
+            item.height = measured;
+            m_heightCache.insert(item.message.id, measured);
+            heightsChanged = true;
+        }
     }
+
+    // Pass 2: Relayout items if heights changed
     if (heightsChanged) {
         relayoutItems();
         if (!m_autoScrollToBottom && !anchorId.isNull()) {
@@ -254,6 +275,8 @@ void MessageListView::updateVisibleCards()
             }
         }
     }
+
+    // Pass 3: Single Geometry Commit
     for (auto it = m_cardMap.cbegin(); it != m_cardMap.cend(); ++it) {
         const int index = itemIndex(it.key());
         if (index < 0) continue;
@@ -365,18 +388,36 @@ void MessageListView::wheelEvent(QWheelEvent* event)
     if (verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 10) m_autoScrollToBottom = true;
 }
 
+void MessageListView::performResizeLayout()
+{
+    const int currentWidth = m_container ? m_container->width() : width();
+    m_lastLayoutWidth = currentWidth;
+    relayoutItems();
+    updateVisibleCards();
+}
+
 void MessageListView::resizeEvent(QResizeEvent* event)
 {
     fluent::scrolling::ScrollView::resizeEvent(event);
-    relayoutItems();
-    updateVisibleCards();
+    m_isResizing = true;
+    if (m_resizeEndTimer) m_resizeEndTimer->start();
+
+    const int currentWidth = m_container ? m_container->width() : width();
+    if (m_lastLayoutWidth < 0 || m_lastLayoutWidth == currentWidth) {
+        performResizeLayout();
+        return;
+    }
+
+    if (m_resizeFrameTimer && !m_resizeFrameTimer->isActive()) {
+        performResizeLayout();
+        m_resizeFrameTimer->start();
+    }
 }
 
 void MessageListView::showEvent(QShowEvent* event)
 {
     fluent::scrolling::ScrollView::showEvent(event);
-    relayoutItems();
-    updateVisibleCards();
+    performResizeLayout();
     if (m_autoScrollToBottom) QTimer::singleShot(0, this, &MessageListView::executeFollowBottom);
 }
 

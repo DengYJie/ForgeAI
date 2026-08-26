@@ -65,6 +65,7 @@ namespace ui::widget::message {
 
         bool hasHeightForWidth() const override;
         int heightForWidth(int width) const override;
+        void setAvailableWidth(int width);
         QSize sizeHint() const override;
         QSize minimumSizeHint() const override;
 

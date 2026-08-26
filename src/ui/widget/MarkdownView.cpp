@@ -575,12 +575,12 @@ int MarkdownView::heightForWidth(int width) const
 {
     if (!m_autoFitHeight || width <= 0) return sizeHint().height();
     const qreal cw = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
-    if (qAbs(m_documentLayout.width - cw) < 1.0 && m_lastAutoFitHeight > 0) return m_lastAutoFitHeight;
-    ui::markdown::MarkdownLayoutEngine tmp;
-    const auto docLayout = m_controller->isStreaming()
-        ? tmp.layout(m_controller->stableDocument(), m_controller->tailDocument(), cw, m_theme, m_resources.images())
-        : tmp.layout(m_controller->stableDocument(), cw, m_theme, m_resources.images());
-    return qMax(16, qCeil(docLayout.size.height()));
+    if (qAbs(m_documentLayout.width - cw) < 0.5 && m_lastAutoFitHeight > 0) return m_lastAutoFitHeight;
+    if (m_layoutCache) {
+        const auto docLayout = m_layoutCache->measure(cw);
+        return qMax(16, qCeil(docLayout.size.height()));
+    }
+    return sizeHint().height();
 }
 
 // Preferred measurement and actual layout geometry must remain strictly independent.

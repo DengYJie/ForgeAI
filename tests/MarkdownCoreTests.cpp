@@ -18,6 +18,18 @@
 #include <QSignalSpy>
 #include <QPainter>
 #include <QTemporaryDir>
+#include <QMainWindow>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QLabel>
+#include <QTimer>
+#include <QEventLoop>
+#include <QFile>
+#include <QTextStream>
+#include <QDir>
+#include <QDateTime>
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -51,6 +63,7 @@ private slots:
     void inlineCodeSelectionPaintsSelectionBackground();
     void headingThemeColorIsApplied();
     void linkHoverHighlightIsApplied();
+    void visualTest();
 };
 
 void MarkdownCoreTests::parsesCommonMarkAndGfm()
@@ -558,6 +571,737 @@ void MarkdownCoreTests::linkHoverHighlightIsApplied()
     p2.end();
 
     QVERIFY(normal != hovered);
+}
+
+namespace {
+
+struct FrameDetail {
+    int frameIndex = 0;
+    qint64 timestampMs = 0;
+    qint64 intervalUs = 0;
+    qint64 durationUs = 0;
+    QSize windowSize;
+    int activeCards = 0;
+    int cardGeometryChanges = 0;
+    int maxPassesPerCard = 0;
+    int markdownFullParsesDelta = 0;
+    int markdownStableLayoutsDelta = 0;
+    int markdownTailLayoutsDelta = 0;
+};
+
+struct ResizeBenchmarkMetrics {
+    quint64 resizeEvents = 0;
+    quint64 coalesceableEvents = 0;
+    quint64 setGeometryEvents = 0;
+    quint64 paintEvents = 0;
+    qint64 totalResizeUs = 0;
+    qint64 minResizeUs = -1;
+    qint64 maxResizeUs = 0;
+    int maxGeometryPassesPerCardInSingleFrame = 0;
+    QVector<double> latencyHistoryMs;
+    QVector<FrameDetail> frameDetails;
+    QVector<FrameDetail> topWorstFrames;
+
+    void recordFrame(const FrameDetail& frame) {
+        ++resizeEvents;
+        totalResizeUs += frame.durationUs;
+        if (minResizeUs < 0 || frame.durationUs < minResizeUs) minResizeUs = frame.durationUs;
+        if (frame.durationUs > maxResizeUs) maxResizeUs = frame.durationUs;
+        if (frame.intervalUs > 0 && frame.intervalUs < 16000) ++coalesceableEvents;
+        if (frame.maxPassesPerCard > maxGeometryPassesPerCardInSingleFrame) {
+            maxGeometryPassesPerCardInSingleFrame = frame.maxPassesPerCard;
+        }
+        latencyHistoryMs.push_back(frame.durationUs / 1000.0);
+        frameDetails.push_back(frame);
+
+        topWorstFrames.push_back(frame);
+        std::sort(topWorstFrames.begin(), topWorstFrames.end(), [](const FrameDetail& a, const FrameDetail& b) {
+            return a.durationUs > b.durationUs;
+        });
+        if (topWorstFrames.size() > 5) topWorstFrames.resize(5);
+    }
+
+    double avgMs() const {
+        return resizeEvents > 0 ? (totalResizeUs / (1000.0 * resizeEvents)) : 0.0;
+    }
+
+    double p95Ms() const {
+        if (latencyHistoryMs.isEmpty()) return 0.0;
+        QVector<double> sorted = latencyHistoryMs;
+        std::sort(sorted.begin(), sorted.end());
+        const int idx = qMin(sorted.size() - 1, static_cast<int>(sorted.size() * 0.95));
+        return sorted.at(idx);
+    }
+
+    double coalescePotentialPercent() const {
+        return resizeEvents > 1 ? (100.0 * coalesceableEvents / (resizeEvents - 1)) : 0.0;
+    }
+};
+
+class ResizeHotspotFilter;
+
+class BenchmarkMessageListView : public ui::widget::message::MessageListView {
+public:
+    using MessageListView::MessageListView;
+    void setFilter(ResizeHotspotFilter* filter);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
+private:
+    ResizeHotspotFilter* m_filter = nullptr;
+};
+
+class ResizeHotspotFilter : public QObject {
+public:
+    explicit ResizeHotspotFilter(ui::widget::message::MessageListView* listView, QLabel* hudLabel, QObject* parent = nullptr)
+        : QObject(parent), m_listView(listView), m_hudLabel(hudLabel)
+    {
+        m_idleTimer = new QTimer(this);
+        m_idleTimer->setSingleShot(true);
+        m_idleTimer->setInterval(600);
+        connect(m_idleTimer, &QTimer::timeout, this, &ResizeHotspotFilter::dumpSessionSummary);
+    }
+
+    void resetMetrics() {
+        m_metrics = {};
+        m_sessionStartTimer.invalidate();
+        m_lastEventTimeUs = 0;
+        updateHud();
+    }
+
+    ResizeBenchmarkMetrics metrics() const { return m_metrics; }
+
+    void onResizeBegin() {
+        if (!m_sessionStartTimer.isValid()) m_sessionStartTimer.start();
+        const qint64 nowUs = m_sessionStartTimer.nsecsElapsed() / 1000;
+        m_currentIntervalUs = m_lastEventTimeUs > 0 ? (nowUs - m_lastEventTimeUs) : 0;
+        m_lastEventTimeUs = nowUs;
+        m_currentFrameTimestampMs = nowUs / 1000;
+
+        m_mdFullParsesBefore = 0;
+        m_mdStableLayoutsBefore = 0;
+        m_mdTailLayoutsBefore = 0;
+        const auto markdownViews = m_listView->findChildren<ui::widget::MarkdownView*>();
+        for (auto* v : markdownViews) {
+            const auto m = v->metrics();
+            m_mdFullParsesBefore += m.fullParseCount;
+            m_mdStableLayoutsBefore += m.stableLayoutCount;
+            m_mdTailLayoutsBefore += m.tailLayoutCount;
+        }
+
+        m_inResizePass = true;
+        m_frameCardGeometryCounts.clear();
+    }
+
+    void onResizeEnd(QWidget* widget, qint64 durationUs) {
+        m_inResizePass = false;
+
+        int mdFullParsesAfter = 0;
+        int mdStableLayoutsAfter = 0;
+        int mdTailLayoutsAfter = 0;
+        const auto markdownViews = m_listView->findChildren<ui::widget::MarkdownView*>();
+        for (auto* v : markdownViews) {
+            const auto m = v->metrics();
+            mdFullParsesAfter += m.fullParseCount;
+            mdStableLayoutsAfter += m.stableLayoutCount;
+            mdTailLayoutsAfter += m.tailLayoutCount;
+        }
+
+        int maxPasses = 0;
+        int frameGeometryChanges = 0;
+        for (auto count : m_frameCardGeometryCounts) {
+            frameGeometryChanges += count;
+            maxPasses = qMax(maxPasses, count);
+        }
+
+        FrameDetail frame;
+        frame.frameIndex = static_cast<int>(m_metrics.resizeEvents + 1);
+        frame.timestampMs = m_currentFrameTimestampMs;
+        frame.intervalUs = m_currentIntervalUs;
+        frame.durationUs = durationUs;
+        if (widget) {
+            frame.windowSize = widget->size();
+        }
+        frame.activeCards = m_listView->activeCardCount();
+        frame.cardGeometryChanges = frameGeometryChanges;
+        frame.maxPassesPerCard = maxPasses;
+        frame.markdownFullParsesDelta = mdFullParsesAfter - m_mdFullParsesBefore;
+        frame.markdownStableLayoutsDelta = mdStableLayoutsAfter - m_mdStableLayoutsBefore;
+        frame.markdownTailLayoutsDelta = mdTailLayoutsAfter - m_mdTailLayoutsBefore;
+
+        m_metrics.recordFrame(frame);
+        m_idleTimer->start();
+        updateHud();
+    }
+
+    void dumpSessionSummary() {
+        if (m_metrics.resizeEvents == 0) return;
+
+        int totalFullParses = 0;
+        int totalStableLayouts = 0;
+        int totalTailLayouts = 0;
+        const auto markdownViews = m_listView->findChildren<ui::widget::MarkdownView*>();
+        for (auto* view : markdownViews) {
+            const auto m = view->metrics();
+            totalFullParses += m.fullParseCount;
+            totalStableLayouts += m.stableLayoutCount;
+            totalTailLayouts += m.tailLayoutCount;
+        }
+
+        const qint64 durationMs = m_sessionStartTimer.elapsed();
+        const QString logPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("resize_hotspot_profile.log"));
+
+        qInfo().noquote() << QStringLiteral(
+            "\n======================= [Resize Hotspot Session Summary] =======================\n"
+            "Active Scenario: %1\n"
+            "Message Count: %2 | Active Cards: %3 | Markdown Views: %4\n"
+            "Session Duration: %5 ms | Resize Events: %6\n\n"
+            "[1. Latency & Frame Cost]\n"
+            "  Avg Resize Pass  : %7 ms\n"
+            "  Min Resize Pass  : %8 ms\n"
+            "  Max (Worst Frame): %9 ms\n"
+            "  P95 Resize Pass  : %10 ms\n\n"
+            "[2. Hotspots & Churn Indicators]\n"
+            "  Total Card setGeometry Calls   : %11 (avg %12 / resize, max single-card churn: %13/frame)\n"
+            "  Card / Viewport Paint Events   : %14\n"
+            "  Total Markdown Full Parses     : %15\n"
+            "  Total Markdown Layouts         : %16 (Stable) / %17 (Tail)\n\n"
+            "[3. Coalescing Potential (16ms Frame Merge)]\n"
+            "  Events within <16ms of previous: %18 / %19 (%20% can be coalesced)\n\n"
+            "-> [Detailed Diagnostic Log Saved To]:\n"
+            "   %21\n"
+            "================================================================================"
+        ).arg(m_scenarioName)
+         .arg(m_listView->messageCount())
+         .arg(m_listView->activeCardCount())
+         .arg(markdownViews.size())
+         .arg(durationMs)
+         .arg(m_metrics.resizeEvents)
+         .arg(m_metrics.avgMs(), 0, 'f', 2)
+         .arg(m_metrics.minResizeUs >= 0 ? m_metrics.minResizeUs / 1000.0 : 0.0, 0, 'f', 2)
+         .arg(m_metrics.maxResizeUs / 1000.0, 0, 'f', 2)
+         .arg(m_metrics.p95Ms(), 0, 'f', 2)
+         .arg(m_metrics.setGeometryEvents)
+         .arg(m_metrics.resizeEvents > 0 ? (double)m_metrics.setGeometryEvents / m_metrics.resizeEvents : 0.0, 0, 'f', 2)
+         .arg(m_metrics.maxGeometryPassesPerCardInSingleFrame)
+         .arg(m_metrics.paintEvents)
+         .arg(totalFullParses)
+         .arg(totalStableLayouts)
+         .arg(totalTailLayouts)
+         .arg(m_metrics.coalesceableEvents)
+         .arg(m_metrics.resizeEvents > 1 ? (m_metrics.resizeEvents - 1) : 0)
+         .arg(m_metrics.coalescePotentialPercent(), 0, 'f', 1)
+         .arg(logPath);
+
+        QFile file(logPath);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QTextStream out(&file);
+            out << QStringLiteral("\n================================================================================\n");
+            out << QStringLiteral("[SESSION TIMESTAMP]: ") << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << QStringLiteral("\n");
+            out << QStringLiteral("Scenario: ") << m_scenarioName << QStringLiteral("\n");
+            out << QStringLiteral("Message Count: ") << m_listView->messageCount()
+                << QStringLiteral(" | Active Cards: ") << m_listView->activeCardCount()
+                << QStringLiteral(" | Markdown Views: ") << markdownViews.size() << QStringLiteral("\n");
+            out << QStringLiteral("Session Duration: ") << durationMs << QStringLiteral(" ms | Total Resize Events: ") << m_metrics.resizeEvents << QStringLiteral("\n");
+            out << QStringLiteral("Avg Frame: ") << QString::number(m_metrics.avgMs(), 'f', 2)
+                << QStringLiteral(" ms | Min: ") << QString::number(m_metrics.minResizeUs / 1000.0, 'f', 2)
+                << QStringLiteral(" ms | Max: ") << QString::number(m_metrics.maxResizeUs / 1000.0, 'f', 2)
+                << QStringLiteral(" ms | P95: ") << QString::number(m_metrics.p95Ms(), 'f', 2) << QStringLiteral(" ms\n");
+            out << QStringLiteral("Total setGeometry: ") << m_metrics.setGeometryEvents
+                << QStringLiteral(" | Max setGeometry/Card/Frame: ") << m_metrics.maxGeometryPassesPerCardInSingleFrame
+                << QStringLiteral(" | Total Paints: ") << m_metrics.paintEvents << QStringLiteral("\n");
+            out << QStringLiteral("Markdown Parses: ") << totalFullParses
+                << QStringLiteral(" | Stable Layouts: ") << totalStableLayouts
+                << QStringLiteral(" | Tail Layouts: ") << totalTailLayouts << QStringLiteral("\n");
+            out << QStringLiteral("Coalescing Potential: ") << m_metrics.coalesceableEvents << QStringLiteral("/")
+                << (m_metrics.resizeEvents > 1 ? m_metrics.resizeEvents - 1 : 0)
+                << QStringLiteral(" (") << QString::number(m_metrics.coalescePotentialPercent(), 'f', 1) << QStringLiteral("%)\n\n");
+
+            out << QStringLiteral("--- [TOP 5 SLOWEST (WORST) FRAMES] ---\n");
+            for (int i = 0; i < m_metrics.topWorstFrames.size(); ++i) {
+                const auto& wf = m_metrics.topWorstFrames[i];
+                out << QStringLiteral("  #%1: Frame #%2 | Latency: %3 ms | Window: %4x%5 | Cards: %6 | setGeometry: %7 | Inter-event interval: %8 ms\n")
+                    .arg(i + 1)
+                    .arg(wf.frameIndex)
+                    .arg(wf.durationUs / 1000.0, 0, 'f', 2)
+                    .arg(wf.windowSize.width())
+                    .arg(wf.windowSize.height())
+                    .arg(wf.activeCards)
+                    .arg(wf.cardGeometryChanges)
+                    .arg(wf.intervalUs / 1000.0, 0, 'f', 2);
+            }
+
+            out << QStringLiteral("\n--- [FRAME-BY-FRAME TIMELINE (First 100 Frames)] ---\n");
+            out << QStringLiteral("Index | Delta (ms) | Interval (ms) | Win Width x Height | Active Cards | setGeometry | MD Layouts\n");
+            const int sampleCount = qMin<int>(m_metrics.frameDetails.size(), 100);
+            for (int i = 0; i < sampleCount; ++i) {
+                const auto& fd = m_metrics.frameDetails[i];
+                out << QStringLiteral("%1 | %2 ms | %3 ms | %4x%5 | %6 | %7 | +%8\n")
+                    .arg(fd.frameIndex, 5)
+                    .arg(fd.durationUs / 1000.0, 8, 'f', 2)
+                    .arg(fd.intervalUs / 1000.0, 8, 'f', 2)
+                    .arg(fd.windowSize.width(), 4)
+                    .arg(fd.windowSize.height(), 4)
+                    .arg(fd.activeCards, 4)
+                    .arg(fd.cardGeometryChanges, 4)
+                    .arg(fd.markdownStableLayoutsDelta + fd.markdownTailLayoutsDelta, 3);
+            }
+            if (m_metrics.frameDetails.size() > 100) {
+                out << QStringLiteral("... (%1 more frames recorded in session)\n").arg(m_metrics.frameDetails.size() - 100);
+            }
+            out << QStringLiteral("================================================================================\n\n");
+            file.close();
+        }
+    }
+
+    void setScenarioName(const QString& name) {
+        m_scenarioName = name;
+        resetMetrics();
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Move) {
+            if (watched->isWidgetType() && watched != m_listView) {
+                ++m_metrics.setGeometryEvents;
+                if (m_inResizePass) {
+                    m_frameCardGeometryCounts[watched]++;
+                }
+            }
+        } else if (event->type() == QEvent::Paint) {
+            ++m_metrics.paintEvents;
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    void updateHud() {
+        if (!m_hudLabel) return;
+        m_hudLabel->setText(QStringLiteral(
+            "<b>场景:</b> %1 | <b>消息:</b> %2 (活跃卡片: %3) | <b>Resize事件:</b> %4 | "
+            "<b>平均耗时:</b> <font color='%5'>%6 ms</font> | <b>P95:</b> %7 ms | <b>几何更新:</b> %8 | "
+            "<b>合并潜力:</b> %9%"
+        ).arg(m_scenarioName)
+         .arg(m_listView->messageCount())
+         .arg(m_listView->activeCardCount())
+         .arg(m_metrics.resizeEvents)
+         .arg(m_metrics.avgMs() > 16.0 ? QStringLiteral("#d9534f") : QStringLiteral("#5cb85c"))
+         .arg(m_metrics.avgMs(), 0, 'f', 2)
+         .arg(m_metrics.p95Ms(), 0, 'f', 2)
+         .arg(m_metrics.setGeometryEvents)
+         .arg(m_metrics.coalescePotentialPercent(), 0, 'f', 1));
+    }
+
+    ui::widget::message::MessageListView* m_listView = nullptr;
+    QLabel* m_hudLabel = nullptr;
+    ResizeBenchmarkMetrics m_metrics;
+    QElapsedTimer m_sessionStartTimer;
+    qint64 m_lastEventTimeUs = 0;
+    qint64 m_currentIntervalUs = 0;
+    qint64 m_currentFrameTimestampMs = 0;
+    int m_mdFullParsesBefore = 0;
+    int m_mdStableLayoutsBefore = 0;
+    int m_mdTailLayoutsBefore = 0;
+    bool m_inResizePass = false;
+    QHash<QObject*, int> m_frameCardGeometryCounts;
+    QTimer* m_idleTimer = nullptr;
+    QString m_scenarioName = QStringLiteral("D. cmark-gfm 全特性全景展示");
+};
+
+void BenchmarkMessageListView::setFilter(ResizeHotspotFilter* filter)
+{
+    m_filter = filter;
+}
+
+void BenchmarkMessageListView::resizeEvent(QResizeEvent* event)
+{
+    if (m_filter) m_filter->onResizeBegin();
+    QElapsedTimer timer;
+    timer.start();
+    ui::widget::message::MessageListView::resizeEvent(event);
+    const qint64 elapsedUs = timer.nsecsElapsed() / 1000;
+    if (m_filter) m_filter->onResizeEnd(this, elapsedUs);
+}
+
+static QList<domain::conversation::Message> createScenarioA() {
+    QList<domain::conversation::Message> list;
+    for (int i = 0; i < 20; ++i) {
+        domain::conversation::Message msg;
+        msg.id = QUuid::createUuid();
+        msg.role = (i % 2 == 0) ? domain::MessageRole::User : domain::MessageRole::Assistant;
+        const QString text = (i % 2 == 0)
+            ? QStringLiteral("用户提问 %1：请问如何使用 Qt 设计高性能的聊天界面？").arg(i / 2 + 1)
+            : QStringLiteral("助手回答 %1：使用 QListView 或虚拟化卡片，结合 QTextLayout 分离排版与渲染即可。").arg(i / 2 + 1);
+        msg.blocks.append(domain::conversation::MessageBlock{domain::BlockType::Text, domain::conversation::TextBlock{text}});
+        list.append(std::move(msg));
+    }
+    return list;
+}
+
+static QList<domain::conversation::Message> createScenarioB() {
+    QList<domain::conversation::Message> list;
+    for (int i = 0; i < 200; ++i) {
+        domain::conversation::Message msg;
+        msg.id = QUuid::createUuid();
+        msg.role = (i % 2 == 0) ? domain::MessageRole::User : domain::MessageRole::Assistant;
+        QString text;
+        if (i % 2 == 0) {
+            text = QStringLiteral("### 提问 #%1\n在开发 Qt 应用程序时，`QWidget::resizeEvent` 高频触发有哪些优化手段？").arg(i + 1);
+        } else {
+            text = QStringLiteral("这是第 %1 条回复。\n\n- 使用 16ms 定时器合并 ResizeEvent 达到帧对齐\n- 降低不可见区域的 Preload Viewport 数量\n- 为 Markdown排版增加宽度感知（width-aware）缓存").arg(i + 1);
+        }
+        msg.blocks.append(domain::conversation::MessageBlock{domain::BlockType::Text, domain::conversation::TextBlock{text}});
+        list.append(std::move(msg));
+    }
+    return list;
+}
+
+static QList<domain::conversation::Message> createScenarioC() {
+    QList<domain::conversation::Message> list;
+    for (int i = 0; i < 200; ++i) {
+        domain::conversation::Message msg;
+        msg.id = QUuid::createUuid();
+        msg.role = (i % 2 == 0) ? domain::MessageRole::User : domain::MessageRole::Assistant;
+        QString text;
+        if (i % 2 == 0) {
+            text = QStringLiteral("请给出一份完整的 C++ 代码和性能对比表格，用于说明虚拟化列表的架构设计。");
+        } else if (i % 10 == 1) {
+            text = QStringLiteral(
+                "# 深入解析 Qt 虚拟列表与 Markdown 渲染引擎\n\n"
+                "在现代客户端应用开发中，**高频窗口缩放**与**大量富文本流式输出**对 GUI 框架提出了极高的要求。\n\n"
+                "## 架构对比表\n\n"
+                "| 阶段 | 传统方案 | 优化方案 | 性能提升 |\n"
+                "|---|---|---|---|\n"
+                "| 事件处理 | 每次 Resize 同步重排 | 16ms 帧合并调度 | 60% CPU 降低 |\n"
+                "| 测量范围 | 全量 2000 项或 5 视口 | 仅视口可见卡片 | 85% 测量减少 |\n"
+                "| 布局缓存 | 单一槽位或无缓存 | LRU Width-Aware 缓存 | 90% 重排消除 |\n"
+                "| 文本绘制 | QTextDocument | QTextLayout + Block Culling | 70% 渲染加速 |\n\n"
+                "## 核心 C++ 实现示例\n\n"
+                "```cpp\n"
+                "#include <QTextLayout>\n"
+                "#include <QPainter>\n\n"
+                "class OptimizedMessageCard {\n"
+                "public:\n"
+                "    void setAvailableWidth(int width) {\n"
+                "        if (m_width == width) return;\n"
+                "        m_width = width;\n"
+                "        m_height = measureHeight(width);\n"
+                "    }\n"
+                "    int height() const { return m_height; }\n"
+                "private:\n"
+                "    int m_width = 0;\n"
+                "    int m_height = 0;\n"
+                "};\n"
+                "```\n\n"
+                "### 任务检查清单\n\n"
+                "- [x] 建立基准测试与热点分析工具\n"
+                "- [ ] 实现 16ms Resize 帧合并\n"
+                "- [ ] 降低 Interactive Resize 的预加载视口\n"
+                "- [ ] 接入 Width-Aware 测量缓存\n\n"
+                "> 提示：通过解耦 `heightForWidth` 测量与实际 `setGeometry`，可以彻底消灭反复重绘震荡。"
+            );
+        } else {
+            text = QStringLiteral("普通消息 %1：包含 `QTextLayout`、`QPainter` 与 `ScrollView` 的综合运用。").arg(i + 1);
+        }
+        msg.blocks.append(domain::conversation::MessageBlock{domain::BlockType::Text, domain::conversation::TextBlock{text}});
+        list.append(std::move(msg));
+    }
+    return list;
+}
+
+static QList<domain::conversation::Message> createScenarioAllCmarkGfmFeatures() {
+    QList<domain::conversation::Message> list;
+
+    // User prompt
+    {
+        domain::conversation::Message msg;
+        msg.id = QUuid::createUuid();
+        msg.role = domain::MessageRole::User;
+        msg.blocks.append(domain::conversation::MessageBlock{
+            domain::BlockType::Text,
+            domain::conversation::TextBlock{QStringLiteral("请展示 cmark-gfm 支持的所有 Markdown 语法和扩展特性的完整渲染效果。")}
+        });
+        list.append(std::move(msg));
+    }
+
+    // Assistant mega-document with all cmark-gfm features
+    {
+        domain::conversation::Message msg;
+        msg.id = QUuid::createUuid();
+        msg.role = domain::MessageRole::Assistant;
+
+        const QString fullMarkdown = QStringLiteral(
+            "# 1. 标题层级 (ATX & Setext Headings)\n\n"
+            "# Heading 1 一级标题\n"
+            "## Heading 2 二级标题\n"
+            "### Heading 3 三级标题\n"
+            "#### Heading 4 四级标题\n"
+            "##### Heading 5 五级标题\n"
+            "###### Heading 6 六级标题\n\n"
+            "Setext Heading 1 一级底线标题\n"
+            "=============================\n\n"
+            "Setext Heading 2 二级底线标题\n"
+            "-----------------------------\n\n"
+            "---\n\n"
+            "# 2. 行内文本样式 (Inline Formats)\n\n"
+            "这是普通正文文本，支持各种字符混排与中英文间距。以下是常用行内修饰：\n\n"
+            "- **粗体文本** (`**bold**`) 与 __粗体下划线__ (`__bold__`)\n"
+            "- *斜体文本* (`*italic*`) 与 _斜体下划线_ (`_italic_`)\n"
+            "- ***粗斜体文本*** (`***bold italic***`)\n"
+            "- ~~删除线文本 (GFM Extension)~~ (`~~strikethrough~~`)\n"
+            "- 内联代码：`QFile`、`QTextStream`、`QSettings` 与 `` `含反引号的转义代码` ``\n"
+            "- 交互式超链接：[ForgeAI 官方仓库链接 (Hover测试)](https://github.com/DengYJie/ForgeAI)\n"
+            "- GFM 自动链接识别：https://github.com 与 <support@forge.ai>\n"
+            "- 行内 HTML 标签：<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> 以及 <span>自定义行内文字</span>\n"
+            "- 硬换行与软换行测试：\n"
+            "  第一行文本（末尾带反斜杠）\\\n"
+            "  强制换到第二行。\n\n"
+            "---\n\n"
+            "# 3. 引用块 (Blockquotes)\n\n"
+            "> 单层引用块：ForgeAI 采用自研的基于 QTextLayout 的分层排版引擎。\n"
+            ">\n"
+            "> > 嵌套第二层引用：解耦了 Preferred Size 与 Actual Viewport Layout。\n"
+            "> >\n"
+            "> > > 嵌套第三层引用：支持流式增量追加与尾部局部重排。\n\n"
+            "> 带内部格式的引用块：\n"
+            "> - 引用内的列表项 1：`inline code`\n"
+            "> - 引用内的列表项 2：**加粗结论**\n\n"
+            "---\n\n"
+            "# 4. 列表与任务清单 (Lists & GFM TaskLists)\n\n"
+            "### 无序列表 (Unordered List)\n"
+            "- 项目 A (`-` 标记)\n"
+            "  * 嵌套项目 A.1 (`*` 标记)\n"
+            "    + 嵌套项目 A.1.1 (`+` 标记)\n"
+            "- 项目 B\n\n"
+            "### 有序列表 (Ordered List)\n"
+            "1. 第一步：解析 Markdown 抽象语法树 (cmark-gfm)\n"
+            "2. 第二步：执行分块几何布局 (MarkdownLayoutEngine)\n"
+            "   1. 计算行高与字形折行\n"
+            "   2. 缓存测量尺寸\n"
+            "3. 第三步：视口裁剪并高效绘制 (MarkdownRenderer)\n\n"
+            "### GFM 任务列表 (Task Lists - 交互复选框)\n"
+            "- [x] 已完成的核心特性：CommonMark 基础语法解析\n"
+            "- [x] 已完成的核心特性：GFM 表格与删除线\n"
+            "- [x] 已完成的核心特性：内联代码块圆角胶囊与选中高亮\n"
+            "- [ ] 待优化的性能项：16ms 窗口缩放事件帧合并\n"
+            "- [ ] 待优化的性能项：Interactive Resize 预加载视口降低\n"
+            "- [ ] 待优化的性能项：Markdown 统一 Width-Aware LRU 缓存\n\n"
+            "---\n\n"
+            "# 5. GFM 表格 (Tables with Alignment)\n\n"
+            "| 功能特性 | 默认对齐 | 居中对齐 (`:---:`) | 靠右对齐 (`---:`) | 状态 |\n"
+            "|:---|:---|:---:|---:|:---:|\n"
+            "| **基础解析** | cmark-gfm AST | AST 节点遍历 | 0.8 ms | ✅ 已完成 |\n"
+            "| **行内样式** | `*italic*`, `**bold**` | `~~strike~~` | 1.2 ms | ✅ 已完成 |\n"
+            "| **代码高亮** | C++, Python, JSON | 关键词/字符串/注释 | 2.5 ms | ✅ 已完成 |\n"
+            "| **视口裁剪** | 仅绘制可见 Block | `firstVisibleBlock` | 0.3 ms | ✅ 已完成 |\n"
+            "| **窗口缩放** | 实时测量 | 帧合并 + LRU 缓存 | < 5 ms | 🚀 计划中 |\n\n"
+            "---\n\n"
+            "# 6. 代码块与语法高亮 (Fenced Code Blocks)\n\n"
+            "### C++ 代码高亮示例\n"
+            "```cpp\n"
+            "#include <iostream>\n"
+            "#include <memory>\n"
+            "#include \"ui/markdown/MarkdownTheme.h\"\n\n"
+            "// 计算窗口缩放时的视口几何\n"
+            "int calculateOptimalHeight(int availableWidth, const ui::markdown::MarkdownTheme& theme) {\n"
+            "    const double ratio = 16.0 / 9.0;\n"
+            "    int calculatedHeight = static_cast<int>(availableWidth / ratio) + 24;\n"
+            "    std::cout << \"Calculated: \" << calculatedHeight << std::endl;\n"
+            "    return calculatedHeight;\n"
+            "}\n"
+            "```\n\n"
+            "### Python 代码高亮示例\n"
+            "```python\n"
+            "import os\n"
+            "import sys\n\n"
+            "def analyze_resize_storm(events: list[int]) -> dict:\n"
+            "    \"\"\"分析窗口缩放事件的延迟与瓶颈\"\"\"\n"
+            "    avg_latency = sum(events) / max(1, len(events))\n"
+            "    return {\n"
+            "        \"total_events\": len(events),\n"
+            "        \"avg_ms\": round(avg_latency, 2),\n"
+            "        \"is_smooth\": avg_latency < 16.0\n"
+            "    }\n"
+            "```\n\n"
+            "### JSON 数据高亮示例\n"
+            "```json\n"
+            "{\n"
+            "  \"projectName\": \"ForgeAI\",\n"
+            "  \"version\": \"1.7.1\",\n"
+            "  \"features\": {\n"
+            "    \"virtualListView\": true,\n"
+            "    \"markdownRenderer\": true,\n"
+            "    \"frameCoalescing\": false\n"
+            "  },\n"
+            "  \"benchmarkTargetFps\": 60\n"
+            "}\n"
+            "```\n\n"
+            "### 4空格缩进代码块 (Indented Code Block)\n\n"
+            "    // 这是 4 空格缩进代码块\n"
+            "    QPoint pos = event->position().toPoint();\n"
+            "    emit clicked(pos);\n\n"
+            "---\n\n"
+            "# 7. 图片与多媒体占位 (Images)\n\n"
+            "![ForgeAI 系统架构设计图](architecture_diagram_preview.png)\n\n"
+            "---\n\n"
+            "# 8. 原始 HTML 块 (Raw HTML Blocks)\n\n"
+            "<div style=\"border: 1px solid #0f6cbd; padding: 10px; border-radius: 6px;\">\n"
+            "    <b>提示信息：</b> 本文档综合测试了 cmark-gfm 所包含的全部规范与扩展特性。\n"
+            "</div>\n\n"
+            "---\n\n"
+            "# 9. 分割线 (Thematic Breaks)\n\n"
+            "使用 `---`：\n"
+            "---\n"
+            "使用 `***`：\n"
+            "***\n"
+            "使用 `___`：\n"
+            "___\n\n"
+            "**全量特性展示结束。**"
+        );
+
+        msg.blocks.append(domain::conversation::MessageBlock{
+            domain::BlockType::Text,
+            domain::conversation::TextBlock{fullMarkdown}
+        });
+        list.append(std::move(msg));
+    }
+
+    return list;
+}
+
+} // namespace
+
+void MarkdownCoreTests::visualTest()
+{
+    const QString logPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("resize_hotspot_profile.log"));
+    QFile::remove(logPath);
+
+    QMainWindow window;
+    window.setWindowTitle(QStringLiteral("MessageListView 窗口缩放性能热点测试 [ForgeAI Benchmark & cmark-gfm Showcase]"));
+    window.resize(980, 720);
+
+    auto* central = new QWidget(&window);
+    auto* mainLayout = new QVBoxLayout(central);
+    mainLayout->setContentsMargins(12, 12, 12, 12);
+    mainLayout->setSpacing(8);
+
+    auto* hudLabel = new QLabel(central);
+    hudLabel->setStyleSheet(QStringLiteral("background: #2b2b2b; color: #ffffff; padding: 8px; border-radius: 6px; font-family: 'Segoe UI', sans-serif; font-size: 13px;"));
+    mainLayout->addWidget(hudLabel);
+
+    auto* toolLayout = new QHBoxLayout();
+    auto* btnA = new QPushButton(QStringLiteral("A. 20条短消息"), central);
+    auto* btnB = new QPushButton(QStringLiteral("B. 200条普通消息"), central);
+    auto* btnC = new QPushButton(QStringLiteral("C. 200条+长Markdown"), central);
+    auto* btnD = new QPushButton(QStringLiteral("D. cmark-gfm 全特性全景"), central);
+    auto* btnE = new QPushButton(QStringLiteral("E. 流式输出+实时Resize"), central);
+    auto* btnReset = new QPushButton(QStringLiteral("重置统计"), central);
+    toolLayout->addWidget(btnA);
+    toolLayout->addWidget(btnB);
+    toolLayout->addWidget(btnC);
+    toolLayout->addWidget(btnD);
+    toolLayout->addWidget(btnE);
+    toolLayout->addWidget(btnReset);
+    toolLayout->addStretch();
+    mainLayout->addLayout(toolLayout);
+
+    auto* listView = new BenchmarkMessageListView(central);
+    mainLayout->addWidget(listView, 1);
+    window.setCentralWidget(central);
+
+    auto* filter = new ResizeHotspotFilter(listView, hudLabel, &window);
+    listView->setFilter(filter);
+    listView->installEventFilter(filter);
+    if (listView->viewport()) listView->viewport()->installEventFilter(filter);
+
+    auto* streamTimer = new QTimer(&window);
+    streamTimer->setInterval(35);
+
+    auto loadScenario = [&](const QString& name, const QList<domain::conversation::Message>& msgs) {
+        streamTimer->stop();
+        filter->setScenarioName(name);
+        listView->syncMessages(msgs);
+        QCoreApplication::processEvents();
+    };
+
+    QObject::connect(btnA, &QPushButton::clicked, [&] { loadScenario(QStringLiteral("A. 20条短消息"), createScenarioA()); });
+    QObject::connect(btnB, &QPushButton::clicked, [&] { loadScenario(QStringLiteral("B. 200条普通消息"), createScenarioB()); });
+    QObject::connect(btnC, &QPushButton::clicked, [&] { loadScenario(QStringLiteral("C. 200条 + 长Markdown (高负载)"), createScenarioC()); });
+    QObject::connect(btnD, &QPushButton::clicked, [&] { loadScenario(QStringLiteral("D. cmark-gfm 全特性全景展示"), createScenarioAllCmarkGfmFeatures()); });
+    QObject::connect(btnReset, &QPushButton::clicked, [&] { filter->resetMetrics(); });
+
+    QObject::connect(btnE, &QPushButton::clicked, [&] {
+        auto msgs = createScenarioA();
+        domain::conversation::Message streamMsg;
+        streamMsg.id = QUuid::createUuid();
+        streamMsg.role = domain::MessageRole::Assistant;
+        streamMsg.blocks.append(domain::conversation::MessageBlock{domain::BlockType::Text, domain::conversation::TextBlock{QStringLiteral("流式输出开始：")}});
+        msgs.append(streamMsg);
+        loadScenario(QStringLiteral("E. 流式输出 + 实时Resize"), msgs);
+
+        static const QStringList tokens = {
+            QStringLiteral(" 在"), QStringLiteral("现代"), QStringLiteral("客户端"), QStringLiteral("开发"), QStringLiteral("中，"),
+            QStringLiteral("Markdown"), QStringLiteral(" 渲染"), QStringLiteral("引擎"), QStringLiteral("需要"), QStringLiteral("支持"),
+            QStringLiteral(" 高频"), QStringLiteral("的"), QStringLiteral("窗口"), QStringLiteral("拖动"), QStringLiteral("缩放。\n\n"),
+            QStringLiteral("```cpp\n"), QStringLiteral("void onTokenStream() {\n"), QStringLiteral("    relayoutTail();\n"),
+            QStringLiteral("}\n```\n\n"), QStringLiteral("不断"), QStringLiteral("追加"), QStringLiteral("更多"), QStringLiteral("内容... ")
+        };
+
+        streamTimer->disconnect();
+        auto tokenIdx = std::make_shared<int>(0);
+        QObject::connect(streamTimer, &QTimer::timeout, [listView, tokenIdx]() {
+            if (*tokenIdx >= 200) {
+                *tokenIdx = 0;
+            }
+            const QString nextChunk = tokens.at((*tokenIdx) % tokens.size());
+            (*tokenIdx)++;
+            if (listView->messageCount() > 0) {
+                auto cards = listView->findChildren<ui::widget::message::MessageCardWidget*>();
+                if (!cards.isEmpty()) {
+                    auto* lastCard = cards.last();
+                    auto* markdownView = lastCard->findChild<ui::widget::MarkdownView*>();
+                    if (markdownView) {
+                        markdownView->appendStreamingText(nextChunk);
+                    }
+                }
+            }
+        });
+        streamTimer->start();
+    });
+
+    // Default load Scenario D (All cmark-gfm features)
+    loadScenario(QStringLiteral("D. cmark-gfm 全特性全景展示"), createScenarioAllCmarkGfmFeatures());
+
+    if (QGuiApplication::platformName() == QStringLiteral("offscreen")) {
+        window.show();
+        for (int w = 600; w <= 800; w += 20) {
+            window.resize(w, 500);
+            QCoreApplication::processEvents();
+        }
+        filter->dumpSessionSummary();
+        QVERIFY(filter->metrics().resizeEvents > 0);
+    } else {
+        window.show();
+        window.raise();
+        window.activateWindow();
+
+        qInfo().noquote() << QStringLiteral(
+            "\n[Benchmark Started] 窗口缩放性能热点测试窗口已启动。\n"
+            "-> 当前默认加载: D. cmark-gfm 全特性全景展示\n"
+            "-> 请拖动窗口边框调整大小，观察卡顿与排版表现。\n"
+            "-> 可点击顶部按钮切换 A/B/C/D/E 五种测试场景。\n"
+            "-> 控制台会在每次拖动暂停时输出详细热点耗时分析。\n"
+            "-> 关闭窗口即可结束测试并输出总汇。"
+        );
+
+        QEventLoop loop;
+        window.setAttribute(Qt::WA_DeleteOnClose, true);
+        QObject::connect(&window, &QWidget::destroyed, &loop, &QEventLoop::quit);
+        loop.exec();
+
+        filter->dumpSessionSummary();
+    }
 }
 
 int main(int argc, char** argv)

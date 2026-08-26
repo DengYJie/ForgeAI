@@ -38,6 +38,16 @@ signals:
     void layoutReady(const ui::markdown::DocumentLayout& layout);
 
 private:
+    struct CacheEntry {
+        qreal width = -1;
+        quint64 themeVersion = 0;
+        ui::markdown::DocumentLayout layout;
+    };
+
+    const ui::markdown::DocumentLayout* findCachedLayout(qreal width) const;
+    void insertCachedLayout(qreal width, ui::markdown::DocumentLayout layout) const;
+    void invalidateLayoutCache();
+
     void onDocumentRebuilt();
     void onStableDocumentAppended();
     void onTailDocumentChanged();
@@ -54,9 +64,7 @@ private:
     quint64 m_stableLayoutThemeVersion = 0;
     const QHash<QString, QImage>* m_images = nullptr;
     MarkdownDocumentLayoutMetrics m_metrics;
-    mutable qreal m_measureCachedWidth = -1;
-    mutable quint64 m_measureCachedThemeVersion = 0;
-    mutable ui::markdown::DocumentLayout m_measureCachedLayout;
+    mutable std::vector<CacheEntry> m_layoutCacheList;
 };
 
 } // namespace ui::widget

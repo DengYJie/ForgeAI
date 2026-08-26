@@ -17,10 +17,58 @@ MarkdownDocumentLayout::MarkdownDocumentLayout(MarkdownDocumentController* contr
             this, &MarkdownDocumentLayout::onTailDocumentChanged);
 }
 
+const ui::markdown::DocumentLayout* MarkdownDocumentLayout::findCachedLayout(qreal width) const
+{
+    if (m_controller->isStreaming() || m_stableLayoutDirty) return nullptr;
+    for (auto it = m_layoutCacheList.begin(); it != m_layoutCacheList.end(); ++it) {
+        if (qAbs(it->width - width) < 0.5 && it->themeVersion == m_theme.version && !it->layout.blocks.isEmpty()) {
+            if (it != m_layoutCacheList.begin()) {
+                std::rotate(m_layoutCacheList.begin(), it, it + 1);
+            }
+            return &m_layoutCacheList.front().layout;
+        }
+    }
+    return nullptr;
+}
+
+void MarkdownDocumentLayout::insertCachedLayout(qreal width, ui::markdown::DocumentLayout layout) const
+{
+    if (m_controller->isStreaming() || layout.blocks.isEmpty()) return;
+    for (auto it = m_layoutCacheList.begin(); it != m_layoutCacheList.end(); ++it) {
+        if (qAbs(it->width - width) < 0.5) {
+            it->width = width;
+            it->themeVersion = m_theme.version;
+            it->layout = std::move(layout);
+            if (it != m_layoutCacheList.begin()) {
+                std::rotate(m_layoutCacheList.begin(), it, it + 1);
+            }
+            return;
+        }
+    }
+    constexpr size_t kMaxCacheEntries = 6;
+    if (m_layoutCacheList.size() >= kMaxCacheEntries) {
+        m_layoutCacheList.pop_back();
+    }
+    m_layoutCacheList.insert(m_layoutCacheList.begin(), CacheEntry{width, m_theme.version, std::move(layout)});
+}
+
+void MarkdownDocumentLayout::invalidateLayoutCache()
+{
+    m_layoutCacheList.clear();
+}
+
 void MarkdownDocumentLayout::setWidth(qreal width)
 {
     if (qAbs(m_width - width) < 0.5) return;
     m_width = width;
+
+    if (!m_controller->isStreaming()) {
+        if (const auto* cached = findCachedLayout(m_width)) {
+            m_currentLayout = *cached;
+            emit layoutReady(m_currentLayout);
+            return;
+        }
+    }
     relayout();
 }
 
@@ -28,8 +76,7 @@ void MarkdownDocumentLayout::setTheme(const ui::markdown::MarkdownTheme& theme)
 {
     m_theme = theme;
     m_stableLayoutDirty = true;
-    m_measureCachedWidth = -1;
-    m_measureCachedLayout = {};
+    invalidateLayoutCache();
     relayout();
 }
 
@@ -37,16 +84,14 @@ void MarkdownDocumentLayout::setImages(const QHash<QString, QImage>* images)
 {
     m_images = images;
     m_stableLayoutDirty = true;
-    m_measureCachedWidth = -1;
-    m_measureCachedLayout = {};
+    invalidateLayoutCache();
     relayout();
 }
 
 void MarkdownDocumentLayout::forceRelayout()
 {
     m_stableLayoutDirty = true;
-    m_measureCachedWidth = -1;
-    m_measureCachedLayout = {};
+    invalidateLayoutCache();
     relayout();
 }
 
@@ -118,11 +163,10 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
 ui::markdown::DocumentLayout MarkdownDocumentLayout::measure(qreal maxWidth) const
 {
     const qreal w = qMax<qreal>(1, maxWidth);
-    if (!m_controller->isStreaming() && !m_stableLayoutDirty &&
-        qAbs(m_measureCachedWidth - w) < 0.5 &&
-        m_measureCachedThemeVersion == m_theme.version &&
-        !m_measureCachedLayout.blocks.isEmpty()) {
-        return m_measureCachedLayout;
+    if (!m_controller->isStreaming() && !m_stableLayoutDirty) {
+        if (const auto* cached = findCachedLayout(w)) {
+            return *cached;
+        }
     }
 
     static const QHash<QString, QImage> emptyImages;
@@ -132,9 +176,7 @@ ui::markdown::DocumentLayout MarkdownDocumentLayout::measure(qreal maxWidth) con
         result = m_engine.layout(m_controller->stableDocument(), m_controller->tailDocument(), w, m_theme, images);
     } else {
         result = m_engine.layout(m_controller->stableDocument(), w, m_theme, images);
-        m_measureCachedWidth = w;
-        m_measureCachedThemeVersion = m_theme.version;
-        m_measureCachedLayout = result;
+        insertCachedLayout(w, result);
     }
     return result;
 }
@@ -152,20 +194,19 @@ MarkdownDocumentLayoutMetrics MarkdownDocumentLayout::metrics() const
 void MarkdownDocumentLayout::onDocumentRebuilt()
 {
     m_stableLayoutDirty = true;
-    m_measureCachedWidth = -1;
-    m_measureCachedLayout = {};
+    invalidateLayoutCache();
     relayout();
 }
 
 void MarkdownDocumentLayout::onStableDocumentAppended()
 {
     m_stableLayoutDirty = true;
-    m_measureCachedWidth = -1;
-    m_measureCachedLayout = {};
+    invalidateLayoutCache();
 }
 
 void MarkdownDocumentLayout::onTailDocumentChanged()
 {
+    invalidateLayoutCache();
     relayout();
 }
 
@@ -175,7 +216,13 @@ void MarkdownDocumentLayout::relayout()
     const auto& images = m_images ? *m_images : emptyImages;
 
     if (!m_controller->isStreaming()) {
+        if (const auto* cached = findCachedLayout(m_width)) {
+            m_currentLayout = *cached;
+            emit layoutReady(m_currentLayout);
+            return;
+        }
         m_currentLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images);
+        insertCachedLayout(m_width, m_currentLayout);
         emit layoutReady(m_currentLayout);
         return;
     }

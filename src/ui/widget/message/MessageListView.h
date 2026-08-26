@@ -76,6 +76,7 @@ private:
     int estimatedHeight(const domain::conversation::Message& message) const;
     int itemIndex(const QUuid& id) const;
     void invalidateMeasuredHeights();
+    void performResizeLayout();
 
     QWidget* m_container = nullptr;
     QVector<Item> m_items;
@@ -88,9 +89,13 @@ private:
     QTimer* m_followTimer = nullptr;
     QTimer* m_visibleCheckTimer = nullptr;
     QTimer* m_virtualRefreshTimer = nullptr;
+    QTimer* m_resizeFrameTimer = nullptr;
+    QTimer* m_resizeEndTimer = nullptr;
     QVariantAnimation* m_scrollAnimation = nullptr;
     bool m_autoScrollToBottom = true;
     bool m_isRefreshingCards = false;
+    bool m_isResizing = false;
+    int m_lastLayoutWidth = -1;
     QUuid m_lastTopVisibleId;
     bool m_avatarVisible = true;
     bool m_headerVisible = true;
