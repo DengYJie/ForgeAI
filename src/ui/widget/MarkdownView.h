@@ -150,7 +150,6 @@ private:
     void onLayoutReady(const ui::markdown::DocumentLayout& layout);
     void onTaskToggleRequested(int blockIndex);
     void onRepaintRequested();
-    void updateContentWidth();
     void updateScrollBars();
     void updateAutoFitHeight();
     void paintViewport(QPaintEvent *event);
@@ -180,7 +179,7 @@ private:
     bool m_usesThemeStyleSheet = true;
     bool m_transparentBackground = true;
     bool m_autoFitHeight = false;
-    int m_autoFitContentHeight = 1;
+    int m_lastAutoFitHeight = -1;
     qreal m_zoomFactor = 1.0;
     bool m_allowNetworkAccess = true;
 

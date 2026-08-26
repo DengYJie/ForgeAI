@@ -176,7 +176,8 @@ void MarkdownView::setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet)
     if (styleSheet.colors.codeBackground.isValid()) m_theme.codeBackground = styleSheet.colors.codeBackground;
     ++m_theme.version;
     m_layoutCache->setTheme(m_theme);
-    updateContentWidth();
+    invalidatePreferredSize();
+    updateActualLayoutWidth();
 }
 
 MarkdownStyleSheet MarkdownView::markdownStyleSheet() const { return m_styleSheet; }
@@ -574,7 +575,7 @@ int MarkdownView::heightForWidth(int width) const
 {
     if (!m_autoFitHeight || width <= 0) return sizeHint().height();
     const qreal cw = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
-    if (qAbs(m_documentLayout.width - cw) < 1.0 && m_autoFitContentHeight > 0) return m_autoFitContentHeight;
+    if (qAbs(m_documentLayout.width - cw) < 1.0 && m_lastAutoFitHeight > 0) return m_lastAutoFitHeight;
     ui::markdown::MarkdownLayoutEngine tmp;
     const auto docLayout = m_controller->isStreaming()
         ? tmp.layout(m_controller->stableDocument(), m_controller->tailDocument(), cw, m_theme, m_resources.images())
@@ -695,11 +696,6 @@ void MarkdownView::updateActualLayoutWidth()
     m_layoutCache->setWidth(w);
 }
 
-void MarkdownView::updateContentWidth()
-{
-    updateActualLayoutWidth();
-}
-
 void MarkdownView::updateScrollBars()
 {
     const int height = qCeil(m_documentLayout.size.height());
@@ -715,11 +711,11 @@ void MarkdownView::updateAutoFitHeight()
     }
 
     const int h = qMax(16, qCeil(m_documentLayout.size.height()));
-    if (h == m_autoFitContentHeight) {
+    if (h == m_lastAutoFitHeight) {
         return;
     }
 
-    m_autoFitContentHeight = h;
+    m_lastAutoFitHeight = h;
     emit autoFitHeightChanged(h);
 }
 

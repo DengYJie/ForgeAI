@@ -28,6 +28,8 @@ void MarkdownDocumentLayout::setTheme(const ui::markdown::MarkdownTheme& theme)
 {
     m_theme = theme;
     m_stableLayoutDirty = true;
+    m_measureCachedWidth = -1;
+    m_measureCachedLayout = {};
     relayout();
 }
 
@@ -35,12 +37,16 @@ void MarkdownDocumentLayout::setImages(const QHash<QString, QImage>* images)
 {
     m_images = images;
     m_stableLayoutDirty = true;
+    m_measureCachedWidth = -1;
+    m_measureCachedLayout = {};
     relayout();
 }
 
 void MarkdownDocumentLayout::forceRelayout()
 {
     m_stableLayoutDirty = true;
+    m_measureCachedWidth = -1;
+    m_measureCachedLayout = {};
     relayout();
 }
 
@@ -112,12 +118,25 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
 ui::markdown::DocumentLayout MarkdownDocumentLayout::measure(qreal maxWidth) const
 {
     const qreal w = qMax<qreal>(1, maxWidth);
+    if (!m_controller->isStreaming() && !m_stableLayoutDirty &&
+        qAbs(m_measureCachedWidth - w) < 0.5 &&
+        m_measureCachedThemeVersion == m_theme.version &&
+        !m_measureCachedLayout.blocks.isEmpty()) {
+        return m_measureCachedLayout;
+    }
+
     static const QHash<QString, QImage> emptyImages;
     const auto& images = m_images ? *m_images : emptyImages;
+    ui::markdown::DocumentLayout result;
     if (m_controller->isStreaming()) {
-        return m_engine.layout(m_controller->stableDocument(), m_controller->tailDocument(), w, m_theme, images);
+        result = m_engine.layout(m_controller->stableDocument(), m_controller->tailDocument(), w, m_theme, images);
+    } else {
+        result = m_engine.layout(m_controller->stableDocument(), w, m_theme, images);
+        m_measureCachedWidth = w;
+        m_measureCachedThemeVersion = m_theme.version;
+        m_measureCachedLayout = result;
     }
-    return m_engine.layout(m_controller->stableDocument(), w, m_theme, images);
+    return result;
 }
 
 const ui::markdown::DocumentLayout& MarkdownDocumentLayout::currentLayout() const
@@ -133,12 +152,16 @@ MarkdownDocumentLayoutMetrics MarkdownDocumentLayout::metrics() const
 void MarkdownDocumentLayout::onDocumentRebuilt()
 {
     m_stableLayoutDirty = true;
+    m_measureCachedWidth = -1;
+    m_measureCachedLayout = {};
     relayout();
 }
 
 void MarkdownDocumentLayout::onStableDocumentAppended()
 {
     m_stableLayoutDirty = true;
+    m_measureCachedWidth = -1;
+    m_measureCachedLayout = {};
 }
 
 void MarkdownDocumentLayout::onTailDocumentChanged()
