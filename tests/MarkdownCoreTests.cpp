@@ -45,6 +45,9 @@ private slots:
     void reportsManyViewConstructionCost();
     void virtualizesMessageCards();
     void virtualizesThousandsOfMessageRecords();
+    void fitContentSizeHintIsInvariantUnderActualResizes();
+    void heightForWidthRespondsToWrappingWidth();
+    void autoFitHeightContractIsRespected();
 };
 
 void MarkdownCoreTests::parsesCommonMarkAndGfm()
@@ -386,7 +389,7 @@ void MarkdownCoreTests::virtualizesMessageCards()
     QVERIFY(list.verticalScrollBar()->value() > 0);
     QVERIFY(!topVisibleSpy.isEmpty());
 
-    QScrollBar externalScrollBar;
+    QScrollBar externalScrollBar(&list);
     list.setCustomScrollBar(&externalScrollBar);
     QCOMPARE(externalScrollBar.maximum(), list.verticalScrollBar()->maximum());
     list.verticalScrollBar()->setValue(list.verticalScrollBar()->maximum());
@@ -419,6 +422,69 @@ void MarkdownCoreTests::virtualizesThousandsOfMessageRecords()
     QCOMPARE(list.messageCount(), 2000);
     QVERIFY(list.activeCardCount() > 0);
     QVERIFY(list.activeCardCount() < 100);
+}
+
+void MarkdownCoreTests::fitContentSizeHintIsInvariantUnderActualResizes()
+{
+    ui::widget::MarkdownView view;
+    view.setHorizontalSizingMode(ui::widget::MarkdownView::HorizontalSizingMode::FitContent);
+    view.setPreferredWidthLimit(600);
+    view.setMarkdown(QStringLiteral("如何学习qt"));
+    QCoreApplication::processEvents();
+
+    const int expectedWidth = view.sizeHint().width();
+    const int expectedHeight = view.sizeHint().height();
+    QVERIFY(expectedWidth > 0);
+    QVERIFY(expectedHeight > 0);
+
+    const qreal singleCharWidth = QFontMetricsF(view.theme().bodyFont).horizontalAdvance(QStringLiteral("如"));
+    QVERIFY2(expectedWidth > singleCharWidth * 2,
+             "Preferred width must represent the whole phrase, not collapse into a single character.");
+
+    const QVector<QSize> testSizes = {
+        QSize(20, 100),
+        QSize(300, 100),
+        QSize(40, 100),
+        QSize(500, 100),
+        QSize(10, 200),
+        QSize(800, 200)
+    };
+
+    for (const auto& sz : testSizes) {
+        view.resize(sz);
+        QCoreApplication::processEvents();
+        QCOMPARE(view.sizeHint().width(), expectedWidth);
+        QCOMPARE(view.sizeHint().height(), expectedHeight);
+    }
+}
+
+void MarkdownCoreTests::heightForWidthRespondsToWrappingWidth()
+{
+    ui::widget::MarkdownView view;
+    view.setAutoFitHeight(true);
+    view.setMarkdown(QStringLiteral(
+        "这是一个用于测试 heightForWidth 行为的长段落，包含多行文字以确保在窄视口下会产生明显的折行。"
+        "当宽度变窄时，行数增加，高度应当严格大于宽视口下的高度。"));
+    QCoreApplication::processEvents();
+
+    const int narrowHeight = view.heightForWidth(50);
+    const int wideHeight = view.heightForWidth(500);
+
+    QVERIFY(narrowHeight > wideHeight);
+}
+
+void MarkdownCoreTests::autoFitHeightContractIsRespected()
+{
+    ui::widget::MarkdownView view;
+    view.setAutoFitHeight(false);
+    view.setMarkdown(QStringLiteral("# Title\n\nParagraph 1\n\nParagraph 2\n\nParagraph 3"));
+    QCoreApplication::processEvents();
+
+    QSignalSpy heightSpy(&view, &ui::widget::MarkdownView::autoFitHeightChanged);
+    view.resize(200, 100);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(heightSpy.count(), 0);
 }
 
 int main(int argc, char** argv)

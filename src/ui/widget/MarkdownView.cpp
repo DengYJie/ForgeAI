@@ -105,7 +105,23 @@ void MarkdownView::finishStream() { m_controller->finishStream(); }
 void MarkdownView::finishStreaming() { m_controller->finishStream(); }
 bool MarkdownView::isStreaming() const { return m_controller->isStreaming(); }
 
-MarkdownViewMetrics MarkdownView::metrics() const noexcept { return m_metrics; }
+MarkdownViewMetrics MarkdownView::metrics() const noexcept
+{
+    auto m = m_metrics;
+    if (m_controller) {
+        m.fullParseCount = m_controller->fullParseCount();
+        m.stableParseCount = m_controller->stableParseCount();
+        m.tailParseCount = m_controller->tailParseCount();
+    }
+    if (m_layoutCache) {
+        const auto lm = m_layoutCache->metrics();
+        m.stableLayoutCount = lm.stableLayoutCount;
+        m.tailLayoutCount = lm.tailLayoutCount;
+        m.lastStableLayoutMs = lm.lastStableLayoutMs;
+        m.lastTailLayoutMs = lm.lastTailLayoutMs;
+    }
+    return m;
+}
 
 void MarkdownView::setBaseUrl(const QUrl &url) { m_baseUrl = url; }
 QUrl MarkdownView::baseUrl() const { return m_baseUrl; }
@@ -573,14 +589,15 @@ int MarkdownView::heightForWidth(int width) const
 
 QSize MarkdownView::sizeHint() const
 {
-    const int h = m_autoFitContentHeight > 0
-        ? m_autoFitContentHeight
-        : qCeil(m_preferredContentSize.height() > 0 ? m_preferredContentSize.height() : QFontMetricsF(m_theme.bodyFont).height());
+    const int h = qMax(0, qCeil(m_preferredContentSize.height() > 0
+        ? m_preferredContentSize.height()
+        : QFontMetricsF(m_theme.bodyFont).height()));
+
     if (m_horizontalSizingMode == HorizontalSizingMode::FitContent) {
         const int w = qMax(0, qCeil(m_preferredContentSize.width()));
-        return QSize(w, qMax(0, h));
+        return QSize(w, h);
     }
-    return QSize(0, qMax(0, h));
+    return QSize(0, h);
 }
 
 QSize MarkdownView::minimumSizeHint() const
@@ -660,15 +677,7 @@ void MarkdownView::invalidatePreferredSize()
 
 void MarkdownView::recalculatePreferredSize()
 {
-    if (m_horizontalSizingMode != HorizontalSizingMode::FitContent) {
-        if (!m_preferredContentSize.isNull()) {
-            m_preferredContentSize = {};
-            updateGeometry();
-        }
-        return;
-    }
-
-    const qreal limit = m_preferredWidthLimit > 0 ? m_preferredWidthLimit : 800.0;
+    const qreal limit = m_preferredWidthLimit > 0 ? m_preferredWidthLimit : DefaultPreferredWidthLimit;
     const auto measured = m_layoutCache->measure(limit);
     const QSizeF newSize = measured.size;
 
@@ -701,12 +710,17 @@ void MarkdownView::updateScrollBars()
 
 void MarkdownView::updateAutoFitHeight()
 {
-    const int h = qMax(16, qCeil(m_documentLayout.size.height()));
-    if (h != m_autoFitContentHeight) {
-        m_autoFitContentHeight = h;
-        updateGeometry();
-        emit autoFitHeightChanged(h);
+    if (!m_autoFitHeight) {
+        return;
     }
+
+    const int h = qMax(16, qCeil(m_documentLayout.size.height()));
+    if (h == m_autoFitContentHeight) {
+        return;
+    }
+
+    m_autoFitContentHeight = h;
+    emit autoFitHeightChanged(h);
 }
 
 void MarkdownView::paintViewport(QPaintEvent* event)

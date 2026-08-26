@@ -92,7 +92,7 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
                 }
             }
             const BlockScrollOffset scroll = scrollOffsets.value(i);
-            qreal lineY = block.rect.top() + 42;
+            qreal lineY = block.rect.top() + 36;
             painter.save(); painter.setClipRect(block.scrollInfo.viewportRect.isValid() ? block.scrollInfo.viewportRect : QRectF(block.rect.left() + 8, block.rect.top() + 30, block.rect.width() - 16, block.rect.height() - 34));
             for (int lineIndex = 0; lineIndex < block.codeLines.size(); ++lineIndex) {
                 const auto& line = block.codeLines.at(lineIndex);
@@ -247,10 +247,10 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
         }
         if (block.kind == BlockKind::CodeBlock) {
             const BlockScrollOffset scroll = scrollOffsets.value(i);
-            qreal lineY = block.rect.top() + 42;
+            qreal lineY = block.rect.top() + 36;
             for (int lineIndex = 0; lineIndex < block.codeLines.size(); ++lineIndex) {
                 const auto& line = block.codeLines.at(lineIndex);
-                if (position.y() >= lineY && position.y() <= lineY + line->height) {
+                if (position.y() >= lineY && (position.y() < lineY + line->height || lineIndex == block.codeLines.size() - 1)) {
                     const int cursor = line->cursorAt(position.x() - (block.contentX - scroll.x), position.y() - lineY);
                     if (cursor >= 0) return {HitKind::Text, i, block.documentTextOffset + block.codeLineOffsets.value(lineIndex) + cursor, {}};
                 }

@@ -76,6 +76,8 @@ public:
         FitContent
     };
 
+    static constexpr qreal DefaultPreferredWidthLimit = 800.0;
+
     void setHorizontalSizingMode(HorizontalSizingMode mode);
     HorizontalSizingMode horizontalSizingMode() const;
 

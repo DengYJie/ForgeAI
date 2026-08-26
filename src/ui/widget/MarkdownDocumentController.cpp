@@ -14,6 +14,7 @@ void MarkdownDocumentController::setMarkdown(const QString& markdown)
     if (m_markdown == markdown) return;
     m_markdown = markdown;
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
+    ++m_fullParseCount;
     m_document = m_parser.parse(m_markdown, parseOptions());
     emit documentRebuilt();
 }
@@ -30,6 +31,9 @@ void MarkdownDocumentController::beginStream()
     m_streamTail.clear();
     m_document = ui::markdown::MarkdownDocument{};
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
+    m_fullParseCount = 0;
+    m_stableParseCount = 0;
+    m_tailParseCount = 0;
     emit streamingChanged(true);
     emit documentRebuilt();
 }
@@ -41,10 +45,12 @@ void MarkdownDocumentController::appendMarkdown(const QString& chunk)
     m_streamTail += chunk;
     const qsizetype boundary = stableStreamingBoundary();
     if (boundary > 0) {
+        ++m_stableParseCount;
         m_document.append(m_parser.parse(m_streamTail.left(boundary), parseOptions()));
         m_streamTail.remove(0, boundary);
         emit stableDocumentAppended();
     }
+    ++m_tailParseCount;
     m_activeTailDocument = m_parser.parse(m_streamTail, parseOptions());
     emit tailDocumentChanged();
 }
@@ -54,6 +60,7 @@ void MarkdownDocumentController::finishStream()
     m_streaming = false;
     m_streamTail.clear();
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
+    ++m_fullParseCount;
     m_document = m_parser.parse(m_markdown, parseOptions());
     emit streamingChanged(false);
     emit streamingFinished();

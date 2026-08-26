@@ -232,7 +232,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                 codeHeight += l->height; block.codeLines.push_back(l); block.codeLineOffsets.push_back(codeOffset);
                 codeOffset += static_cast<int>(line.size()) + 1;
             }
-            block.rect = QRectF(indent, y, right - indent, 30 + 12 + codeHeight + 12);
+            block.rect = QRectF(indent, y, right - indent, 30 + 6 + codeHeight + 6);
             block.copyButtonRect = QRectF(right - 34, y + 4, 24, 22);
             block.scrollInfo.viewportRect = QRectF(block.rect.left() + 8, block.rect.top() + 30, block.rect.width() - 16, block.rect.height() - 34);
             block.scrollInfo.contentSize = QSizeF(maxLineWidth, codeHeight);

@@ -30,6 +30,10 @@ public:
     const ui::markdown::MarkdownDocument& stableDocument() const;
     const ui::markdown::MarkdownDocument& tailDocument() const;
 
+    quint64 fullParseCount() const noexcept { return m_fullParseCount; }
+    quint64 stableParseCount() const noexcept { return m_stableParseCount; }
+    quint64 tailParseCount() const noexcept { return m_tailParseCount; }
+
 signals:
     void documentRebuilt();
     void stableDocumentAppended();
@@ -49,6 +53,9 @@ private:
     ui::markdown::MarkdownParser m_parser;
     ui::markdown::MarkdownDocument m_document;
     ui::markdown::MarkdownDocument m_activeTailDocument;
+    quint64 m_fullParseCount = 0;
+    quint64 m_stableParseCount = 0;
+    quint64 m_tailParseCount = 0;
 };
 
 } // namespace ui::widget
