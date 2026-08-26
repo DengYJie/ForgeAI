@@ -247,7 +247,7 @@ using widget::basic::LeftAlignedButton;
         // same header / message surface / composer hierarchy as ChatPage.
         m_workAreaWidget = new QWidget(this);
         auto *workAreaLayout = new QVBoxLayout(m_workAreaWidget);
-        workAreaLayout->setContentsMargins(0, 0, 0, 16);
+        workAreaLayout->setContentsMargins(0, 0, 0, 0);
         workAreaLayout->setSpacing(0);
         m_pane = new widget::chat::ConversationPane(m_workAreaWidget);
         m_pane->header()->setTitle(tr("新任务"));

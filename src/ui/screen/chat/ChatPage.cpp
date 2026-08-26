@@ -99,7 +99,7 @@ namespace ui::screen::chat {
         // 2. 右侧主对话工作区 (第二 Pane)
         m_chatAreaWidget = new QWidget(this);
         auto *chatAreaLayout = new QVBoxLayout(m_chatAreaWidget);
-        chatAreaLayout->setContentsMargins(0, 0, 0, 16);
+        chatAreaLayout->setContentsMargins(0, 0, 0, 0);
         chatAreaLayout->setSpacing(0);
 
         m_pane = new widget::chat::ConversationPane(m_chatAreaWidget);

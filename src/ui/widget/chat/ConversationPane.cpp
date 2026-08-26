@@ -7,6 +7,7 @@
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/TextFields.h>
 #include <FluentQt/Scrolling.h>
+#include <components/scrolling/OverlayScrollChrome.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -25,27 +26,28 @@ ConversationPane::ConversationPane(QWidget* parent) : QWidget(parent) {
 
 void ConversationPane::setupUi() {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 16);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
     m_header = new ChatHeader(this);
     mainLayout->addWidget(m_header);
 
-    auto* contentRow = new QWidget(this);
-    m_contentRowLayout = new QHBoxLayout(contentRow);
-    m_contentRowLayout->setContentsMargins(8, 6, 8, 0);
+    m_contentRow = new QWidget(this);
+    m_contentRow->installEventFilter(this);
+    m_contentRowLayout = new QHBoxLayout(m_contentRow);
+    m_contentRowLayout->setContentsMargins(0, 0, 0, 0);
     m_contentRowLayout->setSpacing(8);
 
-    m_anchorBar = new ChatAnchorBar(contentRow);
+    m_anchorBar = new ChatAnchorBar(m_contentRow);
     m_anchorBar->hide();
     m_contentRowLayout->addWidget(m_anchorBar, 0);
 
-    m_conversationColumn = new QWidget(contentRow);
+    m_conversationColumn = new QWidget(m_contentRow);
     m_conversationColumn->setMinimumWidth(kMinContentWidth);
     m_conversationColumn->setMaximumWidth(kMaxContentWidth);
 
     auto* conversationLayout = new QVBoxLayout(m_conversationColumn);
-    conversationLayout->setContentsMargins(0, 0, 0, 0);
+    conversationLayout->setContentsMargins(0, 0, 0, 16);
     conversationLayout->setSpacing(6);
 
     auto* messageSurface = new QWidget(m_conversationColumn);
@@ -89,26 +91,52 @@ void ConversationPane::setupUi() {
 
     m_contentRowLayout->addWidget(m_conversationColumn, 1, Qt::AlignHCenter);
 
-    m_externalScrollBar = new fluent::scrolling::ScrollBar(Qt::Vertical, contentRow);
-    m_contentRowLayout->addWidget(m_externalScrollBar, 0);
+    m_rightBalanceSpacer = new QWidget(m_contentRow);
+    m_rightBalanceSpacer->setFixedWidth(32);
+    m_rightBalanceSpacer->hide();
+    m_contentRowLayout->addWidget(m_rightBalanceSpacer, 0);
 
     auto* internalBar = m_messageList->verticalScrollBar();
-    connect(internalBar, &QScrollBar::rangeChanged, m_externalScrollBar, [this, internalBar](int min, int max) {
-        m_externalScrollBar->setRange(min, max);
-        m_externalScrollBar->setPageStep(internalBar->pageStep());
-        m_externalScrollBar->setSingleStep(internalBar->singleStep());
-        m_externalScrollBar->setVisible(max > min);
-    });
-    connect(internalBar, &QScrollBar::valueChanged, m_externalScrollBar, &fluent::scrolling::ScrollBar::setValue);
-    connect(m_externalScrollBar, &fluent::scrolling::ScrollBar::valueChanged, internalBar, &QScrollBar::setValue);
+    m_externalScrollBar = fluent::scrolling::createOverlayScrollBar(
+        Qt::Vertical, m_contentRow, internalBar, QStringLiteral("conversationOverlayScrollBar")
+    );
 
-    mainLayout->addWidget(contentRow, 1);
+    connect(internalBar, &QScrollBar::rangeChanged, this, [this, internalBar]() {
+        fluent::scrolling::mirrorNativeScrollBar(m_externalScrollBar, internalBar);
+        updateScrollBarGeometry();
+    });
+
+    mainLayout->addWidget(m_contentRow, 1);
+}
+
+void ConversationPane::updateScrollBarGeometry() {
+    if (m_externalScrollBar && m_contentRow) {
+        fluent::scrolling::placeVerticalScrollBar(
+            m_externalScrollBar,
+            m_contentRow->rect(),
+            /*top=*/0,
+            /*rightInset=*/0,
+            /*bottomInset=*/0
+        );
+    }
+}
+
+bool ConversationPane::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_contentRow && event->type() == QEvent::Resize) {
+        updateScrollBarGeometry();
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void ConversationPane::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    updateScrollBarGeometry();
 }
 
 void ConversationPane::setAnchorBarVisible(bool visible) {
     m_anchorBar->setVisible(visible);
-    if (m_contentRowLayout) {
-        m_contentRowLayout->setContentsMargins(visible ? 4 : 8, 6, visible ? 44 : 8, 0);
+    if (m_rightBalanceSpacer) {
+        m_rightBalanceSpacer->setVisible(visible);
     }
 }
 

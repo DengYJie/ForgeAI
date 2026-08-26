@@ -40,10 +40,16 @@ public:
     void setEmptyStateVisible(bool visible);
     void setStatusLabelVisible(bool visible);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
     void setupUi();
+    void updateScrollBarGeometry();
 
     ChatHeader* m_header = nullptr;
+    QWidget* m_contentRow = nullptr;
     QHBoxLayout* m_contentRowLayout = nullptr;
     ChatAnchorBar* m_anchorBar = nullptr;
     QWidget* m_conversationColumn = nullptr;
@@ -51,6 +57,7 @@ private:
     ChatInputBox* m_inputBox = nullptr;
     fluent::textfields::Label* m_emptyStateLabel = nullptr;
     fluent::textfields::Label* m_statusLabel = nullptr;
+    QWidget* m_rightBalanceSpacer = nullptr;
     fluent::scrolling::ScrollBar* m_externalScrollBar = nullptr;
 };
 
