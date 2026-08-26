@@ -28,6 +28,7 @@ public:
     void setTheme(const ui::markdown::MarkdownTheme& theme);
     void setImages(const QHash<QString, QImage>* images);
     void forceRelayout();
+    bool updateImageSize(const QString& source, const QSize& newSize);
 
     const ui::markdown::DocumentLayout& currentLayout() const;
     MarkdownDocumentLayoutMetrics metrics() const;

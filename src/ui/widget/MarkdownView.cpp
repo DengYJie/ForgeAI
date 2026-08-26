@@ -5,8 +5,10 @@
 #include <QEasingCurve>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QRegularExpression>
 #include <QScrollBar>
 #include <QShowEvent>
 #include <QVariantAnimation>
@@ -43,7 +45,12 @@ MarkdownView::MarkdownView(QWidget *parent)
     connect(m_layoutCache, &MarkdownDocumentLayout::layoutReady, this, &MarkdownView::onLayoutReady);
 
     connect(m_eventFilter, &MarkdownViewEventFilter::repaintRequested, this, &MarkdownView::onRepaintRequested);
-    connect(m_eventFilter, &MarkdownViewEventFilter::linkActivated, this, &MarkdownView::linkActivated);
+    connect(m_eventFilter, &MarkdownViewEventFilter::linkActivated, this, [this](const QUrl& url) {
+        if (url.toString().startsWith(u'#') || (url.scheme().isEmpty() && !url.fragment().isEmpty())) {
+            scrollToAnchor(url.fragment().isEmpty() ? url.toString().mid(1) : url.fragment());
+        }
+        emit linkActivated(url);
+    });
     connect(m_eventFilter, &MarkdownViewEventFilter::linkHighlighted, this, &MarkdownView::linkHighlighted);
     connect(m_eventFilter, &MarkdownViewEventFilter::selectionChanged, this, &MarkdownView::selectionChanged);
     connect(m_eventFilter, &MarkdownViewEventFilter::imageActivated, this, &MarkdownView::imageActivated);
@@ -58,7 +65,13 @@ MarkdownView::MarkdownView(QWidget *parent)
         scrollBlock(idx, dx, dy, smooth);
     });
 
-    connect(&m_resources, &ui::markdown::MarkdownImageResourceManager::imageUpdated, this, [this] {
+    connect(&m_resources, &ui::markdown::MarkdownImageResourceManager::imageUpdated, this, [this](const QString& source) {
+        const auto& images = m_resources.images();
+        if (const auto it = images.constFind(source); it != images.constEnd() && !it->isNull()) {
+            if (m_layoutCache->updateImageSize(source, it->size())) {
+                return;
+            }
+        }
         m_layoutCache->forceRelayout();
     });
 
@@ -96,7 +109,44 @@ MarkdownViewMetrics MarkdownView::metrics() const noexcept { return m_metrics; }
 
 void MarkdownView::setBaseUrl(const QUrl &url) { m_baseUrl = url; }
 QUrl MarkdownView::baseUrl() const { return m_baseUrl; }
-void MarkdownView::scrollToAnchor(const QString &name) { Q_UNUSED(name) }
+void MarkdownView::scrollToAnchor(const QString &name)
+{
+    QString target = name.trimmed();
+    if (target.startsWith(u'#')) target = target.mid(1).trimmed();
+    if (target.isEmpty() || m_documentLayout.blocks.isEmpty()) return;
+
+    auto slugify = [](const QString& str) -> QString {
+        QString s;
+        for (const QChar& ch : str) {
+            if (ch.isLetterOrNumber()) s += ch.toLower();
+            else if (!s.isEmpty() && !s.endsWith(u'-')) s += u'-';
+        }
+        while (s.endsWith(u'-')) s.chop(1);
+        return s;
+    };
+
+    const QString targetSlug = slugify(target);
+
+    for (const auto& block : m_documentLayout.blocks) {
+        if (block.kind != ui::markdown::BlockKind::Heading) continue;
+        const QString text = block.inlineLayout ? block.inlineLayout->text.trimmed() : QString();
+        const QString slug = slugify(text);
+        if (slug == targetSlug || text.compare(target, Qt::CaseInsensitive) == 0) {
+            const int targetY = qBound(0, qRound(block.rect.top() - m_theme.contentMargins.top()), verticalScrollBar()->maximum());
+            auto* anim = new QVariantAnimation(this);
+            anim->setDuration(160);
+            anim->setEasingCurve(QEasingCurve::OutCubic);
+            anim->setStartValue(verticalScrollBar()->value());
+            anim->setEndValue(targetY);
+            connect(anim, &QVariantAnimation::valueChanged, this, [this](const QVariant& val) {
+                verticalScrollBar()->setValue(val.toInt());
+            });
+            connect(anim, &QVariantAnimation::finished, anim, &QObject::deleteLater);
+            anim->start();
+            return;
+        }
+    }
+}
 
 void MarkdownView::setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet)
 {
@@ -143,6 +193,7 @@ void MarkdownView::setBaseFont(const QFont& font)
 
 void MarkdownView::setContentMargins(const QMarginsF& margins)
 {
+    m_customContentMargins = margins;
     if (m_theme.contentMargins == margins) return;
     m_theme.contentMargins = margins;
     ++m_theme.version;
@@ -245,6 +296,9 @@ void MarkdownView::onThemeUpdated()
         m_theme = fluent::FluentElement::currentTheme() == fluent::FluentElement::Dark
             ? ui::markdown::MarkdownTheme::dark(font())
             : ui::markdown::MarkdownTheme::light(font());
+        if (m_customContentMargins.has_value()) {
+            m_theme.contentMargins = *m_customContentMargins;
+        }
     }
     m_layoutCache->setTheme(m_theme);
     updateContentWidth();
@@ -280,12 +334,59 @@ QString MarkdownView::selectedText() const
     return text.mid(begin, end - begin);
 }
 
-QString MarkdownView::selectedHtml() const { return selectedText().toHtmlEscaped(); }
+QString MarkdownView::selectedHtml() const
+{
+    if (!m_eventFilter->selection().isValid()) return {};
+    const auto sel = m_eventFilter->selection();
+    const int selStart = qMin(sel.anchor, sel.position);
+    const int selEnd = qMax(sel.anchor, sel.position);
+    if (selStart >= selEnd) return {};
+
+    QString html;
+    for (const auto& block : m_documentLayout.blocks) {
+        int blockStart = block.documentTextOffset;
+        int blockLen = block.inlineLayout ? static_cast<int>(block.inlineLayout->text.size())
+                     : (block.kind == ui::markdown::BlockKind::CodeBlock ? static_cast<int>(block.code.size()) : 0);
+        int blockEnd = blockStart + blockLen;
+
+        if (selEnd <= blockStart || selStart >= blockEnd) continue;
+
+        int relStart = qBound(0, selStart - blockStart, blockLen);
+        int relEnd = qBound(0, selEnd - blockStart, blockLen);
+        if (relStart >= relEnd) continue;
+
+        if (block.kind == ui::markdown::BlockKind::CodeBlock) {
+            const QString codeSlice = block.code.mid(relStart, relEnd - relStart).toHtmlEscaped();
+            html += QStringLiteral("<pre><code>%1</code></pre>\n").arg(codeSlice);
+        } else if (block.kind == ui::markdown::BlockKind::Heading && block.inlineLayout) {
+            const QString textSlice = block.inlineLayout->text.mid(relStart, relEnd - relStart).toHtmlEscaped();
+            html += QStringLiteral("<h3>%1</h3>\n").arg(textSlice);
+        } else if (block.kind == ui::markdown::BlockKind::ListItem && block.inlineLayout) {
+            const QString textSlice = block.inlineLayout->text.mid(relStart, relEnd - relStart).toHtmlEscaped();
+            html += QStringLiteral("<li>%1</li>\n").arg(textSlice);
+        } else if (block.kind == ui::markdown::BlockKind::QuoteContent && block.inlineLayout) {
+            const QString textSlice = block.inlineLayout->text.mid(relStart, relEnd - relStart).toHtmlEscaped();
+            html += QStringLiteral("<blockquote>%1</blockquote>\n").arg(textSlice);
+        } else if (block.inlineLayout) {
+            const QString textSlice = block.inlineLayout->text.mid(relStart, relEnd - relStart).toHtmlEscaped();
+            html += QStringLiteral("<p>%1</p>\n").arg(textSlice);
+        }
+    }
+
+    return html.isEmpty() ? selectedText().toHtmlEscaped() : html;
+}
 
 void MarkdownView::copy()
 {
     const QString text = selectedText();
-    if (!text.isEmpty()) QGuiApplication::clipboard()->setText(text);
+    if (text.isEmpty()) return;
+    const QString html = selectedHtml();
+    auto* mime = new QMimeData();
+    mime->setText(text);
+    if (!html.isEmpty()) {
+        mime->setHtml(html);
+    }
+    QGuiApplication::clipboard()->setMimeData(mime);
 }
 
 void MarkdownView::selectAll()
@@ -317,16 +418,107 @@ qreal MarkdownView::zoomFactor() const { return m_zoomFactor; }
 
 bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags, bool incremental, bool *wrapped)
 {
+    if (text.isEmpty()) return false;
     const QString haystack = documentPlainText();
-    const Qt::CaseSensitivity cs = flags.testFlag(QTextDocument::FindCaseSensitively) ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    if (haystack.isEmpty()) return false;
+
+    const bool backward = flags.testFlag(QTextDocument::FindBackward);
+    const bool caseSensitive = flags.testFlag(QTextDocument::FindCaseSensitively);
+    const bool wholeWords = flags.testFlag(QTextDocument::FindWholeWords);
     const auto sel = m_eventFilter->selection();
-    int from = incremental && sel.position >= 0 ? sel.position : 0;
-    int found = haystack.indexOf(text, from, cs);
+
+    int foundStart = -1;
+    int foundLength = static_cast<int>(text.size());
     bool didWrap = false;
-    if (found < 0 && from > 0) { found = haystack.indexOf(text, 0, cs); didWrap = found >= 0; }
+
+    if (wholeWords) {
+        const QRegularExpression::PatternOptions options = caseSensitive
+            ? QRegularExpression::NoPatternOption
+            : QRegularExpression::CaseInsensitiveOption;
+        const QRegularExpression re(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(text)), options);
+
+        QList<QPair<int, int>> matches;
+        auto it = re.globalMatch(haystack);
+        while (it.hasNext()) {
+            auto match = it.next();
+            matches.append({static_cast<int>(match.capturedStart()), static_cast<int>(match.capturedLength())});
+        }
+
+        if (matches.isEmpty()) return false;
+
+        if (!backward) {
+            const int from = incremental && sel.position >= 0 ? sel.position : 0;
+            for (const auto& m : matches) {
+                if (m.first >= from) {
+                    foundStart = m.first;
+                    foundLength = m.second;
+                    break;
+                }
+            }
+            if (foundStart < 0 && from > 0) {
+                foundStart = matches.first().first;
+                foundLength = matches.first().second;
+                didWrap = true;
+            }
+        } else {
+            const int from = incremental && sel.isValid() ? qMin(sel.anchor, sel.position) : static_cast<int>(haystack.size());
+            for (int i = matches.size() - 1; i >= 0; --i) {
+                if (matches[i].first < from) {
+                    foundStart = matches[i].first;
+                    foundLength = matches[i].second;
+                    break;
+                }
+            }
+            if (foundStart < 0 && from < haystack.size()) {
+                foundStart = matches.last().first;
+                foundLength = matches.last().second;
+                didWrap = true;
+            }
+        }
+    } else {
+        const Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+        if (!backward) {
+            const int from = incremental && sel.position >= 0 ? sel.position : 0;
+            int pos = static_cast<int>(haystack.indexOf(text, from, cs));
+            if (pos < 0 && from > 0) {
+                pos = static_cast<int>(haystack.indexOf(text, 0, cs));
+                didWrap = (pos >= 0);
+            }
+            if (pos >= 0) {
+                foundStart = pos;
+                foundLength = static_cast<int>(text.size());
+            }
+        } else {
+            const int from = incremental && sel.isValid() ? qMin(sel.anchor, sel.position) - 1 : static_cast<int>(haystack.size());
+            int pos = from >= 0 ? static_cast<int>(haystack.lastIndexOf(text, from, cs)) : -1;
+            if (pos < 0 && from < haystack.size()) {
+                pos = static_cast<int>(haystack.lastIndexOf(text, haystack.size(), cs));
+                didWrap = (pos >= 0);
+            }
+            if (pos >= 0) {
+                foundStart = pos;
+                foundLength = static_cast<int>(text.size());
+            }
+        }
+    }
+
     if (wrapped) *wrapped = didWrap;
-    if (found < 0) return false;
-    m_eventFilter->setSelection({found, found + static_cast<int>(text.size())});
+    if (foundStart < 0) return false;
+
+    m_eventFilter->setSelection({foundStart, foundStart + foundLength});
+    emit selectionChanged(true);
+
+    for (const auto& b : m_documentLayout.blocks) {
+        if (foundStart >= b.documentTextOffset && foundStart <= b.documentTextOffset + (b.inlineLayout ? b.inlineLayout->text.size() : 0)) {
+            const int viewTop = verticalScrollBar()->value();
+            const int viewBottom = viewTop + viewport()->height();
+            if (b.rect.top() < viewTop || b.rect.bottom() > viewBottom) {
+                verticalScrollBar()->setValue(qBound(0, qRound(b.rect.top() - 20), verticalScrollBar()->maximum()));
+            }
+            break;
+        }
+    }
+
     viewport()->update();
     return true;
 }

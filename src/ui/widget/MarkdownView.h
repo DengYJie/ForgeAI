@@ -7,6 +7,7 @@
 #include <QUrl>
 #include <QAbstractScrollArea>
 #include <memory>
+#include <optional>
 
 #include <FluentQt/Foundation.h>
 #include <FluentQt/TextFields.h>
@@ -157,6 +158,7 @@ private:
 
     QUrl m_baseUrl;
     MarkdownStyleSheet m_styleSheet;
+    std::optional<QMarginsF> m_customContentMargins;
     bool m_usesThemeStyleSheet = true;
     bool m_transparentBackground = true;
     bool m_autoFitHeight = false;

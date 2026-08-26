@@ -110,16 +110,76 @@ const ui::markdown::MarkdownDocument& MarkdownDocumentController::tailDocument()
 
 qsizetype MarkdownDocumentController::stableStreamingBoundary() const
 {
+    if (m_streamTail.isEmpty()) return 0;
+
     bool inFence = false;
+    bool inList = false;
+    int consecutiveEmptyLines = 0;
     qsizetype lastBoundary = 0;
     qsizetype start = 0;
+
+    auto isListMarker = [](const QStringView& line) -> bool {
+        const QStringView t = line.trimmed();
+        if (t.startsWith(u"- ") || t.startsWith(u"* ") || t.startsWith(u"+ ")) return true;
+        int i = 0;
+        while (i < t.size() && t[i].isDigit()) ++i;
+        if (i > 0 && i < t.size() - 1 && (t[i] == u'.' || t[i] == u')') && t[i + 1].isSpace()) return true;
+        return false;
+    };
+
+    auto isTopLevelBlockStart = [&isListMarker](const QStringView& line) -> bool {
+        if (line.isEmpty()) return false;
+        if (line.startsWith(u' ') || line.startsWith(u'\t')) return false;
+        const QStringView t = line.trimmed();
+        if (t.startsWith(u'#') || t.startsWith(u"---") || t.startsWith(u"***") || t.startsWith(u"___")
+            || t.startsWith(u"```") || t.startsWith(u"~~~") || t.startsWith(u">")) {
+            return true;
+        }
+        if (!isListMarker(line)) {
+            return true;
+        }
+        return false;
+    };
+
     while (start <= m_streamTail.size()) {
         const qsizetype end = m_streamTail.indexOf(u'\n', start);
         const qsizetype lineEnd = end < 0 ? m_streamTail.size() : end;
         const QStringView line{m_streamTail.constData() + start, lineEnd - start};
         const QStringView trimmed = line.trimmed();
-        if (trimmed.startsWith(u"```") || trimmed.startsWith(u"~~~")) inFence = !inFence;
-        if (!inFence && trimmed.isEmpty()) lastBoundary = end < 0 ? lineEnd : end + 1;
+
+        if (trimmed.startsWith(u"```") || trimmed.startsWith(u"~~~")) {
+            inFence = !inFence;
+            inList = false;
+            consecutiveEmptyLines = 0;
+        } else if (!inFence) {
+            if (trimmed.isEmpty()) {
+                ++consecutiveEmptyLines;
+                const qsizetype boundaryCandidate = end < 0 ? lineEnd : end + 1;
+                if (consecutiveEmptyLines >= 2) {
+                    inList = false;
+                    lastBoundary = boundaryCandidate;
+                } else if (!inList) {
+                    if (end >= 0 && end + 1 < m_streamTail.size()) {
+                        const qsizetype nextEnd = m_streamTail.indexOf(u'\n', end + 1);
+                        const qsizetype nextLineEnd = nextEnd < 0 ? m_streamTail.size() : nextEnd;
+                        const QStringView nextLine{m_streamTail.constData() + end + 1, nextLineEnd - (end + 1)};
+                        if (isTopLevelBlockStart(nextLine)) {
+                            lastBoundary = boundaryCandidate;
+                        }
+                    }
+                }
+            } else {
+                consecutiveEmptyLines = 0;
+                if (isListMarker(line)) {
+                    inList = true;
+                } else if (!line.startsWith(u' ') && !line.startsWith(u'\t')) {
+                    if (isTopLevelBlockStart(line)) {
+                        inList = false;
+                    }
+                }
+            }
+        }
+
         if (end < 0) break;
         start = end + 1;
     }

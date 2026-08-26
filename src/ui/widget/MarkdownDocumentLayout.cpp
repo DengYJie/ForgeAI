@@ -44,6 +44,71 @@ void MarkdownDocumentLayout::forceRelayout()
     relayout();
 }
 
+bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize& newSize)
+{
+    if (newSize.isEmpty() || m_currentLayout.blocks.isEmpty()) return false;
+
+    bool modified = false;
+    for (int i = 0; i < m_currentLayout.blocks.size(); ++i) {
+        auto& block = m_currentLayout.blocks[i];
+        if (block.kind != ui::markdown::BlockKind::Image || block.imageUrl != source) continue;
+
+        const qreal indent = block.rect.left();
+        const qreal right = m_width - m_theme.contentMargins.right();
+        const qreal maxW = right - indent;
+        const qreal maxH = 600;
+        const QSizeF intrinsic = newSize;
+        qreal w = qMin<qreal>(intrinsic.width(), maxW);
+        qreal h = intrinsic.height() * (w / qMax<qreal>(1.0, intrinsic.width()));
+        if (h > maxH) {
+            h = maxH;
+            w = intrinsic.width() * (h / qMax<qreal>(1.0, intrinsic.height()));
+        }
+
+        const qreal deltaH = h - block.rect.height();
+        if (qAbs(deltaH) < 0.5) continue;
+
+        block.rect.setWidth(w);
+        block.rect.setHeight(h);
+        block.imageIntrinsicSize = intrinsic;
+
+        for (int j = i + 1; j < m_currentLayout.blocks.size(); ++j) {
+            auto& downstream = m_currentLayout.blocks[j];
+            downstream.rect.translate(0, deltaH);
+            downstream.copyButtonRect.translate(0, deltaH);
+            if (downstream.taskItem) {
+                downstream.taskCheckRect.translate(0, deltaH);
+            }
+        }
+
+        m_currentLayout.size.rheight() += deltaH;
+        modified = true;
+
+        if (m_controller->isStreaming() && i < m_stableLayout.blocks.size()) {
+            if (m_stableLayout.blocks[i].imageUrl == source) {
+                m_stableLayout.blocks[i].rect.setWidth(w);
+                m_stableLayout.blocks[i].rect.setHeight(h);
+                m_stableLayout.blocks[i].imageIntrinsicSize = intrinsic;
+                for (int j = i + 1; j < m_stableLayout.blocks.size(); ++j) {
+                    auto& downstream = m_stableLayout.blocks[j];
+                    downstream.rect.translate(0, deltaH);
+                    downstream.copyButtonRect.translate(0, deltaH);
+                    if (downstream.taskItem) {
+                        downstream.taskCheckRect.translate(0, deltaH);
+                    }
+                }
+                m_stableLayout.size.rheight() += deltaH;
+            }
+        }
+    }
+
+    if (modified) {
+        emit layoutReady(m_currentLayout);
+        return true;
+    }
+    return false;
+}
+
 const ui::markdown::DocumentLayout& MarkdownDocumentLayout::currentLayout() const
 {
     return m_currentLayout;
