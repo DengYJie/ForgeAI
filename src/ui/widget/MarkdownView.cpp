@@ -279,6 +279,7 @@ void MarkdownView::setAutoFitHeight(bool enable)
     policy.setVerticalPolicy(QSizePolicy::Preferred);
     policy.setHeightForWidth(enable);
     setSizePolicy(policy);
+    updateScrollBars();
     updateAutoFitHeight();
     invalidatePreferredSize();
     updateGeometry();
@@ -723,7 +724,12 @@ void MarkdownView::updateScrollBars()
 {
     const int height = qCeil(m_documentLayout->size.height());
     verticalScrollBar()->setPageStep(viewport()->height());
-    verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
+    if (m_autoFitHeight) {
+        verticalScrollBar()->setRange(0, 0);
+        verticalScrollBar()->setValue(0);
+    } else {
+        verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
+    }
     setVerticalScrollBarPolicy(m_autoFitHeight ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
 }
 
