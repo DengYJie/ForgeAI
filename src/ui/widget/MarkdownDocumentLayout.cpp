@@ -17,23 +17,23 @@ MarkdownDocumentLayout::MarkdownDocumentLayout(MarkdownDocumentController* contr
             this, &MarkdownDocumentLayout::onTailDocumentChanged);
 }
 
-const ui::markdown::DocumentLayout* MarkdownDocumentLayout::findCachedLayout(qreal width) const
+ui::markdown::DocumentLayoutPtr MarkdownDocumentLayout::findCachedLayout(qreal width) const
 {
-    if (m_controller->isStreaming() || m_stableLayoutDirty) return nullptr;
+    if (m_controller->isStreaming()) return nullptr;
     for (auto it = m_layoutCacheList.begin(); it != m_layoutCacheList.end(); ++it) {
-        if (qAbs(it->width - width) < 0.5 && it->themeVersion == m_theme.version && !it->layout.blocks.isEmpty()) {
+        if (qAbs(it->width - width) < 0.5 && it->themeVersion == m_theme.version && it->layout && it->layout->blockCount() > 0) {
             if (it != m_layoutCacheList.begin()) {
                 std::rotate(m_layoutCacheList.begin(), it, it + 1);
             }
-            return &m_layoutCacheList.front().layout;
+            return m_layoutCacheList.front().layout;
         }
     }
     return nullptr;
 }
 
-void MarkdownDocumentLayout::insertCachedLayout(qreal width, ui::markdown::DocumentLayout layout) const
+void MarkdownDocumentLayout::insertCachedLayout(qreal width, ui::markdown::DocumentLayoutPtr layout) const
 {
-    if (m_controller->isStreaming() || layout.blocks.isEmpty()) return;
+    if (m_controller->isStreaming() || !layout || layout->blockCount() == 0) return;
     for (auto it = m_layoutCacheList.begin(); it != m_layoutCacheList.end(); ++it) {
         if (qAbs(it->width - width) < 0.5) {
             it->width = width;
@@ -64,8 +64,8 @@ void MarkdownDocumentLayout::setWidth(qreal width)
     m_width = width;
 
     if (!m_controller->isStreaming()) {
-        if (const auto* cached = findCachedLayout(m_width)) {
-            m_currentLayout = *cached;
+        if (auto cached = findCachedLayout(m_width)) {
+            m_currentLayout = std::move(cached);
             emit layoutReady(m_currentLayout);
             return;
         }
@@ -98,11 +98,22 @@ void MarkdownDocumentLayout::forceRelayout()
 
 bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize& newSize)
 {
-    if (newSize.isEmpty() || m_currentLayout.blocks.isEmpty()) return false;
+    if (newSize.isEmpty() || !m_currentLayout || m_currentLayout->blocks.isEmpty()) return false;
 
+    // Fast in-place geometry adjustment without running any Markdown/QTextLayout parsing
+    bool found = false;
+    for (const auto& b : m_currentLayout->blocks) {
+        if (b.kind == ui::markdown::BlockKind::Image && b.imageUrl == source) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
+
+    auto newLayout = std::make_shared<ui::markdown::DocumentLayout>(*m_currentLayout);
     bool modified = false;
-    for (int i = 0; i < m_currentLayout.blocks.size(); ++i) {
-        auto& block = m_currentLayout.blocks[i];
+    for (int i = 0; i < newLayout->blocks.size(); ++i) {
+        auto& block = newLayout->blocks[i];
         if (block.kind != ui::markdown::BlockKind::Image || block.imageUrl != source) continue;
 
         const qreal indent = block.rect.left();
@@ -124,8 +135,8 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
         block.rect.setHeight(h);
         block.imageIntrinsicSize = intrinsic;
 
-        for (int j = i + 1; j < m_currentLayout.blocks.size(); ++j) {
-            auto& downstream = m_currentLayout.blocks[j];
+        for (int j = i + 1; j < newLayout->blocks.size(); ++j) {
+            auto& downstream = newLayout->blocks[j];
             downstream.rect.translate(0, deltaH);
             downstream.copyButtonRect.translate(0, deltaH);
             if (downstream.taskItem) {
@@ -133,56 +144,43 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
             }
         }
 
-        m_currentLayout.size.rheight() += deltaH;
+        newLayout->size.rheight() += deltaH;
         modified = true;
-
-        if (m_controller->isStreaming() && i < m_stableLayout.blocks.size()) {
-            if (m_stableLayout.blocks[i].imageUrl == source) {
-                m_stableLayout.blocks[i].rect.setWidth(w);
-                m_stableLayout.blocks[i].rect.setHeight(h);
-                m_stableLayout.blocks[i].imageIntrinsicSize = intrinsic;
-                for (int j = i + 1; j < m_stableLayout.blocks.size(); ++j) {
-                    auto& downstream = m_stableLayout.blocks[j];
-                    downstream.rect.translate(0, deltaH);
-                    downstream.copyButtonRect.translate(0, deltaH);
-                    if (downstream.taskItem) {
-                        downstream.taskCheckRect.translate(0, deltaH);
-                    }
-                }
-                m_stableLayout.size.rheight() += deltaH;
-            }
-        }
     }
 
     if (modified) {
+        m_currentLayout = std::move(newLayout);
+        m_layoutCacheList.clear(); // Height changed, clear width LRU cache only (NOT engine cache)
         emit layoutReady(m_currentLayout);
         return true;
     }
     return false;
 }
 
-ui::markdown::DocumentLayout MarkdownDocumentLayout::measure(qreal maxWidth) const
+ui::markdown::DocumentLayoutPtr MarkdownDocumentLayout::measure(qreal maxWidth) const
 {
     const qreal w = qMax<qreal>(1, maxWidth);
-    if (!m_controller->isStreaming() && !m_stableLayoutDirty) {
-        if (const auto* cached = findCachedLayout(w)) {
-            return *cached;
+    if (!m_controller->isStreaming()) {
+        if (auto cached = findCachedLayout(w)) {
+            return cached;
         }
     }
 
     static const QHash<QString, QImage> emptyImages;
     const auto& images = m_images ? *m_images : emptyImages;
-    ui::markdown::DocumentLayout result;
+    ui::markdown::DocumentLayoutPtr result;
     if (m_controller->isStreaming()) {
-        result = m_engine.layout(m_controller->stableDocument(), m_controller->tailDocument(), w, m_theme, images);
+        result = std::make_shared<ui::markdown::DocumentLayout>(
+            m_engine.layout(m_controller->stableDocument(), m_controller->tailDocument(), w, m_theme, images));
     } else {
-        result = m_engine.layout(m_controller->stableDocument(), w, m_theme, images);
+        result = std::make_shared<ui::markdown::DocumentLayout>(
+            m_engine.layout(m_controller->stableDocument(), w, m_theme, images));
         insertCachedLayout(w, result);
     }
     return result;
 }
 
-const ui::markdown::DocumentLayout& MarkdownDocumentLayout::currentLayout() const
+ui::markdown::DocumentLayoutPtr MarkdownDocumentLayout::currentLayout() const
 {
     return m_currentLayout;
 }
@@ -202,12 +200,12 @@ void MarkdownDocumentLayout::onDocumentRebuilt()
 void MarkdownDocumentLayout::onStableDocumentAppended()
 {
     m_stableLayoutDirty = true;
-    invalidateLayoutCache();
+    m_layoutCacheList.clear();
 }
 
 void MarkdownDocumentLayout::onTailDocumentChanged()
 {
-    invalidateLayoutCache();
+    m_layoutCacheList.clear();
     relayout();
 }
 
@@ -217,12 +215,14 @@ void MarkdownDocumentLayout::relayout()
     const auto& images = m_images ? *m_images : emptyImages;
 
     if (!m_controller->isStreaming()) {
-        if (const auto* cached = findCachedLayout(m_width)) {
-            m_currentLayout = *cached;
+        m_stableLayoutDirty = false;
+        if (auto cached = findCachedLayout(m_width)) {
+            m_currentLayout = std::move(cached);
             emit layoutReady(m_currentLayout);
             return;
         }
-        m_currentLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images);
+        m_currentLayout = std::make_shared<ui::markdown::DocumentLayout>(
+            m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images));
         insertCachedLayout(m_width, m_currentLayout);
         emit layoutReady(m_currentLayout);
         return;
@@ -230,7 +230,8 @@ void MarkdownDocumentLayout::relayout()
 
     if (m_stableLayoutDirty || !qFuzzyCompare(m_stableLayoutWidth, m_width) || m_stableLayoutThemeVersion != m_theme.version) {
         QElapsedTimer t; t.start();
-        m_stableLayout = m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images);
+        m_stableLayout = std::make_shared<ui::markdown::DocumentLayout>(
+            m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images));
         m_metrics.lastStableLayoutMs = t.elapsed();
         ++m_metrics.stableLayoutCount;
         m_stableLayoutDirty = false;
@@ -243,19 +244,20 @@ void MarkdownDocumentLayout::relayout()
     m_metrics.lastTailLayoutMs = t.elapsed();
     ++m_metrics.tailLayoutCount;
 
-    m_currentLayout = m_stableLayout;
-    const qreal yOffset = m_stableLayout.size.height() - m_theme.contentMargins.bottom() - m_theme.contentMargins.top();
-    const int textOffset = m_stableLayout.textLength();
+    auto layout = std::make_shared<ui::markdown::DocumentLayout>(*m_stableLayout);
+    const qreal yOffset = m_stableLayout ? (m_stableLayout->size.height() - m_theme.contentMargins.bottom() - m_theme.contentMargins.top()) : 0;
+    const int textOffset = m_stableLayout ? m_stableLayout->textLength() : 0;
     for (ui::markdown::BlockLayout block : tail.blocks) {
         block.rect.translate(0, yOffset);
         block.copyButtonRect.translate(0, yOffset);
         block.documentTextOffset += textOffset;
-        m_currentLayout.blocks.push_back(std::move(block));
+        layout->blocks.push_back(std::move(block));
     }
-    m_currentLayout.size = QSizeF(m_width, yOffset + tail.size.height());
-    m_currentLayout.width = m_width;
-    m_currentLayout.themeVersion = m_theme.version;
+    layout->size = QSizeF(m_width, yOffset + tail.size.height());
+    layout->width = m_width;
+    layout->themeVersion = m_theme.version;
 
+    m_currentLayout = std::move(layout);
     emit layoutReady(m_currentLayout);
 }
 

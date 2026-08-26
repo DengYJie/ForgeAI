@@ -75,7 +75,7 @@ MarkdownView::MarkdownView(QWidget *parent)
         m_layoutCache->forceRelayout();
     });
 
-    m_eventFilter->setDocumentLayout(&m_documentLayout);
+    m_eventFilter->setDocumentLayoutGetter([this] { return m_documentLayout.get(); });
     m_eventFilter->setScrollOffsets(&m_blockScrollOffsets);
     m_eventFilter->setScrollBarValueGetter([this] { return verticalScrollBar()->value(); });
 }
@@ -129,7 +129,7 @@ void MarkdownView::scrollToAnchor(const QString &name)
 {
     QString target = name.trimmed();
     if (target.startsWith(u'#')) target = target.mid(1).trimmed();
-    if (target.isEmpty() || m_documentLayout.blocks.isEmpty()) return;
+    if (target.isEmpty() || m_documentLayout->blockCount() == 0) return;
 
     auto slugify = [](const QString& str) -> QString {
         QString s;
@@ -143,7 +143,7 @@ void MarkdownView::scrollToAnchor(const QString &name)
 
     const QString targetSlug = slugify(target);
 
-    for (const auto& block : m_documentLayout.blocks) {
+    for (const auto& block : *m_documentLayout) {
         if (block.kind != ui::markdown::BlockKind::Heading) continue;
         const QString text = block.inlineLayout ? block.inlineLayout->text.trimmed() : QString();
         const QString slug = slugify(text);
@@ -287,8 +287,8 @@ void MarkdownView::setBlockScrollOffset(int blockIndex, const ui::markdown::Bloc
 
 bool MarkdownView::scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool smooth)
 {
-    if (blockIndex < 0 || blockIndex >= m_documentLayout.blocks.size()) return false;
-    const auto& block = m_documentLayout.blocks.at(blockIndex);
+    if (blockIndex < 0 || blockIndex >= m_documentLayout->blockCount()) return false;
+    const auto& block = m_documentLayout->blockAt(blockIndex);
     if (!block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll()) return false;
 
     const auto current = m_blockScrollOffsets.value(blockIndex);
@@ -388,7 +388,7 @@ QString MarkdownView::selectedHtml() const
     if (selStart >= selEnd) return {};
 
     QString html;
-    for (const auto& block : m_documentLayout.blocks) {
+    for (const auto& block : *m_documentLayout) {
         int blockStart = block.documentTextOffset;
         int blockLen = block.inlineLayout ? static_cast<int>(block.inlineLayout->text.size())
                      : (block.kind == ui::markdown::BlockKind::CodeBlock ? static_cast<int>(block.code.size()) : 0);
@@ -554,7 +554,7 @@ bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags,
     m_eventFilter->setSelection({foundStart, foundStart + foundLength});
     emit selectionChanged(true);
 
-    for (const auto& b : m_documentLayout.blocks) {
+    for (const auto& b : *m_documentLayout) {
         if (foundStart >= b.documentTextOffset && foundStart <= b.documentTextOffset + (b.inlineLayout ? b.inlineLayout->text.size() : 0)) {
             const int viewTop = verticalScrollBar()->value();
             const int viewBottom = viewTop + viewport()->height();
@@ -575,10 +575,10 @@ int MarkdownView::heightForWidth(int width) const
 {
     if (!m_autoFitHeight || width <= 0) return sizeHint().height();
     const qreal cw = qMax<qreal>(1, width - (verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0));
-    if (qAbs(m_documentLayout.width - cw) < 0.5 && m_lastAutoFitHeight > 0) return m_lastAutoFitHeight;
+    if (qAbs(m_documentLayout->width - cw) < 0.5 && m_lastAutoFitHeight > 0) return m_lastAutoFitHeight;
     if (m_layoutCache) {
         const auto docLayout = m_layoutCache->measure(cw);
-        return qMax(16, qCeil(docLayout.size.height()));
+        return qMax(16, qCeil(docLayout->size.height()));
     }
     return sizeHint().height();
 }
@@ -637,11 +637,12 @@ void MarkdownView::focusOutEvent(QFocusEvent* event)
     m_eventFilter->clearSelection();
 }
 
-void MarkdownView::onLayoutReady(const ui::markdown::DocumentLayout& layout)
+void MarkdownView::onLayoutReady(ui::markdown::DocumentLayoutPtr layout)
 {
     m_documentLayout = layout;
-    m_metrics.blockCount = m_documentLayout.blocks.size();
-    m_metrics.documentHeight = m_documentLayout.size.height();
+    m_metrics.blockCount = m_documentLayout->blockCount();
+    m_metrics.documentHeight = m_documentLayout->size.height();
+    m_preferredContentSize = m_documentLayout->size;
     const auto lm = m_layoutCache->metrics();
     m_metrics.stableLayoutCount = lm.stableLayoutCount;
     m_metrics.tailLayoutCount = lm.tailLayoutCount;
@@ -651,8 +652,8 @@ void MarkdownView::onLayoutReady(const ui::markdown::DocumentLayout& layout)
     updateAutoFitHeight();
     requestImageResources();
     recalculatePreferredSize();
-    if (m_lastDocumentSize != m_documentLayout.size) {
-        m_lastDocumentSize = m_documentLayout.size;
+    if (m_lastDocumentSize != m_documentLayout->size) {
+        m_lastDocumentSize = m_documentLayout->size;
         emit documentSizeChanged(m_lastDocumentSize);
     }
     viewport()->update();
@@ -660,8 +661,8 @@ void MarkdownView::onLayoutReady(const ui::markdown::DocumentLayout& layout)
 
 void MarkdownView::onTaskToggleRequested(int blockIndex)
 {
-    if (blockIndex < 0 || blockIndex >= m_documentLayout.blocks.size()) return;
-    const auto& block = m_documentLayout.blocks.at(blockIndex);
+    if (blockIndex < 0 || blockIndex >= m_documentLayout->blockCount()) return;
+    const auto& block = m_documentLayout->blockAt(blockIndex);
     m_controller->toggleTaskAtLine(block.taskSourceLine, block.taskChecked);
 }
 
@@ -680,7 +681,7 @@ void MarkdownView::recalculatePreferredSize()
 {
     const qreal limit = m_preferredWidthLimit > 0 ? m_preferredWidthLimit : DefaultPreferredWidthLimit;
     const auto measured = m_layoutCache->measure(limit);
-    const QSizeF newSize = measured.size;
+    const QSizeF newSize = measured ? measured->size : QSizeF();
 
     if (m_preferredSizeDirty || m_preferredContentSize != newSize) {
         m_preferredSizeDirty = false;
@@ -698,7 +699,7 @@ void MarkdownView::updateActualLayoutWidth()
 
 void MarkdownView::updateScrollBars()
 {
-    const int height = qCeil(m_documentLayout.size.height());
+    const int height = qCeil(m_documentLayout->size.height());
     verticalScrollBar()->setPageStep(viewport()->height());
     verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
     setVerticalScrollBarPolicy(m_autoFitHeight ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
@@ -710,7 +711,7 @@ void MarkdownView::updateAutoFitHeight()
         return;
     }
 
-    const int h = qMax(16, qCeil(m_documentLayout.size.height()));
+    const int h = qMax(16, qCeil(m_documentLayout->size.height()));
     if (h == m_lastAutoFitHeight) {
         return;
     }
@@ -727,7 +728,7 @@ void MarkdownView::paintViewport(QPaintEvent* event)
     painter.save();
     painter.translate(0, -verticalScrollBar()->value());
     const QRectF exposed = QRectF(event->rect()).translated(0, verticalScrollBar()->value());
-    m_metrics.visibleBlockCount = m_renderer.paint(painter, m_documentLayout, m_theme, exposed,
+    m_metrics.visibleBlockCount = m_renderer.paint(painter, *m_documentLayout, m_theme, exposed,
                                                     m_eventFilter->selection(),
                                                     m_eventFilter->hoveredBlock(),
                                                     m_eventFilter->hoveredCopyBlock(),
@@ -742,9 +743,9 @@ void MarkdownView::paintViewport(QPaintEvent* event)
 bool MarkdownView::handleBlockWheel(QWheelEvent* event)
 {
     const QPointF docPos = toDocument(event->position());
-    const auto hit = m_renderer.hitTest(m_documentLayout, docPos, m_blockScrollOffsets);
-    if (hit.blockIndex < 0 || hit.blockIndex >= m_documentLayout.blocks.size()) return false;
-    const auto& block = m_documentLayout.blocks.at(hit.blockIndex);
+    const auto hit = m_renderer.hitTest(*m_documentLayout, docPos, m_blockScrollOffsets);
+    if (hit.blockIndex < 0 || hit.blockIndex >= m_documentLayout->blockCount()) return false;
+    const auto& block = m_documentLayout->blockAt(hit.blockIndex);
     if (!block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll()) return false;
 
     const QPoint numPixels = event->pixelDelta();
@@ -779,7 +780,7 @@ QPointF MarkdownView::toDocument(const QPointF& viewportPosition) const
 QString MarkdownView::documentPlainText() const
 {
     QString text;
-    for (const auto& block : m_documentLayout.blocks) {
+    for (const auto& block : *m_documentLayout) {
         if (block.inlineLayout) text += block.inlineLayout->text;
         else if (block.kind == ui::markdown::BlockKind::CodeBlock) text += block.code;
         text += u'\n';
@@ -789,7 +790,7 @@ QString MarkdownView::documentPlainText() const
 
 void MarkdownView::requestImageResources()
 {
-    for (const auto& block : m_documentLayout.blocks) {
+    for (const auto& block : *m_documentLayout) {
         if (block.kind == ui::markdown::BlockKind::Image)
             m_resources.request(block.imageUrl, m_baseUrl);
     }

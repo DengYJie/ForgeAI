@@ -35,6 +35,176 @@
 
 using namespace ui::markdown;
 
+namespace {
+
+QString generateLongMarkdownDocument() {
+    return QStringLiteral(
+        "# 1. 标题与大纲层级 (Heading Hierarchy)\n\n"
+        "# Heading 1 一级标题\n"
+        "## Heading 2 二级标题\n"
+        "### Heading 3 三级标题\n"
+        "#### Heading 4 四级标题\n"
+        "##### Heading 5 五级标题\n"
+        "###### Heading 6 六级标题\n\n"
+        "Setext Heading 1 一级底线标题\n"
+        "=============================\n\n"
+        "Setext Heading 2 二级底线标题\n"
+        "-----------------------------\n\n"
+        "---\n\n"
+        "# 2. 行内文本样式与字符格式化 (Inline Formatting)\n\n"
+        "这是长文本排版测试的核心正文段落。我们支持大量中英文混排、标点符号、数学运算符以及特殊字符格式。\n\n"
+        "在实际的大语言模型（LLM）对话交互中，模型经常生成包含多种行内标签的内容：\n\n"
+        "- **粗体强调** (`**bold**`) 与 __粗体下划线__ (`__bold__`)\n"
+        "- *斜体强调* (`*italic*`) 与 _斜体下划线_ (`_italic_`)\n"
+        "- ***粗斜体混合强调*** (`***bold italic***`)\n"
+        "- ~~删除线语法 (GFM Extension)~~ (`~~strikethrough~~`)\n"
+        "- 内联代码：`QFile`、`QTextStream`、`QSettings` 与 `` `含反引号的转义代码` ``\n"
+        "- 交互式超链接：[ForgeAI 官方仓库 (Hover测试)](https://github.com/DengYJie/ForgeAI)\n"
+        "- GFM 自动链接识别：https://github.com 与 <support@forge.ai>\n"
+        "- 行内 HTML 标签：<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> 以及 <span>自定义行内文字</span>\n"
+        "- 强制换行测试：\n"
+        "  第一行文本（末尾带反斜杠）\\\n"
+        "  强制折行到第二行展示。\n\n"
+        "---\n\n"
+        "# 3. 多层引用块与格式嵌套 (Blockquotes)\n\n"
+        "> 单层引用块：ForgeAI 采用基于 QTextLayout 的分层排版引擎，将文本准备与几何排版彻底解耦。\n"
+        ">\n"
+        "> > 嵌套第二层引用：解耦了 Preferred Size 测算与 Actual Viewport Layout 实际排版。\n"
+        "> >\n"
+        "> > > 嵌套第三层引用：支持极速流式增量追加，仅重新排版 tailDocument，绝不破坏 stableDocument 缓存。\n\n"
+        "> 带内部复杂格式的引用块：\n"
+        "> - 引用内的列表项 1：`inline code` 高亮显示\n"
+        "> - 引用内的列表项 2：**加粗的架构结论**，确保行间距均匀\n"
+        "> - 引用内的表格测试：\n"
+        ">   | 属性 | 描述 |\n"
+        ">   |---|---|\n"
+        ">   | Intrinsic | 宽度不变的内在尺寸 |\n"
+        ">   | Wrapping | 随宽度压缩的折行排版 |\n\n"
+        "---\n\n"
+        "# 4. 复杂列表与任务清单 (Lists & Task Lists)\n\n"
+        "### 4.1 无序列表与三层嵌套\n"
+        "- 顶级项目 A (`-` 标记)\n"
+        "  * 次级嵌套项目 A.1 (`*` 标记)\n"
+        "    + 三级嵌套项目 A.1.1 (`+` 标记)\n"
+        "    + 三级嵌套项目 A.1.2\n"
+        "  * 次级嵌套项目 A.2\n"
+        "- 顶级项目 B\n\n"
+        "### 4.2 有序步骤清单\n"
+        "1. 第一步：解析 Markdown 抽象语法树（基于 cmark-gfm 高性能 C 解析库）\n"
+        "2. 第二步：执行分块几何布局（MarkdownLayoutEngine）\n"
+        "   1. 计算行高与字形折行（HarfBuzz shaping 仅在宽度压缩时发生）\n"
+        "   2. 缓存测量尺寸（LRU Width-Aware 缓存机制）\n"
+        "3. 第三步：视口裁剪并高效绘制（MarkdownRenderer 仅遍历可见 BlockLayout）\n\n"
+        "### 4.3 GFM 任务清单 (带交互复选框状态)\n"
+        "- [x] 已完成的核心特性：CommonMark 基础语法解析与 AST 节点构建\n"
+        "- [x] 已完成的核心特性：GFM 表格与删除线扩展支持\n"
+        "- [x] 已完成的核心特性：内联代码块圆角胶囊与选中背景绘制\n"
+        "- [x] 已完成的性能优化：CodeBlock 语法高亮与 QTextLayout 宽度不变缓存\n"
+        "- [x] 已完成的性能优化：Table Intrinsic 自然宽度测算与列宽复用\n"
+        "- [x] 已完成的性能优化：Streaming 细粒度缓存保留与局部尾部增量排版\n"
+        "- [ ] 待优化的扩展项：16ms 窗口缩放事件帧合并调度\n"
+        "- [ ] 待优化的扩展项：Interactive Resize 预加载视口降低\n\n"
+        "---\n\n"
+        "# 5. 多列 GFM 数据表格 (Multi-Column Tables)\n\n"
+        "| 模块特性 | 默认对齐 | 居中对齐 (`:---:`) | 靠右对齐 (`---:`) | 性能表现 | 状态 |\n"
+        "|:---|:---|:---:|---:|:---:|:---:|\n"
+        "| **基础解析** | cmark-gfm AST | AST 节点遍历 | 0.8 ms | 极速 | ✅ 已就绪 |\n"
+        "| **行内样式** | `*italic*`, `**bold**` | `~~strike~~` | 1.2 ms | 极速 | ✅ 已就绪 |\n"
+        "| **代码高亮** | C++, Python, JSON | 关键词/字符串/注释 | 2.5 ms | 缓存复用 | ✅ 已就绪 |\n"
+        "| **视口裁剪** | 仅绘制可见 Block | `firstVisibleBlock` | 0.3 ms | 极致 | ✅ 已就绪 |\n"
+        "| **流式排版** | 稳定块锁定 + 尾部排版 | 增量 Append | < 1.0 ms | 极速 | ✅ 已就绪 |\n"
+        "| **窗口缩放** | 实时测量 | 帧合并 + LRU 缓存 | 2.1 ms | 丝滑 | 🚀 稳定交付 |\n\n"
+        "---\n\n"
+        "# 6. 语法高亮代码块 (Fenced Code Blocks)\n\n"
+        "### 6.1 C++ 核心代码示例\n"
+        "```cpp\n"
+        "#include <iostream>\n"
+        "#include <memory>\n"
+        "#include \"ui/markdown/MarkdownLayout.h\"\n\n"
+        "// 计算窗口缩放时的视口几何与局部排版\n"
+        "int calculateOptimalHeight(int availableWidth, const ui::markdown::MarkdownTheme& theme) {\n"
+        "    const double ratio = 16.0 / 9.0;\n"
+        "    int calculatedHeight = static_cast<int>(availableWidth / ratio) + 24;\n"
+        "    std::cout << \"Calculated: \" << calculatedHeight << std::endl;\n"
+        "    return calculatedHeight;\n"
+        "}\n\n"
+        "void processLayoutPipeline(const ui::markdown::DocumentLayout& doc) {\n"
+        "    for (const auto& block : doc.blocks) {\n"
+        "        if (block.kind == ui::markdown::BlockKind::CodeBlock) {\n"
+        "            std::cout << \"Code block lines: \" << block.codeLines.size() << std::endl;\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+        "```\n\n"
+        "### 6.2 Python 异步流水线示例\n"
+        "```python\n"
+        "import asyncio\n"
+        "import time\n"
+        "from typing import AsyncGenerator\n\n"
+        "async def token_stream_simulator(content: str, chunk_size: int = 12) -> AsyncGenerator[str, None]:\n"
+        "    \"\"\"模拟 LLM 真实 Token 流式投递流水线\"\"\"\n"
+        "    for i in range(0, len(content), chunk_size):\n"
+        "        chunk = content[i:i + chunk_size]\n"
+        "        await asyncio.sleep(0.015)  # 15ms 模拟 Token 生成间隔\n"
+        "        yield chunk\n\n"
+        "async def main():\n"
+        "    async for token in token_stream_simulator(\"Hello ForgeAI Streaming!\"):\n"
+        "        print(token, end=\"\", flush=True)\n"
+        "```\n\n"
+        "### 6.3 Rust 高性能流处理示例\n"
+        "```rust\n"
+        "use std::time::Instant;\n\n"
+        "pub struct LayoutBenchmark {\n"
+        "    pub total_passes: u64,\n"
+        "    pub avg_latency_ms: f64,\n"
+        "}\n\n"
+        "impl LayoutBenchmark {\n"
+        "    pub fn run_benchmark(&mut self) -> bool {\n"
+        "        let start = Instant::now();\n"
+        "        // 模拟 10,000 次排版计算\n"
+        "        let elapsed = start.elapsed();\n"
+        "        self.avg_latency_ms = elapsed.as_secs_f64() * 1000.0 / 10000.0;\n"
+        "        self.avg_latency_ms < 0.05\n"
+        "    }\n"
+        "}\n"
+        "```\n\n"
+        "### 6.4 JSON 配置数据\n"
+        "```json\n"
+        "{\n"
+        "  \"projectName\": \"ForgeAI\",\n"
+        "  \"version\": \"1.8.0\",\n"
+        "  \"optimization\": {\n"
+        "    \"streamingTailOnly\": true,\n"
+        "    \"widthAwareLRUCache\": true,\n"
+        "    \"tableIntrinsicFastPath\": true,\n"
+        "    \"codeBlockHighlightCache\": true\n"
+        "  },\n"
+        "  \"benchmarkTargetFps\": 60\n"
+        "}\n"
+        "```\n\n"
+        "---\n\n"
+        "# 7. 嵌入式组件与富媒体展示 (Images & Embeds)\n\n"
+        "![ForgeAI 系统架构设计图 (测试自适应尺寸)](architecture_diagram_preview.png)\n\n"
+        "---\n\n"
+        "# 8. 原始 HTML 自定义组件块 (Raw HTML Blocks)\n\n"
+        "<div style=\"border: 1px solid #0f6cbd; padding: 12px; border-radius: 8px; background: rgba(15, 108, 189, 0.05);\">\n"
+        "    <b>长文本流式压力测试提示：</b> 本文档综合覆盖了各种复杂语法节点，是检测流式排版、内存局部性与窗口缩放稳定性的基准样本。\n"
+        "</div>\n\n"
+        "---\n\n"
+        "# 9. 分割线样式测试 (Thematic Breaks)\n\n"
+        "分割线形式 A：\n"
+        "---\n"
+        "分割线形式 B：\n"
+        "***\n"
+        "分割线形式 C：\n"
+        "___\n\n"
+        "# 10. 总结与展望 (Conclusion)\n\n"
+        "至此，长文档的全部 10 个章节已全部流式输出完成。排版引擎在整个流式输出过程中保持了极高的吞吐率和极低的帧延迟。"
+    );
+}
+
+} // namespace
+
 class MarkdownCoreTests final : public QObject {
     Q_OBJECT
 private slots:
@@ -49,6 +219,7 @@ private slots:
     void codeBlocksProvideTextHitTesting();
     void streamingFinishesWithCompleteDocumentLayout();
     void streamingKeepsStableBlocksOutOfTailRelayout();
+    void streamingLongDocumentPerformanceAndStability();
     void markdownViewThemeAndSelectionApi();
     void markdownViewFollowsFluentDarkTheme();
     void taskListsHaveStableHitTargetsAndOptionalInteraction();
@@ -57,6 +228,7 @@ private slots:
     void reportsManyViewConstructionCost();
     void virtualizesMessageCards();
     void virtualizesThousandsOfMessageRecords();
+    void userCardHeightForWidthCalculationIsAccurate();
     void fitContentSizeHintIsInvariantUnderActualResizes();
     void heightForWidthRespondsToWrappingWidth();
     void autoFitHeightContractIsRespected();
@@ -245,6 +417,76 @@ void MarkdownCoreTests::streamingKeepsStableBlocksOutOfTailRelayout()
     view.appendStreamingText(QStringLiteral("\n\nnext stable block.\n\n"));
     QVERIFY(view.metrics().stableLayoutCount > afterStable.stableLayoutCount);
     view.finishStreaming();
+}
+
+void MarkdownCoreTests::streamingLongDocumentPerformanceAndStability()
+{
+    const QString longDoc = generateLongMarkdownDocument();
+    QVERIFY(longDoc.length() >= 4000);
+
+    // 1. Break into realistic LLM streaming token chunks (5-20 characters per chunk, ~300 chunks)
+    QStringList chunks;
+    int pos = 0;
+    int step = 14;
+    while (pos < longDoc.length()) {
+        const int chunkSize = qMin(step, static_cast<int>(longDoc.length()) - pos);
+        chunks.append(longDoc.mid(pos, chunkSize));
+        pos += chunkSize;
+        step = (step % 17) + 6;
+    }
+    QVERIFY(chunks.size() >= 150);
+
+    // 2. Stream through MarkdownView
+    ui::widget::MarkdownView streamed;
+    streamed.resize(640, 480);
+    streamed.beginStream();
+
+    QElapsedTimer streamTimer;
+    streamTimer.start();
+    qint64 totalTailUs = 0;
+    qint64 maxTailUs = 0;
+
+    for (const QString& chunk : chunks) {
+        QElapsedTimer tokenTimer;
+        tokenTimer.start();
+        streamed.appendStreamingText(chunk);
+        const qint64 tokenUs = tokenTimer.nsecsElapsed() / 1000;
+        totalTailUs += tokenUs;
+        maxTailUs = qMax(maxTailUs, tokenUs);
+    }
+    const qint64 totalMs = streamTimer.elapsed();
+    streamed.finishStreaming();
+
+    // 3. Verify metrics & invariants
+    const auto m = streamed.metrics();
+    QCOMPARE(streamed.markdown(), longDoc);
+    QVERIFY(m.tailLayoutCount >= static_cast<quint64>(chunks.size()));
+    // Stable layout should only trigger when complete blocks form, strictly bounded << chunks.size()
+    QVERIFY(m.stableLayoutCount < static_cast<quint64>(chunks.size() / 2));
+
+    const double avgTailMs = (totalTailUs / 1000.0) / chunks.size();
+    qInfo() << "Long document streaming benchmark: total chunks =" << chunks.size()
+            << ", total streaming time =" << totalMs << "ms"
+            << ", avg per-token latency =" << avgTailMs << "ms"
+            << ", max token latency =" << (maxTailUs / 1000.0) << "ms"
+            << ", stableLayoutCount =" << m.stableLayoutCount
+            << ", tailLayoutCount =" << m.tailLayoutCount;
+
+    QVERIFY2(avgTailMs < 5.0, qPrintable(QStringLiteral("Average per-token latency too slow: %1 ms").arg(avgTailMs)));
+
+    // 4. Validate layout parity with non-streamed full parse
+    ui::widget::MarkdownView batch;
+    batch.resize(640, 480);
+    batch.setMarkdown(longDoc);
+
+    QCOMPARE(streamed.sizeHint().height(), batch.sizeHint().height());
+    QCOMPARE(streamed.sizeHint().width(), batch.sizeHint().width());
+
+    // 5. Verify interaction on streamed content
+    streamed.selectAll();
+    batch.selectAll();
+    QVERIFY(!streamed.selectedText().isEmpty());
+    QCOMPARE(streamed.selectedText().length(), batch.selectedText().length());
 }
 
 void MarkdownCoreTests::markdownViewThemeAndSelectionApi()
@@ -439,6 +681,31 @@ void MarkdownCoreTests::virtualizesThousandsOfMessageRecords()
     QCOMPARE(list.messageCount(), 2000);
     QVERIFY(list.activeCardCount() > 0);
     QVERIFY(list.activeCardCount() < 100);
+}
+
+void MarkdownCoreTests::userCardHeightForWidthCalculationIsAccurate()
+{
+    domain::conversation::Message userMsg;
+    userMsg.id = QUuid::createUuid();
+    userMsg.role = domain::MessageRole::User;
+    userMsg.blocks.append(domain::conversation::MessageBlock{
+        domain::BlockType::Text,
+        domain::conversation::TextBlock{QStringLiteral("### 提问 #151\n在开发 Qt 应用程序时，`QWidget::resizeEvent` 高频触发有哪些优化手段？")}
+    });
+
+    ui::widget::message::MessageCardWidget card;
+    card.setMessage(userMsg);
+    card.setAvailableWidth(800);
+    QCoreApplication::processEvents();
+
+    const int h800 = card.heightForWidth(800);
+    // User card with Heading + Paragraph must NOT be squashed to 24px fallback!
+    QVERIFY2(h800 >= 60, qPrintable(QStringLiteral("User card height (%1 px) is too small, likely squashed to fallback!").arg(h800)));
+    QVERIFY(card.sizeHint().height() >= 60);
+
+    const int h300 = card.heightForWidth(300);
+    // Narrower width wraps text and requires more height
+    QVERIFY(h300 >= h800);
 }
 
 void MarkdownCoreTests::fitContentSizeHintIsInvariantUnderActualResizes()
@@ -1078,139 +1345,9 @@ static QList<domain::conversation::Message> createScenarioAllCmarkGfmFeatures() 
         domain::conversation::Message msg;
         msg.id = QUuid::createUuid();
         msg.role = domain::MessageRole::Assistant;
-
-        const QString fullMarkdown = QStringLiteral(
-            "# 1. 标题层级 (ATX & Setext Headings)\n\n"
-            "# Heading 1 一级标题\n"
-            "## Heading 2 二级标题\n"
-            "### Heading 3 三级标题\n"
-            "#### Heading 4 四级标题\n"
-            "##### Heading 5 五级标题\n"
-            "###### Heading 6 六级标题\n\n"
-            "Setext Heading 1 一级底线标题\n"
-            "=============================\n\n"
-            "Setext Heading 2 二级底线标题\n"
-            "-----------------------------\n\n"
-            "---\n\n"
-            "# 2. 行内文本样式 (Inline Formats)\n\n"
-            "这是普通正文文本，支持各种字符混排与中英文间距。以下是常用行内修饰：\n\n"
-            "- **粗体文本** (`**bold**`) 与 __粗体下划线__ (`__bold__`)\n"
-            "- *斜体文本* (`*italic*`) 与 _斜体下划线_ (`_italic_`)\n"
-            "- ***粗斜体文本*** (`***bold italic***`)\n"
-            "- ~~删除线文本 (GFM Extension)~~ (`~~strikethrough~~`)\n"
-            "- 内联代码：`QFile`、`QTextStream`、`QSettings` 与 `` `含反引号的转义代码` ``\n"
-            "- 交互式超链接：[ForgeAI 官方仓库链接 (Hover测试)](https://github.com/DengYJie/ForgeAI)\n"
-            "- GFM 自动链接识别：https://github.com 与 <support@forge.ai>\n"
-            "- 行内 HTML 标签：<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> 以及 <span>自定义行内文字</span>\n"
-            "- 硬换行与软换行测试：\n"
-            "  第一行文本（末尾带反斜杠）\\\n"
-            "  强制换到第二行。\n\n"
-            "---\n\n"
-            "# 3. 引用块 (Blockquotes)\n\n"
-            "> 单层引用块：ForgeAI 采用自研的基于 QTextLayout 的分层排版引擎。\n"
-            ">\n"
-            "> > 嵌套第二层引用：解耦了 Preferred Size 与 Actual Viewport Layout。\n"
-            "> >\n"
-            "> > > 嵌套第三层引用：支持流式增量追加与尾部局部重排。\n\n"
-            "> 带内部格式的引用块：\n"
-            "> - 引用内的列表项 1：`inline code`\n"
-            "> - 引用内的列表项 2：**加粗结论**\n\n"
-            "---\n\n"
-            "# 4. 列表与任务清单 (Lists & GFM TaskLists)\n\n"
-            "### 无序列表 (Unordered List)\n"
-            "- 项目 A (`-` 标记)\n"
-            "  * 嵌套项目 A.1 (`*` 标记)\n"
-            "    + 嵌套项目 A.1.1 (`+` 标记)\n"
-            "- 项目 B\n\n"
-            "### 有序列表 (Ordered List)\n"
-            "1. 第一步：解析 Markdown 抽象语法树 (cmark-gfm)\n"
-            "2. 第二步：执行分块几何布局 (MarkdownLayoutEngine)\n"
-            "   1. 计算行高与字形折行\n"
-            "   2. 缓存测量尺寸\n"
-            "3. 第三步：视口裁剪并高效绘制 (MarkdownRenderer)\n\n"
-            "### GFM 任务列表 (Task Lists - 交互复选框)\n"
-            "- [x] 已完成的核心特性：CommonMark 基础语法解析\n"
-            "- [x] 已完成的核心特性：GFM 表格与删除线\n"
-            "- [x] 已完成的核心特性：内联代码块圆角胶囊与选中高亮\n"
-            "- [ ] 待优化的性能项：16ms 窗口缩放事件帧合并\n"
-            "- [ ] 待优化的性能项：Interactive Resize 预加载视口降低\n"
-            "- [ ] 待优化的性能项：Markdown 统一 Width-Aware LRU 缓存\n\n"
-            "---\n\n"
-            "# 5. GFM 表格 (Tables with Alignment)\n\n"
-            "| 功能特性 | 默认对齐 | 居中对齐 (`:---:`) | 靠右对齐 (`---:`) | 状态 |\n"
-            "|:---|:---|:---:|---:|:---:|\n"
-            "| **基础解析** | cmark-gfm AST | AST 节点遍历 | 0.8 ms | ✅ 已完成 |\n"
-            "| **行内样式** | `*italic*`, `**bold**` | `~~strike~~` | 1.2 ms | ✅ 已完成 |\n"
-            "| **代码高亮** | C++, Python, JSON | 关键词/字符串/注释 | 2.5 ms | ✅ 已完成 |\n"
-            "| **视口裁剪** | 仅绘制可见 Block | `firstVisibleBlock` | 0.3 ms | ✅ 已完成 |\n"
-            "| **窗口缩放** | 实时测量 | 帧合并 + LRU 缓存 | < 5 ms | 🚀 计划中 |\n\n"
-            "---\n\n"
-            "# 6. 代码块与语法高亮 (Fenced Code Blocks)\n\n"
-            "### C++ 代码高亮示例\n"
-            "```cpp\n"
-            "#include <iostream>\n"
-            "#include <memory>\n"
-            "#include \"ui/markdown/MarkdownTheme.h\"\n\n"
-            "// 计算窗口缩放时的视口几何\n"
-            "int calculateOptimalHeight(int availableWidth, const ui::markdown::MarkdownTheme& theme) {\n"
-            "    const double ratio = 16.0 / 9.0;\n"
-            "    int calculatedHeight = static_cast<int>(availableWidth / ratio) + 24;\n"
-            "    std::cout << \"Calculated: \" << calculatedHeight << std::endl;\n"
-            "    return calculatedHeight;\n"
-            "}\n"
-            "```\n\n"
-            "### Python 代码高亮示例\n"
-            "```python\n"
-            "import os\n"
-            "import sys\n\n"
-            "def analyze_resize_storm(events: list[int]) -> dict:\n"
-            "    \"\"\"分析窗口缩放事件的延迟与瓶颈\"\"\"\n"
-            "    avg_latency = sum(events) / max(1, len(events))\n"
-            "    return {\n"
-            "        \"total_events\": len(events),\n"
-            "        \"avg_ms\": round(avg_latency, 2),\n"
-            "        \"is_smooth\": avg_latency < 16.0\n"
-            "    }\n"
-            "```\n\n"
-            "### JSON 数据高亮示例\n"
-            "```json\n"
-            "{\n"
-            "  \"projectName\": \"ForgeAI\",\n"
-            "  \"version\": \"1.7.1\",\n"
-            "  \"features\": {\n"
-            "    \"virtualListView\": true,\n"
-            "    \"markdownRenderer\": true,\n"
-            "    \"frameCoalescing\": false\n"
-            "  },\n"
-            "  \"benchmarkTargetFps\": 60\n"
-            "}\n"
-            "```\n\n"
-            "### 4空格缩进代码块 (Indented Code Block)\n\n"
-            "    // 这是 4 空格缩进代码块\n"
-            "    QPoint pos = event->position().toPoint();\n"
-            "    emit clicked(pos);\n\n"
-            "---\n\n"
-            "# 7. 图片与多媒体占位 (Images)\n\n"
-            "![ForgeAI 系统架构设计图](architecture_diagram_preview.png)\n\n"
-            "---\n\n"
-            "# 8. 原始 HTML 块 (Raw HTML Blocks)\n\n"
-            "<div style=\"border: 1px solid #0f6cbd; padding: 10px; border-radius: 6px;\">\n"
-            "    <b>提示信息：</b> 本文档综合测试了 cmark-gfm 所包含的全部规范与扩展特性。\n"
-            "</div>\n\n"
-            "---\n\n"
-            "# 9. 分割线 (Thematic Breaks)\n\n"
-            "使用 `---`：\n"
-            "---\n"
-            "使用 `***`：\n"
-            "***\n"
-            "使用 `___`：\n"
-            "___\n\n"
-            "**全量特性展示结束。**"
-        );
-
         msg.blocks.append(domain::conversation::MessageBlock{
             domain::BlockType::Text,
-            domain::conversation::TextBlock{fullMarkdown}
+            domain::conversation::TextBlock{generateLongMarkdownDocument()}
         });
         list.append(std::move(msg));
     }
@@ -1243,13 +1380,15 @@ void MarkdownCoreTests::visualTest()
     auto* btnB = new QPushButton(QStringLiteral("B. 200条普通消息"), central);
     auto* btnC = new QPushButton(QStringLiteral("C. 200条+长Markdown"), central);
     auto* btnD = new QPushButton(QStringLiteral("D. cmark-gfm 全特性全景"), central);
-    auto* btnE = new QPushButton(QStringLiteral("E. 流式输出+实时Resize"), central);
+    auto* btnE = new QPushButton(QStringLiteral("E. 短流式+实时Resize"), central);
+    auto* btnF = new QPushButton(QStringLiteral("F. 5000字长文本高频流式+Resize"), central);
     auto* btnReset = new QPushButton(QStringLiteral("重置统计"), central);
     toolLayout->addWidget(btnA);
     toolLayout->addWidget(btnB);
     toolLayout->addWidget(btnC);
     toolLayout->addWidget(btnD);
     toolLayout->addWidget(btnE);
+    toolLayout->addWidget(btnF);
     toolLayout->addWidget(btnReset);
     toolLayout->addStretch();
     mainLayout->addLayout(toolLayout);
@@ -1280,40 +1419,119 @@ void MarkdownCoreTests::visualTest()
     QObject::connect(btnReset, &QPushButton::clicked, [&] { filter->resetMetrics(); });
 
     QObject::connect(btnE, &QPushButton::clicked, [&] {
-        auto msgs = createScenarioA();
+        QList<domain::conversation::Message> msgs;
+        {
+            domain::conversation::Message userMsg;
+            userMsg.id = QUuid::createUuid();
+            userMsg.role = domain::MessageRole::User;
+            userMsg.blocks.append(domain::conversation::MessageBlock{
+                domain::BlockType::Text,
+                domain::conversation::TextBlock{QStringLiteral("请实时流式演示一段包含代码的 Markdown 回复。")}
+            });
+            msgs.append(userMsg);
+        }
         domain::conversation::Message streamMsg;
         streamMsg.id = QUuid::createUuid();
         streamMsg.role = domain::MessageRole::Assistant;
-        streamMsg.blocks.append(domain::conversation::MessageBlock{domain::BlockType::Text, domain::conversation::TextBlock{QStringLiteral("流式输出开始：")}});
+        streamMsg.status = domain::MessageStatus::Sending;
+        streamMsg.blocks.append(domain::conversation::MessageBlock{
+            domain::BlockType::Text,
+            domain::conversation::TextBlock{QString()}
+        });
         msgs.append(streamMsg);
-        loadScenario(QStringLiteral("E. 流式输出 + 实时Resize"), msgs);
+        loadScenario(QStringLiteral("E. 短流式 + 实时Resize"), msgs);
 
         static const QStringList tokens = {
-            QStringLiteral(" 在"), QStringLiteral("现代"), QStringLiteral("客户端"), QStringLiteral("开发"), QStringLiteral("中，"),
+            QStringLiteral("在"), QStringLiteral("现代"), QStringLiteral("客户端"), QStringLiteral("开发"), QStringLiteral("中，"),
             QStringLiteral("Markdown"), QStringLiteral(" 渲染"), QStringLiteral("引擎"), QStringLiteral("需要"), QStringLiteral("支持"),
             QStringLiteral(" 高频"), QStringLiteral("的"), QStringLiteral("窗口"), QStringLiteral("拖动"), QStringLiteral("缩放。\n\n"),
             QStringLiteral("```cpp\n"), QStringLiteral("void onTokenStream() {\n"), QStringLiteral("    relayoutTail();\n"),
-            QStringLiteral("}\n```\n\n"), QStringLiteral("不断"), QStringLiteral("追加"), QStringLiteral("更多"), QStringLiteral("内容... ")
+            QStringLiteral("}\n```\n\n"), QStringLiteral("自研"), QStringLiteral("的分层"), QStringLiteral("排版"), QStringLiteral("引擎"),
+            QStringLiteral("将 Stable Document"), QStringLiteral(" 与 Tail Document"), QStringLiteral(" 隔离，"),
+            QStringLiteral("实现 O(1) 复杂度的"), QStringLiteral("流式增量追加与尾部排版。")
         };
 
         streamTimer->disconnect();
+        streamTimer->setInterval(35);
         auto tokenIdx = std::make_shared<int>(0);
-        QObject::connect(streamTimer, &QTimer::timeout, [listView, tokenIdx]() {
-            if (*tokenIdx >= 200) {
-                *tokenIdx = 0;
+        auto sessionMsgs = std::make_shared<QList<domain::conversation::Message>>(msgs);
+        auto accumulatedText = std::make_shared<QString>();
+
+        QObject::connect(streamTimer, &QTimer::timeout, [listView, tokenIdx, sessionMsgs, accumulatedText, streamTimer]() {
+            if (*tokenIdx >= tokens.size()) {
+                streamTimer->stop();
+                (*sessionMsgs)[1].status = domain::MessageStatus::Sent;
+                listView->syncMessages(*sessionMsgs);
+                return;
             }
-            const QString nextChunk = tokens.at((*tokenIdx) % tokens.size());
+            *accumulatedText += tokens.at(*tokenIdx);
             (*tokenIdx)++;
-            if (listView->messageCount() > 0) {
-                auto cards = listView->findChildren<ui::widget::message::MessageCardWidget*>();
-                if (!cards.isEmpty()) {
-                    auto* lastCard = cards.last();
-                    auto* markdownView = lastCard->findChild<ui::widget::MarkdownView*>();
-                    if (markdownView) {
-                        markdownView->appendStreamingText(nextChunk);
-                    }
-                }
+            (*sessionMsgs)[1].blocks[0] = domain::conversation::MessageBlock{
+                domain::BlockType::Text,
+                domain::conversation::TextBlock{*accumulatedText}
+            };
+            listView->syncMessages(*sessionMsgs);
+            listView->scrollToBottom();
+        });
+        streamTimer->start();
+    });
+
+    QObject::connect(btnF, &QPushButton::clicked, [&] {
+        QList<domain::conversation::Message> msgs;
+        {
+            domain::conversation::Message userMsg;
+            userMsg.id = QUuid::createUuid();
+            userMsg.role = domain::MessageRole::User;
+            userMsg.blocks.append(domain::conversation::MessageBlock{
+                domain::BlockType::Text,
+                domain::conversation::TextBlock{QStringLiteral("请开始流式生成 5000 字全特性 Markdown 深度技术文档。")}
+            });
+            msgs.append(userMsg);
+        }
+        domain::conversation::Message streamMsg;
+        streamMsg.id = QUuid::createUuid();
+        streamMsg.role = domain::MessageRole::Assistant;
+        streamMsg.status = domain::MessageStatus::Sending;
+        streamMsg.blocks.append(domain::conversation::MessageBlock{
+            domain::BlockType::Text,
+            domain::conversation::TextBlock{QString()}
+        });
+        msgs.append(streamMsg);
+        loadScenario(QStringLiteral("F. 5000字长文本高频流式 + 实时Resize"), msgs);
+
+        const QString fullDoc = generateLongMarkdownDocument();
+        QStringList chunks;
+        int pos = 0;
+        int step = 14;
+        while (pos < fullDoc.length()) {
+            const int chunkSize = qMin(step, static_cast<int>(fullDoc.length()) - pos);
+            chunks.append(fullDoc.mid(pos, chunkSize));
+            pos += chunkSize;
+            step = (step % 17) + 6;
+        }
+
+        streamTimer->disconnect();
+        streamTimer->setInterval(20);
+        auto tokenIdx = std::make_shared<int>(0);
+        auto docChunks = std::make_shared<QStringList>(chunks);
+        auto sessionMsgs = std::make_shared<QList<domain::conversation::Message>>(msgs);
+        auto accumulatedText = std::make_shared<QString>();
+
+        QObject::connect(streamTimer, &QTimer::timeout, [listView, tokenIdx, docChunks, sessionMsgs, accumulatedText, streamTimer]() {
+            if (*tokenIdx >= docChunks->size()) {
+                streamTimer->stop();
+                (*sessionMsgs)[1].status = domain::MessageStatus::Sent;
+                listView->syncMessages(*sessionMsgs);
+                return;
             }
+            *accumulatedText += docChunks->at(*tokenIdx);
+            (*tokenIdx)++;
+            (*sessionMsgs)[1].blocks[0] = domain::conversation::MessageBlock{
+                domain::BlockType::Text,
+                domain::conversation::TextBlock{*accumulatedText}
+            };
+            listView->syncMessages(*sessionMsgs);
+            listView->scrollToBottom();
         });
         streamTimer->start();
     });

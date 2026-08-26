@@ -160,14 +160,59 @@ namespace ui::widget::message {
     int MessageCardWidget::heightForWidth(int width) const
     {
         if (width <= 0) return sizeHint().height();
-        return qMax(24, m_mainLayout->totalHeightForWidth(width));
+
+        const QMargins mainMargins = m_mainLayout ? m_mainLayout->contentsMargins() : QMargins(12, 4, 12, 4);
+        const int spacing = m_mainLayout ? m_mainLayout->spacing() : 2;
+        const int innerWidth = qMax(1, width - mainMargins.left() - mainMargins.right());
+
+        int totalH = mainMargins.top() + mainMargins.bottom();
+
+        // 1. Header (Assistant only)
+        if (m_headerVisible && m_message.role != domain::MessageRole::User && m_headerWidget && m_headerWidget->isVisible()) {
+            totalH += m_headerWidget->sizeHint().height() + spacing;
+        }
+
+        // 2. Process Group (Thinking / Tools)
+        if (m_processGroupWidget && m_processGroupWidget->isVisible()) {
+            totalH += m_processGroupWidget->sizeHint().height() + spacing;
+        }
+
+        // 3. Error Widget
+        if (m_errorWidget && m_errorWidget->isVisible()) {
+            totalH += m_errorWidget->sizeHint().height() + spacing;
+        }
+
+        // 4. Content Row (User Bubble / Assistant MarkdownView)
+        if (m_markdownView) {
+            if (m_message.role == domain::MessageRole::User) {
+                const int maxBubbleWidth = qMax(200, static_cast<int>(innerWidth * 0.85));
+                const QMargins bubbleMargins = m_bubbleLayout ? m_bubbleLayout->contentsMargins() : QMargins(10, 6, 10, 6);
+                const int bubbleContentWidth = qMax(1, maxBubbleWidth - bubbleMargins.left() - bubbleMargins.right());
+                const int mdHeight = m_markdownView->heightForWidth(bubbleContentWidth);
+                const int bubbleHeight = mdHeight + bubbleMargins.top() + bubbleMargins.bottom();
+                const int avatarHeight = (m_avatar && m_avatarVisible) ? m_avatar->sizeHint().height() : 0;
+                totalH += qMax(bubbleHeight, avatarHeight) + spacing;
+            } else {
+                const int mdHeight = m_markdownView->heightForWidth(innerWidth);
+                totalH += mdHeight + spacing;
+            }
+        }
+
+        // 5. Action Bar
+        if (m_actionBar && m_actionBar->isVisible()) {
+            totalH += m_actionBar->height();
+        }
+
+        return qMax(24, totalH);
     }
 
     void MessageCardWidget::setAvailableWidth(int width)
     {
         if (width <= 0) return;
         if (m_message.role == domain::MessageRole::User) {
-            const int maxBubbleWidth = qMax(200, static_cast<int>(width * 0.85));
+            const QMargins mainMargins = m_mainLayout ? m_mainLayout->contentsMargins() : QMargins(12, 4, 12, 4);
+            const int innerWidth = qMax(1, width - mainMargins.left() - mainMargins.right());
+            const int maxBubbleWidth = qMax(200, static_cast<int>(innerWidth * 0.85));
             if (m_userBubbleCard) m_userBubbleCard->setMaximumWidth(maxBubbleWidth);
             const QMargins margins = m_bubbleLayout ? m_bubbleLayout->contentsMargins() : QMargins(10, 6, 10, 6);
             const int horizontalMargins = margins.left() + margins.right();
@@ -177,12 +222,13 @@ namespace ui::widget::message {
 
     QSize MessageCardWidget::sizeHint() const
     {
-        return m_mainLayout ? m_mainLayout->sizeHint() : QWidget::sizeHint();
+        const int w = width() > 100 ? width() : 800;
+        return QSize(w, heightForWidth(w));
     }
 
     QSize MessageCardWidget::minimumSizeHint() const
     {
-        return m_mainLayout ? m_mainLayout->minimumSize() : QWidget::minimumSizeHint();
+        return QSize(64, 24);
     }
 
     void MessageCardWidget::resizeEvent(QResizeEvent* event)

@@ -21,6 +21,11 @@ void MarkdownViewEventFilter::setDocumentLayout(const ui::markdown::DocumentLayo
     m_layout = layout;
 }
 
+void MarkdownViewEventFilter::setDocumentLayoutGetter(std::function<const ui::markdown::DocumentLayout*()> getter)
+{
+    m_layoutGetter = std::move(getter);
+}
+
 void MarkdownViewEventFilter::setScrollOffsets(const QHash<int, ui::markdown::BlockScrollOffset>* offsets)
 {
     m_scrollOffsets = offsets;
@@ -80,7 +85,8 @@ QPointF MarkdownViewEventFilter::toDocument(const QPointF& viewportPos, int scro
 
 bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
 {
-    if (!m_layout) return false;
+    const auto* docLayout = layout();
+    if (!docLayout) return false;
 
     static const QHash<int, ui::markdown::BlockScrollOffset> emptyOffsets;
     const auto& offsets = m_scrollOffsets ? *m_scrollOffsets : emptyOffsets;
@@ -97,7 +103,7 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
     if (event->type() == QEvent::MouseMove) {
         auto* mouse = static_cast<QMouseEvent*>(event);
         const QPointF docPos = toDocument(mouse->position(), 0);
-        const auto hit = m_renderer.hitTest(*m_layout, docPos, offsets);
+        const auto hit = m_renderer.hitTest(*docLayout, docPos, offsets);
         const int prevHovered = m_hoveredBlock;
         const int prevCopy = m_hoveredCopyBlock;
         const QString prevLinkUrl = m_hoveredLinkUrl;
@@ -123,7 +129,7 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
     if (event->type() == QEvent::MouseButtonPress) {
         auto* mouse = static_cast<QMouseEvent*>(event);
         if (mouse->button() == Qt::LeftButton) {
-            const auto hit = m_renderer.hitTest(*m_layout, toDocument(mouse->position(), 0), offsets);
+            const auto hit = m_renderer.hitTest(*docLayout, toDocument(mouse->position(), 0), offsets);
             m_selecting = m_selectable && (hit.kind == ui::markdown::HitKind::Text || hit.kind == ui::markdown::HitKind::Link);
             if (m_selecting) setSelectionPosition(hit.textOffset, mouse->modifiers().testFlag(Qt::ShiftModifier));
             return true;
@@ -133,7 +139,7 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
     if (event->type() == QEvent::MouseButtonRelease) {
         auto* mouse = static_cast<QMouseEvent*>(event);
         if (mouse->button() == Qt::LeftButton) {
-            const auto hit = m_renderer.hitTest(*m_layout, toDocument(mouse->position(), 0), offsets);
+            const auto hit = m_renderer.hitTest(*docLayout, toDocument(mouse->position(), 0), offsets);
             if (m_selecting && m_selection.anchor == m_selection.position && hit.kind == ui::markdown::HitKind::Link)
                 emit linkActivated(QUrl(hit.value));
             if (hit.kind == ui::markdown::HitKind::Image)
@@ -152,7 +158,7 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
 
     if (event->type() == QEvent::ContextMenu) {
         auto* context = static_cast<QContextMenuEvent*>(event);
-        const auto hit = m_renderer.hitTest(*m_layout, toDocument(context->pos(), 0), offsets);
+        const auto hit = m_renderer.hitTest(*docLayout, toDocument(context->pos(), 0), offsets);
         emit contextMenuRequested(context->pos(),
                                   hit.kind == ui::markdown::HitKind::Link ? QUrl(hit.value) : QUrl{},
                                   hit.kind == ui::markdown::HitKind::Image ? QUrl(hit.value) : QUrl{});
@@ -164,10 +170,10 @@ bool MarkdownViewEventFilter::handleViewportEvent(QEvent* event)
             QAction* copyLink = menu.addAction(QObject::tr("复制链接"));
             connect(copyLink, &QAction::triggered, this, [url] { QGuiApplication::clipboard()->setText(url.toString()); });
         } else if (hit.kind == ui::markdown::HitKind::CodeCopy ||
-                   (hit.blockIndex >= 0 && m_layout->blocks.at(hit.blockIndex).kind == ui::markdown::BlockKind::CodeBlock)) {
+                   (hit.blockIndex >= 0 && hit.blockIndex < docLayout->blockCount() && docLayout->blockAt(hit.blockIndex).kind == ui::markdown::BlockKind::CodeBlock)) {
             const QString code = hit.kind == ui::markdown::HitKind::CodeCopy
                 ? hit.value
-                : m_layout->blocks.at(hit.blockIndex).code;
+                : docLayout->blockAt(hit.blockIndex).code;
             QAction* copyCode = menu.addAction(QObject::tr("复制代码"));
             const int idx = hit.blockIndex;
             connect(copyCode, &QAction::triggered, this, [this, code, idx] {

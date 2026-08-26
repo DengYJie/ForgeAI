@@ -106,14 +106,23 @@ struct BlockLayout {
     int documentTextOffset = 0;
 };
 
+struct DocumentLayout;
+using DocumentLayoutPtr = std::shared_ptr<const DocumentLayout>;
+
 struct DocumentLayout {
     QSizeF size;
     QVector<BlockLayout> blocks;
     qreal width = 0;
     quint64 themeVersion = 0;
+
     int firstVisibleBlock(qreal y) const;
     int lastVisibleBlock(qreal y) const;
     int textLength() const;
+
+    int blockCount() const { return blocks.size(); }
+    const BlockLayout& blockAt(int index) const { return blocks.at(index); }
+    const BlockLayout* begin() const { return blocks.begin(); }
+    const BlockLayout* end() const { return blocks.end(); }
 };
 
 struct MarkdownLayoutMetrics {
@@ -161,24 +170,27 @@ private:
     struct CodeCacheKey {
         quint64 themeVersion = 0;
         QString language;
-        size_t codeHash = 0;
+        QString source;
         bool operator==(const CodeCacheKey& o) const {
-            return themeVersion == o.themeVersion && language == o.language && codeHash == o.codeHash;
+            return themeVersion == o.themeVersion && language == o.language && source == o.source;
         }
     };
     friend inline size_t qHash(const CodeCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.themeVersion, k.language, k.codeHash);
+        return qHashMulti(seed, k.themeVersion, k.language, k.source);
     }
 
     struct TableCacheKey {
         const MarkdownNode* node = nullptr;
         quint64 themeVersion = 0;
+        int rowCount = 0;
+        int totalCols = 0;
         bool operator==(const TableCacheKey& o) const {
-            return node == o.node && themeVersion == o.themeVersion;
+            return node == o.node && themeVersion == o.themeVersion &&
+                   rowCount == o.rowCount && totalCols == o.totalCols;
         }
     };
     friend inline size_t qHash(const TableCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.node, k.themeVersion);
+        return qHashMulti(seed, k.node, k.themeVersion, k.rowCount, k.totalCols);
     }
 
     struct InlineCacheKey {
@@ -186,13 +198,16 @@ private:
         quint64 themeVersion = 0;
         int fontPixelSize = 0;
         int fontWeight = 0;
+        int childCount = 0;
+        int literalLength = 0;
         bool operator==(const InlineCacheKey& o) const {
             return node == o.node && themeVersion == o.themeVersion &&
-                   fontPixelSize == o.fontPixelSize && fontWeight == o.fontWeight;
+                   fontPixelSize == o.fontPixelSize && fontWeight == o.fontWeight &&
+                   childCount == o.childCount && literalLength == o.literalLength;
         }
     };
     friend inline size_t qHash(const InlineCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.node, k.themeVersion, k.fontPixelSize, k.fontWeight);
+        return qHashMulti(seed, k.node, k.themeVersion, k.fontPixelSize, k.fontWeight, k.childCount, k.literalLength);
     }
 
     mutable QHash<CodeCacheKey, CodeBlockContentLayout> m_codeBlockCache;

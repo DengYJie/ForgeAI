@@ -29,35 +29,36 @@ public:
     void setImages(const QHash<QString, QImage>* images);
     void forceRelayout();
     bool updateImageSize(const QString& source, const QSize& newSize);
-    ui::markdown::DocumentLayout measure(qreal maxWidth) const;
+    ui::markdown::DocumentLayoutPtr measure(qreal maxWidth) const;
 
-    const ui::markdown::DocumentLayout& currentLayout() const;
+    ui::markdown::DocumentLayoutPtr currentLayout() const;
     MarkdownDocumentLayoutMetrics metrics() const;
 
 signals:
-    void layoutReady(const ui::markdown::DocumentLayout& layout);
+    void layoutReady(ui::markdown::DocumentLayoutPtr layout);
 
 private:
     struct CacheEntry {
         qreal width = -1;
         quint64 themeVersion = 0;
-        ui::markdown::DocumentLayout layout;
+        ui::markdown::DocumentLayoutPtr layout;
     };
 
-    const ui::markdown::DocumentLayout* findCachedLayout(qreal width) const;
-    void insertCachedLayout(qreal width, ui::markdown::DocumentLayout layout) const;
+    ui::markdown::DocumentLayoutPtr findCachedLayout(qreal width) const;
+    void insertCachedLayout(qreal width, ui::markdown::DocumentLayoutPtr layout) const;
     void invalidateLayoutCache();
 
     void onDocumentRebuilt();
     void onStableDocumentAppended();
     void onTailDocumentChanged();
+    void onStreamingStarted();
     void relayout();
 
     MarkdownDocumentController* m_controller;
     ui::markdown::MarkdownLayoutEngine m_engine;
     ui::markdown::MarkdownTheme m_theme;
-    ui::markdown::DocumentLayout m_currentLayout;
-    ui::markdown::DocumentLayout m_stableLayout;
+    ui::markdown::DocumentLayoutPtr m_currentLayout;
+    ui::markdown::DocumentLayoutPtr m_stableLayout;
     qreal m_width = 800;
     bool m_stableLayoutDirty = true;
     qreal m_stableLayoutWidth = -1;

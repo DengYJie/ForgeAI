@@ -21,6 +21,7 @@ public:
     explicit MarkdownViewEventFilter(QWidget* viewport, QObject* parent = nullptr);
 
     void setDocumentLayout(const ui::markdown::DocumentLayout* layout);
+    void setDocumentLayoutGetter(std::function<const ui::markdown::DocumentLayout*()> getter);
     void setScrollOffsets(const QHash<int, ui::markdown::BlockScrollOffset>* offsets);
     void setScrollBarValueGetter(std::function<int()> getter);
     void setSelectable(bool selectable);
@@ -55,11 +56,13 @@ signals:
     void cursorChanged(Qt::CursorShape shape);
 
 private:
+    const ui::markdown::DocumentLayout* layout() const { return m_layoutGetter ? m_layoutGetter() : m_layout; }
     void setSelectionPosition(int position, bool extend);
     void showCopiedFeedback(int blockIndex);
 
     QWidget* m_viewport = nullptr;
     const ui::markdown::DocumentLayout* m_layout = nullptr;
+    std::function<const ui::markdown::DocumentLayout*()> m_layoutGetter;
     const QHash<int, ui::markdown::BlockScrollOffset>* m_scrollOffsets = nullptr;
     std::function<int()> m_scrollBarValueGetter;
     ui::markdown::MarkdownRenderer m_renderer;

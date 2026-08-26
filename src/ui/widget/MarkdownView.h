@@ -147,7 +147,7 @@ protected:
     void focusOutEvent(QFocusEvent *event) override;
 
 private:
-    void onLayoutReady(const ui::markdown::DocumentLayout& layout);
+    void onLayoutReady(ui::markdown::DocumentLayoutPtr layout);
     void onTaskToggleRequested(int blockIndex);
     void onRepaintRequested();
     void updateScrollBars();
@@ -167,7 +167,7 @@ private:
     ui::markdown::MarkdownRenderer m_renderer;
     ui::markdown::MarkdownTheme m_theme;
     ui::markdown::MarkdownImageResourceManager m_resources;
-    ui::markdown::DocumentLayout m_documentLayout;
+    ui::markdown::DocumentLayoutPtr m_documentLayout = std::make_shared<ui::markdown::DocumentLayout>();
 
     QUrl m_baseUrl;
     MarkdownStyleSheet m_styleSheet;

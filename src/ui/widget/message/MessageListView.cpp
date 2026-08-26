@@ -251,7 +251,6 @@ void MessageListView::updateVisibleCards()
         const bool isNewCard = (card == nullptr);
         if (!card) { card = acquireCard(); m_cardMap.insert(item.message.id, card); }
 
-        card->setAvailableWidth(width);
         const bool needsRebind = isNewCard
             || (card->message() != item.message)
             || (card->isAvatarVisible() != m_avatarVisible)
@@ -259,6 +258,7 @@ void MessageListView::updateVisibleCards()
         if (needsRebind) {
             bindCard(card, item);
         }
+        card->setAvailableWidth(width);
         const int measured = qMax(1, card->heightForWidth(width));
         if (measured != item.height) {
             item.height = measured;

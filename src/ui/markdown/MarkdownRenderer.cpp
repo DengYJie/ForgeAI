@@ -72,8 +72,8 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
     painter.setRenderHint(QPainter::TextAntialiasing, true);
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     int paintedBlocks = 0;
-    for (int i = first; i <= last && i < document.blocks.size(); ++i) {
-        const BlockLayout& block = document.blocks.at(i);
+    for (int i = first; i <= last && i < document.blockCount(); ++i) {
+        const BlockLayout& block = document.blockAt(i);
         if (!block.rect.intersects(exposedDocumentRect)) continue;
         ++paintedBlocks;
         if (block.quoteIndent > 0) {
@@ -245,8 +245,8 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
                                         const QHash<int, BlockScrollOffset>& scrollOffsets) const
 {
     const int index = document.firstVisibleBlock(position.y());
-    for (int i = index; i < document.blocks.size() && document.blocks[i].rect.top() <= position.y(); ++i) {
-        const BlockLayout& block = document.blocks[i];
+    for (int i = index; i < document.blockCount() && document.blockAt(i).rect.top() <= position.y(); ++i) {
+        const BlockLayout& block = document.blockAt(i);
         if (!block.rect.contains(position)) continue;
         if (block.kind == BlockKind::CodeBlock && block.copyButtonRect.contains(position)) return {HitKind::CodeCopy, i, -1, block.code};
         if (block.taskItem && block.taskCheckRect.contains(position)) return {HitKind::TaskCheckbox, i, -1, block.taskChecked ? QStringLiteral("1") : QStringLiteral("0")};
