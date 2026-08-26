@@ -11,16 +11,21 @@ struct InlineBuilder {
     QString text;
     QVector<QTextLayout::FormatRange> formats;
     QVector<LinkRange> links;
+    QVector<CodeSpanRange> codeSpans;
     const MarkdownTheme& theme;
 
     void add(const MarkdownNode& node, QTextCharFormat format = {}, QString activeLink = {}) {
         const int start = text.size();
+        bool isCode = false;
         switch (node.type) {
         case MarkdownNodeType::Text: text += node.literal; break;
         case MarkdownNodeType::SoftBreak: text += u' '; break;
         case MarkdownNodeType::HardBreak: text += u'\n'; break;
         case MarkdownNodeType::InlineCode:
-            format.setFont(theme.codeFont); format.setBackground(theme.inlineCodeBackground); text += node.literal; break;
+            format.setFont(theme.codeFont);
+            text += node.literal;
+            isCode = true;
+            break;
         case MarkdownNodeType::Emphasis: format.setFontItalic(true); break;
         case MarkdownNodeType::Strong: format.setFontWeight(QFont::Bold); break;
         case MarkdownNodeType::Strikethrough: format.setFontStrikeOut(true); break;
@@ -34,13 +39,15 @@ struct InlineBuilder {
             for (const auto& child : node.children) add(*child, format, activeLink);
         }
         const int length = text.size() - start;
-        // Do not append an empty format range for plain text: in QTextLayout a
-        // later empty range resets the inherited foreground to the platform
-        // default (black), overriding the themed base format.
-        if (length > 0 && (!format.isEmpty() || !activeLink.isEmpty())) {
-            QTextLayout::FormatRange range{start, length, format};
-            formats.push_back(range);
-            if (!activeLink.isEmpty()) links.push_back({start, length, activeLink});
+        if (length > 0) {
+            if (isCode) {
+                codeSpans.push_back({start, length});
+            }
+            if (!format.isEmpty() || !activeLink.isEmpty()) {
+                QTextLayout::FormatRange range{start, length, format};
+                formats.push_back(range);
+                if (!activeLink.isEmpty()) links.push_back({start, length, activeLink});
+            }
         }
     }
 };
@@ -49,7 +56,7 @@ std::shared_ptr<InlineLayout> plainInline(const QString& text, const QFont& font
                                           const MarkdownTheme& theme, qreal width, bool wrap = true)
 {
     QTextCharFormat base; base.setForeground(theme.text);
-    return std::make_shared<InlineLayout>(text, font, QVector<QTextLayout::FormatRange>{{0, static_cast<int>(text.size()), base}}, QVector<LinkRange>{}, width, wrap);
+    return std::make_shared<InlineLayout>(text, font, QVector<QTextLayout::FormatRange>{{0, static_cast<int>(text.size()), base}}, QVector<LinkRange>{}, QVector<CodeSpanRange>{}, width, wrap);
 }
 
 QString languageName(QString fence)
@@ -60,10 +67,11 @@ QString languageName(QString fence)
 } // namespace
 
 InlineLayout::InlineLayout(QString value, const QFont& baseFont, const QVector<QTextLayout::FormatRange>& formats,
-                           QVector<LinkRange> linkRanges, qreal availableWidth, bool wrap)
+                           QVector<LinkRange> linkRanges, QVector<CodeSpanRange> codeRanges, qreal availableWidth, bool wrap)
     : text(std::move(value))
     , layout(text, baseFont)
     , links(std::move(linkRanges))
+    , codeSpans(std::move(codeRanges))
     , availableWidth(qMax<qreal>(1, availableWidth))
 {
     QTextOption option;
@@ -86,6 +94,12 @@ InlineLayout::InlineLayout(QString value, const QFont& baseFont, const QVector<Q
     height = y;
     usedWidth = maxLineWidth;
     if (height <= 0) height = QFontMetricsF(baseFont).height();
+}
+
+InlineLayout::InlineLayout(QString value, const QFont& baseFont, const QVector<QTextLayout::FormatRange>& formats,
+                           QVector<LinkRange> linkRanges, qreal availableWidth, bool wrap)
+    : InlineLayout(std::move(value), baseFont, formats, std::move(linkRanges), {}, availableWidth, wrap)
+{
 }
 
 int InlineLayout::cursorAt(qreal x, qreal y) const
@@ -131,9 +145,9 @@ int DocumentLayout::textLength() const
 }
 
 std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNode& node, const QFont& font,
-                                                                 const MarkdownTheme& theme, qreal width) const
+                                                               const MarkdownTheme& theme, qreal width) const
 {
-    InlineBuilder builder{{}, {}, {}, theme};
+    InlineBuilder builder{{}, {}, {}, {}, theme};
     if (node.type == MarkdownNodeType::Html && !node.literal.isEmpty())
         builder.text = node.literal;
     for (const auto& child : node.children) builder.add(*child);
@@ -142,7 +156,7 @@ std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNod
         base.setForeground(theme.text);
         builder.formats.prepend({0, static_cast<int>(builder.text.size()), base});
     }
-    return std::make_shared<InlineLayout>(builder.text, font, builder.formats, builder.links, width);
+    return std::make_shared<InlineLayout>(builder.text, font, builder.formats, builder.links, builder.codeSpans, width);
 }
 
 void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,

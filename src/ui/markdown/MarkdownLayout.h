@@ -13,15 +13,19 @@
 namespace ui::markdown {
 
 struct LinkRange { int start = 0; int length = 0; QString url; };
+struct CodeSpanRange { int start = 0; int length = 0; };
 
 struct InlineLayout {
     QString text;
     QTextLayout layout;
     QVector<LinkRange> links;
+    QVector<CodeSpanRange> codeSpans;
     qreal availableWidth = 0;
     qreal usedWidth = 0;
     qreal height = 0;
 
+    InlineLayout(QString value, const QFont& baseFont, const QVector<QTextLayout::FormatRange>& formats,
+                 QVector<LinkRange> linkRanges, QVector<CodeSpanRange> codeRanges, qreal availableWidth, bool wrap = true);
     InlineLayout(QString value, const QFont& baseFont, const QVector<QTextLayout::FormatRange>& formats,
                  QVector<LinkRange> linkRanges, qreal availableWidth, bool wrap = true);
     int cursorAt(qreal x, qreal y) const;

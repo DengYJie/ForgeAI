@@ -48,6 +48,7 @@ private slots:
     void fitContentSizeHintIsInvariantUnderActualResizes();
     void heightForWidthRespondsToWrappingWidth();
     void autoFitHeightContractIsRespected();
+    void inlineCodeSelectionPaintsSelectionBackground();
 };
 
 void MarkdownCoreTests::parsesCommonMarkAndGfm()
@@ -485,6 +486,31 @@ void MarkdownCoreTests::autoFitHeightContractIsRespected()
     QCoreApplication::processEvents();
 
     QCOMPARE(heightSpy.count(), 0);
+}
+
+void MarkdownCoreTests::inlineCodeSelectionPaintsSelectionBackground()
+{
+    MarkdownParser parser;
+    const MarkdownDocument document = parser.parse(QStringLiteral("- `QFile`、`QTextStream`"));
+    const MarkdownTheme theme = MarkdownTheme::light();
+    const DocumentLayout layout = MarkdownLayoutEngine{}.layout(document, 400, theme);
+    QVERIFY(!layout.blocks.isEmpty());
+    QVERIFY(layout.blocks[0].inlineLayout);
+    QVERIFY(!layout.blocks[0].inlineLayout->codeSpans.isEmpty());
+
+    QImage unselected(400, 50, QImage::Format_ARGB32_Premultiplied);
+    unselected.fill(Qt::white);
+    QPainter p1(&unselected);
+    MarkdownRenderer{}.paint(p1, layout, theme, QRectF(0, 0, 400, 50), {});
+    p1.end();
+
+    QImage selected(400, 50, QImage::Format_ARGB32_Premultiplied);
+    selected.fill(Qt::white);
+    QPainter p2(&selected);
+    MarkdownRenderer{}.paint(p2, layout, theme, QRectF(0, 0, 400, 50), TextSelection{0, 50});
+    p2.end();
+
+    QVERIFY(unselected != selected);
 }
 
 int main(int argc, char** argv)

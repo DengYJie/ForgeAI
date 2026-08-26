@@ -7,6 +7,32 @@ namespace ui::markdown {
 void MarkdownRenderer::paintInline(QPainter& painter, const InlineLayout& inlineLayout, const QPointF& origin,
                                    const MarkdownTheme& theme, int documentOffset, const TextSelection& selection) const
 {
+    if (!inlineLayout.codeSpans.isEmpty()) {
+        painter.save();
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme.inlineCodeBackground);
+        for (const auto& span : inlineLayout.codeSpans) {
+            const int spanStart = span.start;
+            const int spanEnd = span.start + span.length;
+            for (int i = 0; i < inlineLayout.layout.lineCount(); ++i) {
+                const QTextLine line = inlineLayout.layout.lineAt(i);
+                const int lineStart = line.textStart();
+                const int lineEnd = line.textStart() + line.textLength();
+                const int overlapStart = qMax(spanStart, lineStart);
+                const int overlapEnd = qMin(spanEnd, lineEnd);
+                if (overlapEnd > overlapStart) {
+                    const qreal x1 = line.cursorToX(overlapStart);
+                    const qreal x2 = line.cursorToX(overlapEnd);
+                    const qreal left = qMin(x1, x2);
+                    const qreal width = qAbs(x2 - x1);
+                    const QRectF codeRect(origin.x() + left - 2, origin.y() + line.y() + 1, width + 4, line.height() - 2);
+                    painter.drawRoundedRect(codeRect, 3, 3);
+                }
+            }
+        }
+        painter.restore();
+    }
+
     QVector<QTextLayout::FormatRange> selections;
     if (selection.isValid()) {
         const int first = qMin(selection.anchor, selection.position);
