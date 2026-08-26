@@ -66,9 +66,13 @@ private:
     std::unique_ptr<MarkdownNode> m_root;
 };
 
+struct MarkdownParseOptions {
+    bool allowHtml = true;
+};
+
 class MarkdownParser final {
 public:
-    MarkdownDocument parse(const QString& markdown) const;
+    MarkdownDocument parse(const QString& markdown, const MarkdownParseOptions& options = {}) const;
 };
 
 } // namespace ui::markdown

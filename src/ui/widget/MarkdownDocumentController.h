@@ -40,6 +40,7 @@ signals:
 
 private:
     qsizetype stableStreamingBoundary() const;
+    ui::markdown::MarkdownParseOptions parseOptions() const;
 
     QString m_markdown;
     QString m_streamTail;

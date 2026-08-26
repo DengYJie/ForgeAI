@@ -14,7 +14,7 @@ void MarkdownDocumentController::setMarkdown(const QString& markdown)
     if (m_markdown == markdown) return;
     m_markdown = markdown;
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_document = m_parser.parse(m_markdown);
+    m_document = m_parser.parse(m_markdown, parseOptions());
     emit documentRebuilt();
 }
 
@@ -41,11 +41,11 @@ void MarkdownDocumentController::appendMarkdown(const QString& chunk)
     m_streamTail += chunk;
     const qsizetype boundary = stableStreamingBoundary();
     if (boundary > 0) {
-        m_document.append(m_parser.parse(m_streamTail.left(boundary)));
+        m_document.append(m_parser.parse(m_streamTail.left(boundary), parseOptions()));
         m_streamTail.remove(0, boundary);
         emit stableDocumentAppended();
     }
-    m_activeTailDocument = m_parser.parse(m_streamTail);
+    m_activeTailDocument = m_parser.parse(m_streamTail, parseOptions());
     emit tailDocumentChanged();
 }
 
@@ -54,7 +54,7 @@ void MarkdownDocumentController::finishStream()
     m_streaming = false;
     m_streamTail.clear();
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_document = m_parser.parse(m_markdown);
+    m_document = m_parser.parse(m_markdown, parseOptions());
     emit streamingChanged(false);
     emit streamingFinished();
     emit documentRebuilt();
@@ -94,7 +94,7 @@ void MarkdownDocumentController::toggleTaskAtLine(int sourceLine, bool currently
     m_markdown.replace(start + match.capturedStart(1), 1, checked ? QStringLiteral("x") : QStringLiteral(" "));
     emit taskToggled(sourceLine, checked);
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_document = m_parser.parse(m_markdown);
+    m_document = m_parser.parse(m_markdown, parseOptions());
     emit documentRebuilt();
 }
 
@@ -124,6 +124,11 @@ qsizetype MarkdownDocumentController::stableStreamingBoundary() const
         start = end + 1;
     }
     return lastBoundary;
+}
+
+ui::markdown::MarkdownParseOptions MarkdownDocumentController::parseOptions() const
+{
+    return {m_allowHtml};
 }
 
 } // namespace ui::widget

@@ -300,10 +300,10 @@ void MarkdownView::selectAll()
 }
 
 void MarkdownView::setSelectable(bool selectable) { m_eventFilter->setSelectable(selectable); }
-bool MarkdownView::isSelectable() const { return m_eventFilter->selection().isValid() || true; }
+bool MarkdownView::isSelectable() const { return m_eventFilter->isSelectable(); }
 
 void MarkdownView::setTaskListInteractive(bool interactive) { m_eventFilter->setTaskListInteractive(interactive); }
-bool MarkdownView::isTaskListInteractive() const { return false; }
+bool MarkdownView::isTaskListInteractive() const { return m_eventFilter->isTaskListInteractive(); }
 
 void MarkdownView::setZoomFactor(qreal factor)
 {

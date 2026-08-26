@@ -36,9 +36,11 @@ MarkdownNodeType nodeType(cmark_node* node)
     return MarkdownNodeType::Unknown;
 }
 
-std::unique_ptr<MarkdownNode> adaptNode(cmark_node* source)
+std::unique_ptr<MarkdownNode> adaptNode(cmark_node* source, bool allowHtml)
 {
     auto result = std::make_unique<MarkdownNode>(nodeType(source));
+    if (!allowHtml && result->type == MarkdownNodeType::Html)
+        result->type = MarkdownNodeType::Text;
     if (const char* literal = cmark_node_get_literal(source))
         result->literal = QString::fromUtf8(literal);
     if (const char* url = cmark_node_get_url(source))
@@ -61,7 +63,7 @@ std::unique_ptr<MarkdownNode> adaptNode(cmark_node* source)
         result->attributes.tableHeader = cmark_gfm_extensions_get_table_row_is_header(source);
 
     for (cmark_node* child = cmark_node_first_child(source); child; child = cmark_node_next(child))
-        result->children.push_back(adaptNode(child));
+        result->children.push_back(adaptNode(child, allowHtml));
     return result;
 }
 
@@ -81,7 +83,7 @@ void MarkdownDocument::append(MarkdownDocument&& fragment)
     fragment.m_root->children.clear();
 }
 
-MarkdownDocument MarkdownParser::parse(const QString& markdown) const
+MarkdownDocument MarkdownParser::parse(const QString& markdown, const MarkdownParseOptions& options) const
 {
     MarkdownDocument result;
     result.m_source = markdown;
@@ -94,7 +96,7 @@ MarkdownDocument MarkdownParser::parse(const QString& markdown) const
     cmark_node* root = cmark_parser_finish(parser);
     cmark_parser_free(parser);
     if (root) {
-        result.m_root = adaptNode(root);
+        result.m_root = adaptNode(root, options.allowHtml);
         cmark_node_free(root);
     }
     return result;

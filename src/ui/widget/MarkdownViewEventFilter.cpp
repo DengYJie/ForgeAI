@@ -68,6 +68,8 @@ void MarkdownViewEventFilter::clearSelection()
 int MarkdownViewEventFilter::hoveredBlock() const { return m_hoveredBlock; }
 int MarkdownViewEventFilter::hoveredCopyBlock() const { return m_hoveredCopyBlock; }
 int MarkdownViewEventFilter::copiedBlock() const { return m_copiedBlock; }
+bool MarkdownViewEventFilter::isSelectable() const { return m_selectable; }
+bool MarkdownViewEventFilter::isTaskListInteractive() const { return m_taskListInteractive; }
 
 QPointF MarkdownViewEventFilter::toDocument(const QPointF& viewportPos, int scrollBarValue) const
 {

@@ -31,6 +31,8 @@ public:
     ui::markdown::TextSelection selection() const;
     void setSelection(const ui::markdown::TextSelection& sel);
     void clearSelection();
+    bool isSelectable() const;
+    bool isTaskListInteractive() const;
     int hoveredBlock() const;
     int hoveredCopyBlock() const;
     int copiedBlock() const;
