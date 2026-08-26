@@ -2,6 +2,7 @@
 
 #include <QRegularExpression>
 #include <QStringView>
+#include <optional>
 
 namespace ui::widget {
 
@@ -51,7 +52,9 @@ void MarkdownDocumentController::appendMarkdown(const QString& chunk)
         emit stableDocumentAppended();
     }
     ++m_tailParseCount;
+    ++m_tailGeneration;
     m_activeTailDocument = m_parser.parse(m_streamTail, parseOptions());
+    emit tailGenerationChanged(m_tailGeneration);
     emit tailDocumentChanged();
 }
 
@@ -62,8 +65,10 @@ void MarkdownDocumentController::finishStream()
     m_activeTailDocument = ui::markdown::MarkdownDocument{};
     ++m_fullParseCount;
     m_document = m_parser.parse(m_markdown, parseOptions());
+    // Emit streamingChanged first so Layout knows to switch to non-streaming path,
+    // then documentRebuilt triggers a full re-layout. MarkdownView will emit
+    // streamingFinished() after the final layoutReady() is received.
     emit streamingChanged(false);
-    emit streamingFinished();
     emit documentRebuilt();
 }
 
@@ -119,7 +124,8 @@ qsizetype MarkdownDocumentController::stableStreamingBoundary() const
 {
     if (m_streamTail.isEmpty()) return 0;
 
-    bool inFence = false;
+    struct FenceState { QChar marker; int len = 0; };
+    std::optional<FenceState> fence;
     bool inList = false;
     int consecutiveEmptyLines = 0;
     qsizetype lastBoundary = 0;
@@ -154,11 +160,30 @@ qsizetype MarkdownDocumentController::stableStreamingBoundary() const
         const QStringView line{m_streamTail.constData() + start, lineEnd - start};
         const QStringView trimmed = line.trimmed();
 
-        if (trimmed.startsWith(u"```") || trimmed.startsWith(u"~~~")) {
-            inFence = !inFence;
-            inList = false;
-            consecutiveEmptyLines = 0;
-        } else if (!inFence) {
+        // CommonMark-correct fence detection:
+        // A closing fence must use the SAME character as the opening fence,
+        // and its length must be >= the opening fence length.
+        if (!trimmed.isEmpty() && (trimmed[0] == u'`' || trimmed[0] == u'~')) {
+            const QChar marker = trimmed[0];
+            int len = 0;
+            while (len < trimmed.size() && trimmed[len] == marker) ++len;
+            // The rest after the fence characters must be blank (or just the language info on open)
+            const bool restIsBlank = trimmed.mid(len).trimmed().isEmpty();
+            if (restIsBlank || !fence) {
+                if (!fence) {
+                    // Opening fence: record marker and minimum-close length
+                    fence = FenceState{marker, len};
+                    inList = false;
+                    consecutiveEmptyLines = 0;
+                } else if (fence->marker == marker && len >= fence->len) {
+                    // Valid closing fence
+                    fence.reset();
+                    inList = false;
+                    consecutiveEmptyLines = 0;
+                }
+                // else: different marker or too short — inside fenced code, ignore
+            }
+        } else if (!fence) {
             if (trimmed.isEmpty()) {
                 ++consecutiveEmptyLines;
                 const qsizetype boundaryCandidate = end < 0 ? lineEnd : end + 1;

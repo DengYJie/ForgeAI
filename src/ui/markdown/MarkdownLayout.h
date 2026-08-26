@@ -104,6 +104,20 @@ struct BlockLayout {
     std::shared_ptr<TableLayoutData> table;
     BlockScrollInfo scrollInfo;
     int documentTextOffset = 0;
+
+    // Translate ALL absolute geometry fields by (dx, dy).
+    // Use this whenever a block is repositioned (e.g. tail→composite merge,
+    // image-size patch cascade). Avoids scattered translate() call-sites.
+    void translate(qreal dx, qreal dy)
+    {
+        rect.translate(dx, dy);
+        copyButtonRect.translate(dx, dy);
+        if (taskItem && taskCheckRect.isValid())
+            taskCheckRect.translate(dx, dy);
+        scrollInfo.viewportRect.translate(dx, dy);
+        scrollInfo.hScrollBarRect.translate(dx, dy);
+        scrollInfo.vScrollBarRect.translate(dx, dy);
+    }
 };
 
 struct DocumentLayout;
@@ -114,6 +128,10 @@ struct DocumentLayout {
     QVector<BlockLayout> blocks;
     qreal width = 0;
     quint64 themeVersion = 0;
+    // The y-cursor value at which appendNodes() finished writing blocks.
+    // This is the authoritative "where the next block should start" cursor,
+    // more reliable than inferring it from blocks.back().rect.bottom().
+    qreal contentEndY = 0;
 
     int firstVisibleBlock(qreal y) const;
     int lastVisibleBlock(qreal y) const;
@@ -148,24 +166,32 @@ public:
     MarkdownLayoutMetrics metrics() const noexcept;
     void resetMetrics() noexcept;
 
+    // Must be called before layout()-ing a fresh tail AST.
+    // Prevents the InlineCache from returning stale PreparedInlines
+    // when the allocator reuses AST node addresses across tail re-parses.
+    // Pass generation=0 when laying out stable documents.
+    void setTailGeneration(quint64 generation) { m_tailGeneration = generation; }
+    void clearTailCache();
+
 private:
     void appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,
                      qreal& y, qreal width, qreal indent, int quoteDepth, int listDepth,
                      const MarkdownTheme& theme, int& textOffset,
-                     const QHash<QString, QImage>& images) const;
+                     const QHash<QString, QImage>& images, quint64 generation) const;
 
     PreparedInline prepareInline(const MarkdownNode& node, const QFont& font,
                                 const MarkdownTheme& theme) const;
     const PreparedInline& prepareCachedInline(const MarkdownNode& node, const QFont& font,
-                                              const MarkdownTheme& theme) const;
+                                              const MarkdownTheme& theme, quint64 generation) const;
     std::shared_ptr<InlineLayout> layoutInline(const PreparedInline& prepared,
                                                qreal availableWidth, bool wrap = true) const;
     std::shared_ptr<InlineLayout> makeIntrinsicInline(const MarkdownNode& node, const QFont& font,
-                                                      const MarkdownTheme& theme) const;
+                                                      const MarkdownTheme& theme, quint64 generation) const;
     std::shared_ptr<InlineLayout> makeInline(const MarkdownNode& node, const QFont& font,
-                                             const MarkdownTheme& theme, qreal width) const;
+                                             const MarkdownTheme& theme, qreal width, quint64 generation) const;
 
     MarkdownSyntaxHighlighter m_syntaxHighlighter;
+    quint64 m_tailGeneration = 0;
 
     struct CodeCacheKey {
         quint64 themeVersion = 0;
@@ -182,32 +208,36 @@ private:
     struct TableCacheKey {
         const MarkdownNode* node = nullptr;
         quint64 themeVersion = 0;
+        quint64 generation = 0; // 0 = stable, non-zero = tail generation
         int rowCount = 0;
         int totalCols = 0;
         bool operator==(const TableCacheKey& o) const {
             return node == o.node && themeVersion == o.themeVersion &&
+                   generation == o.generation &&
                    rowCount == o.rowCount && totalCols == o.totalCols;
         }
     };
     friend inline size_t qHash(const TableCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.node, k.themeVersion, k.rowCount, k.totalCols);
+        return qHashMulti(seed, k.node, k.themeVersion, k.generation, k.rowCount, k.totalCols);
     }
 
     struct InlineCacheKey {
         const MarkdownNode* node = nullptr;
         quint64 themeVersion = 0;
+        quint64 generation = 0; // 0 = stable AST (pointer identity safe), non-zero = tail generation
         int fontPixelSize = 0;
         int fontWeight = 0;
         int childCount = 0;
         int literalLength = 0;
         bool operator==(const InlineCacheKey& o) const {
             return node == o.node && themeVersion == o.themeVersion &&
+                   generation == o.generation &&
                    fontPixelSize == o.fontPixelSize && fontWeight == o.fontWeight &&
                    childCount == o.childCount && literalLength == o.literalLength;
         }
     };
     friend inline size_t qHash(const InlineCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.node, k.themeVersion, k.fontPixelSize, k.fontWeight, k.childCount, k.literalLength);
+        return qHashMulti(seed, k.node, k.themeVersion, k.generation, k.fontPixelSize, k.fontWeight, k.childCount, k.literalLength);
     }
 
     mutable QHash<CodeCacheKey, CodeBlockContentLayout> m_codeBlockCache;

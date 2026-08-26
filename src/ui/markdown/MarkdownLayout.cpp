@@ -152,6 +152,25 @@ void MarkdownLayoutEngine::clearCache()
     m_tableCache.clear();
 }
 
+void MarkdownLayoutEngine::clearTailCache()
+{
+    // Remove only entries that belong to a previous tail generation (generation != 0).
+    // Stable entries (generation == 0) are retained — their AST pointers are stable
+    // throughout the streaming lifetime.
+    for (auto it = m_inlineCache.begin(); it != m_inlineCache.end(); ) {
+        if (it.key().generation != 0)
+            it = m_inlineCache.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = m_tableCache.begin(); it != m_tableCache.end(); ) {
+        if (it.key().generation != 0)
+            it = m_tableCache.erase(it);
+        else
+            ++it;
+    }
+}
+
 MarkdownLayoutMetrics MarkdownLayoutEngine::metrics() const noexcept
 {
     return m_metrics;
@@ -193,10 +212,10 @@ PreparedInline MarkdownLayoutEngine::prepareInline(const MarkdownNode& node, con
 }
 
 const PreparedInline& MarkdownLayoutEngine::prepareCachedInline(const MarkdownNode& node, const QFont& font,
-                                                                const MarkdownTheme& theme) const
+                                                                const MarkdownTheme& theme, quint64 generation) const
 {
     const int pixelSize = font.pixelSize() > 0 ? font.pixelSize() : qRound(font.pointSizeF() * 10);
-    const InlineCacheKey key{&node, theme.version, pixelSize, static_cast<int>(font.weight()),
+    const InlineCacheKey key{&node, theme.version, generation, pixelSize, static_cast<int>(font.weight()),
                              static_cast<int>(node.children.size()), static_cast<int>(node.literal.size())};
     auto it = m_inlineCache.find(key);
     if (it == m_inlineCache.end()) {
@@ -219,29 +238,29 @@ std::shared_ptr<InlineLayout> MarkdownLayoutEngine::layoutInline(const PreparedI
 }
 
 std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeIntrinsicInline(const MarkdownNode& node, const QFont& font,
-                                                                        const MarkdownTheme& theme) const
+                                                                        const MarkdownTheme& theme, quint64 generation) const
 {
-    const auto& prepared = prepareCachedInline(node, font, theme);
+    const auto& prepared = prepareCachedInline(node, font, theme, generation);
     return prepared.intrinsicLayout;
 }
 
 std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNode& node, const QFont& font,
-                                                               const MarkdownTheme& theme, qreal width) const
+                                                               const MarkdownTheme& theme, qreal width, quint64 generation) const
 {
-    const auto& prepared = prepareCachedInline(node, font, theme);
+    const auto& prepared = prepareCachedInline(node, font, theme, generation);
     return layoutInline(prepared, width, true);
 }
 
 void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,
                                        qreal& y, qreal width, qreal indent, int quoteDepth, int listDepth,
                                        const MarkdownTheme& theme, int& textOffset,
-                                       const QHash<QString, QImage>& images) const
+                                       const QHash<QString, QImage>& images, quint64 generation) const
 {
     const qreal right = width - theme.contentMargins.right();
     for (const auto& nodePtr : nodes) {
         const MarkdownNode& node = *nodePtr;
         if (node.type == MarkdownNodeType::BlockQuote) {
-            appendNodes(node.children, result, y, width, indent + 18, quoteDepth + 1, listDepth, theme, textOffset, images);
+            appendNodes(node.children, result, y, width, indent + 18, quoteDepth + 1, listDepth, theme, textOffset, images, generation);
             continue;
         }
         // ListItem can arrive here from a nested list. Its parent marker policy is
@@ -256,13 +275,13 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                     block.taskChecked = node.attributes.taskChecked;
                     block.taskSourceLine = node.sourceRange.startLine;
                     block.quoteIndent = quoteDepth * 18; block.contentX = indent + theme.listIndent;
-                    block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme), right - block.contentX);
+                    block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme, generation), right - block.contentX);
                     block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
                     block.rect = QRectF(indent, y, right - indent, block.inlineLayout->height + 4);
                     if (block.taskItem) block.taskCheckRect = QRectF(indent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
                     result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + 3; first = false;
                 } else if (child->type == MarkdownNodeType::List) {
-                    appendNodes(child->children, result, y, width, indent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset, images);
+                    appendNodes(child->children, result, y, width, indent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset, images, generation);
                 }
             }
             continue;
@@ -282,13 +301,13 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                         block.taskChecked = item.attributes.taskChecked;
                         block.taskSourceLine = item.sourceRange.startLine;
                         block.quoteIndent = quoteDepth * 18; block.contentX = markerIndent + theme.listIndent;
-                        block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme), right - block.contentX);
+                        block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme, generation), right - block.contentX);
                         block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
                         block.rect = QRectF(markerIndent, y, right - markerIndent, block.inlineLayout->height + 4);
                         if (block.taskItem) block.taskCheckRect = QRectF(markerIndent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
                         result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + 3; first = false;
                     } else {
-                        appendNodes(child->children, result, y, width, markerIndent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset, images);
+                        appendNodes(child->children, result, y, width, markerIndent + theme.listIndent, quoteDepth, listDepth + 1, theme, textOffset, images, generation);
                     }
                 }
             }
@@ -354,7 +373,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         if (node.type == MarkdownNodeType::Table) {
             int totalCols = 0;
             for (const auto& r : node.children) totalCols += static_cast<int>(r->children.size());
-            const TableCacheKey tableKey{&node, theme.version, static_cast<int>(node.children.size()), totalCols};
+            const TableCacheKey tableKey{&node, theme.version, generation, static_cast<int>(node.children.size()), totalCols};
             auto tableIt = m_tableCache.find(tableKey);
             if (tableIt == m_tableCache.end()) {
                 auto intrinsicData = std::make_shared<TableIntrinsicData>();
@@ -374,7 +393,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
 
                     QVector<std::shared_ptr<InlineLayout>> rowIntrinsicCells;
                     for (int column = 0; column < static_cast<int>(row->children.size()); ++column) {
-                        auto cellIntrinsic = makeIntrinsicInline(*row->children[column], cellFont, theme);
+                        auto cellIntrinsic = makeIntrinsicInline(*row->children[column], cellFont, theme, generation);
                         intrinsicData->preferredWidths[column] = qMax(
                             intrinsicData->preferredWidths[column], cellIntrinsic->usedWidth + 16);
                         rowIntrinsicCells.push_back(std::move(cellIntrinsic));
@@ -436,7 +455,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                         rowHeight = qMax(rowHeight, intrinsicCell->height);
                     } else {
                         ++m_metrics.tableCellWrappedCount;
-                        auto value = makeInline(*rowNode->children[column], cellFont, theme, colInnerWidth);
+                        auto value = makeInline(*rowNode->children[column], cellFont, theme, colInnerWidth, generation);
                         rowHeight = qMax(rowHeight, value->height);
                         cells.push_back(std::move(value));
                     }
@@ -463,7 +482,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         if (node.type == MarkdownNodeType::Paragraph && node.children.size() == 1 && node.children.front()->type == MarkdownNodeType::Image) {
             const MarkdownNode& imageNode = *node.children.front();
             BlockLayout block; block.kind = BlockKind::Image; block.imageUrl = imageNode.attributes.url;
-            block.imageAlt = prepareCachedInline(imageNode, theme.bodyFont, theme).text;
+            block.imageAlt = prepareCachedInline(imageNode, theme.bodyFont, theme, generation).text;
             block.documentTextOffset = textOffset++;
             QSizeF intrinsic(360, 180);
             if (const auto imgIt = images.constFind(block.imageUrl); imgIt != images.constEnd() && !imgIt->isNull()) {
@@ -504,7 +523,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         BlockLayout block; block.kind = node.type == MarkdownNodeType::Heading ? BlockKind::Heading : (node.type == MarkdownNodeType::Html ? BlockKind::Html : (quoteDepth ? BlockKind::QuoteContent : BlockKind::Paragraph));
         block.quoteIndent = quoteDepth * 18; block.contentX = indent;
         const QFont font = node.type == MarkdownNodeType::Heading ? theme.headingFont(node.attributes.headingLevel) : theme.bodyFont;
-        block.inlineLayout = layoutInline(prepareCachedInline(node, font, theme), right - indent);
+        block.inlineLayout = layoutInline(prepareCachedInline(node, font, theme, generation), right - indent);
         block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
         const qreal top = node.type == MarkdownNodeType::Heading ? theme.blockGap * .65 : 0;
         block.rect = QRectF(indent, y + top, right - indent, block.inlineLayout->height); result.blocks.push_back(std::move(block)); y += top + result.blocks.back().rect.height() + theme.blockGap;
@@ -518,7 +537,9 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
     DocumentLayout result;
     result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
-    appendNodes(document.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
+    // Stable documents use generation=0 — pointer identity is safe for the full lifetime.
+    appendNodes(document.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images, 0);
+    result.contentEndY = y;
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
         if (b.inlineLayout) {
@@ -546,8 +567,9 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
     DocumentLayout result;
     result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
-    appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
-    appendNodes(activeTail.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
+    appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images, 0);
+    appendNodes(activeTail.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images, m_tailGeneration);
+    result.contentEndY = y;
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
         if (b.inlineLayout) {

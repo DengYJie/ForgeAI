@@ -51,8 +51,13 @@ private:
     void onDocumentRebuilt();
     void onStableDocumentAppended();
     void onTailDocumentChanged();
+    void onTailGenerationChanged(quint64 generation);
     void onStreamingChanged(bool streaming);
     void relayout();
+
+    static bool patchImageInLayout(ui::markdown::DocumentLayout& layout,
+                                   const QString& source, const QSize& newSize,
+                                   qreal layoutWidth, const ui::markdown::MarkdownTheme& theme);
 
     MarkdownDocumentController* m_controller;
     ui::markdown::MarkdownLayoutEngine m_engine;

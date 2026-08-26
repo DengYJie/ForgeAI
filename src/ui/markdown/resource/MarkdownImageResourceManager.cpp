@@ -47,7 +47,11 @@ void MarkdownImageResourceManager::request(const QString& source, const QUrl& ba
 
 void MarkdownImageResourceManager::loadLocal(const QString& key)
 {
-    QImage image(key.startsWith(QStringLiteral(":")) ? key : QUrl(key).toLocalFile());
+    QString path = key;
+    if (key.startsWith(QStringLiteral("file://"))) {
+        path = QUrl(key).toLocalFile();
+    }
+    QImage image(path);
     if (!image.isNull()) {
         m_images.insert(key, image);
         for (const QString& alias : m_aliases.values(key)) m_images.insert(alias, image);

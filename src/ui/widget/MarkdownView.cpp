@@ -39,7 +39,6 @@ MarkdownView::MarkdownView(QWidget *parent)
     m_layoutCache->setImages(&m_resources.images());
 
     connect(m_controller, &MarkdownDocumentController::streamingChanged, this, &MarkdownView::streamingChanged);
-    connect(m_controller, &MarkdownDocumentController::streamingFinished, this, &MarkdownView::streamingFinished);
     connect(m_controller, &MarkdownDocumentController::taskToggled, this, &MarkdownView::taskToggled);
 
     connect(m_layoutCache, &MarkdownDocumentLayout::layoutReady, this, &MarkdownView::onLayoutReady);
@@ -99,10 +98,17 @@ void MarkdownView::beginStream()
     m_preferredContentSize = QSizeF();
     m_preferredSizeDirty = true;
     m_lastAutoFitHeight = 0;
+    // blockIndex scroll offsets are keyed by index, which changes across streaming sessions.
+    // Clear them to prevent old offsets from mapping to wrong blocks in the new session.
+    for (auto* anim : m_blockScrollAnimations) { anim->stop(); anim->deleteLater(); }
+    m_blockScrollAnimations.clear();
+    m_blockScrollOffsets.clear();
+    m_blockTargetScrollOffsets.clear();
     if (verticalScrollBar()) {
         verticalScrollBar()->setValue(0);
     }
     m_controller->beginStream();
+    m_wasStreaming = true;
     updateAutoFitHeight();
     viewport()->update();
 }
@@ -665,6 +671,14 @@ void MarkdownView::onLayoutReady(ui::markdown::DocumentLayoutPtr layout)
         emit documentSizeChanged(m_lastDocumentSize);
     }
     viewport()->update();
+
+    // Emit streamingFinished AFTER the final layout is in place.
+    // Controller no longer emits streamingFinished; we detect the transition here
+    // so consumers always see the completed layout when streamingFinished fires.
+    if (m_wasStreaming && !m_controller->isStreaming()) {
+        m_wasStreaming = false;
+        emit streamingFinished();
+    }
 }
 
 void MarkdownView::onTaskToggleRequested(int blockIndex)

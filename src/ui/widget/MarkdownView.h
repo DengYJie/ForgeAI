@@ -182,6 +182,7 @@ private:
     int m_lastAutoFitHeight = -1;
     qreal m_zoomFactor = 1.0;
     bool m_allowNetworkAccess = true;
+    bool m_wasStreaming = false; // Tracks streaming→not-streaming transition for streamingFinished emit
 
     QHash<int, ui::markdown::BlockScrollOffset> m_blockScrollOffsets;
     QHash<int, ui::markdown::BlockScrollOffset> m_blockTargetScrollOffsets;

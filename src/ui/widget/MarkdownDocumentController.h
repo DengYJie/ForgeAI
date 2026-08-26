@@ -33,13 +33,18 @@ public:
     quint64 fullParseCount() const noexcept { return m_fullParseCount; }
     quint64 stableParseCount() const noexcept { return m_stableParseCount; }
     quint64 tailParseCount() const noexcept { return m_tailParseCount; }
+    quint64 tailGeneration() const noexcept { return m_tailGeneration; }
 
 signals:
     void documentRebuilt();
     void stableDocumentAppended();
     void tailDocumentChanged();
     void streamingChanged(bool streaming);
-    void streamingFinished();
+    // streamingFinished is intentionally NOT emitted here.
+    // MarkdownView emits streamingFinished() after it receives the final
+    // layoutReady() triggered by documentRebuilt(), ensuring consumers
+    // always see the completed layout when the signal fires.
+    void tailGenerationChanged(quint64 generation);
     void taskToggled(int sourceLine, bool checked);
 
 private:
@@ -56,6 +61,7 @@ private:
     quint64 m_fullParseCount = 0;
     quint64 m_stableParseCount = 0;
     quint64 m_tailParseCount = 0;
+    quint64 m_tailGeneration = 0;
 };
 
 } // namespace ui::widget

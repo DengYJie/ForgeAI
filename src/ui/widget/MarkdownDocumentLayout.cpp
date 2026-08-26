@@ -15,6 +15,8 @@ MarkdownDocumentLayout::MarkdownDocumentLayout(MarkdownDocumentController* contr
             this, &MarkdownDocumentLayout::onStableDocumentAppended);
     connect(controller, &MarkdownDocumentController::tailDocumentChanged,
             this, &MarkdownDocumentLayout::onTailDocumentChanged);
+    connect(controller, &MarkdownDocumentController::tailGenerationChanged,
+            this, &MarkdownDocumentLayout::onTailGenerationChanged);
     connect(controller, &MarkdownDocumentController::streamingChanged,
             this, &MarkdownDocumentLayout::onStreamingChanged);
 }
@@ -102,24 +104,55 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
 {
     if (newSize.isEmpty() || !m_currentLayout || m_currentLayout->blocks.isEmpty()) return false;
 
-    // Fast in-place geometry adjustment without running any Markdown/QTextLayout parsing
-    bool found = false;
+    // Check if the image exists in the current composite layout at all
+    bool foundInCurrent = false;
     for (const auto& b : m_currentLayout->blocks) {
         if (b.kind == ui::markdown::BlockKind::Image && b.imageUrl == source) {
-            found = true;
+            foundInCurrent = true;
             break;
         }
     }
-    if (!found) return false;
+    if (!foundInCurrent) return false;
+
+    // If streaming, the image may be in m_stableLayout. Patch it there first
+    // so the next tail relayout doesn't revert to the old placeholder geometry.
+    if (m_controller->isStreaming() && m_stableLayout) {
+        bool imageInStable = false;
+        for (const auto& b : m_stableLayout->blocks) {
+            if (b.kind == ui::markdown::BlockKind::Image && b.imageUrl == source) {
+                imageInStable = true;
+                break;
+            }
+        }
+        if (imageInStable) {
+            auto newStable = std::make_shared<ui::markdown::DocumentLayout>(*m_stableLayout);
+            if (patchImageInLayout(*newStable, source, newSize, m_width, m_theme)) {
+                m_stableLayout = std::move(newStable);
+            }
+        }
+    }
 
     auto newLayout = std::make_shared<ui::markdown::DocumentLayout>(*m_currentLayout);
+    if (patchImageInLayout(*newLayout, source, newSize, m_width, m_theme)) {
+        m_currentLayout = std::move(newLayout);
+        m_layoutCacheList.clear(); // Height changed, clear width LRU cache only (NOT engine cache)
+        emit layoutReady(m_currentLayout);
+        return true;
+    }
+    return false;
+}
+
+bool MarkdownDocumentLayout::patchImageInLayout(ui::markdown::DocumentLayout& layout,
+                                                const QString& source, const QSize& newSize,
+                                                qreal layoutWidth, const ui::markdown::MarkdownTheme& theme)
+{
     bool modified = false;
-    for (int i = 0; i < newLayout->blocks.size(); ++i) {
-        auto& block = newLayout->blocks[i];
+    for (int i = 0; i < layout.blocks.size(); ++i) {
+        auto& block = layout.blocks[i];
         if (block.kind != ui::markdown::BlockKind::Image || block.imageUrl != source) continue;
 
         const qreal indent = block.rect.left();
-        const qreal right = m_width - m_theme.contentMargins.right();
+        const qreal right = layoutWidth - theme.contentMargins.right();
         const qreal maxW = right - indent;
         const qreal maxH = 600;
         const QSizeF intrinsic = newSize;
@@ -137,26 +170,16 @@ bool MarkdownDocumentLayout::updateImageSize(const QString& source, const QSize&
         block.rect.setHeight(h);
         block.imageIntrinsicSize = intrinsic;
 
-        for (int j = i + 1; j < newLayout->blocks.size(); ++j) {
-            auto& downstream = newLayout->blocks[j];
-            downstream.rect.translate(0, deltaH);
-            downstream.copyButtonRect.translate(0, deltaH);
-            if (downstream.taskItem) {
-                downstream.taskCheckRect.translate(0, deltaH);
-            }
+        // Use block.translate() to move ALL geometry fields of downstream blocks
+        for (int j = i + 1; j < layout.blocks.size(); ++j) {
+            layout.blocks[j].translate(0, deltaH);
         }
 
-        newLayout->size.rheight() += deltaH;
+        layout.size.rheight() += deltaH;
+        layout.contentEndY += deltaH;
         modified = true;
     }
-
-    if (modified) {
-        m_currentLayout = std::move(newLayout);
-        m_layoutCacheList.clear(); // Height changed, clear width LRU cache only (NOT engine cache)
-        emit layoutReady(m_currentLayout);
-        return true;
-    }
-    return false;
+    return modified;
 }
 
 ui::markdown::DocumentLayoutPtr MarkdownDocumentLayout::measure(qreal maxWidth) const
@@ -206,6 +229,16 @@ void MarkdownDocumentLayout::onStableDocumentAppended()
 {
     m_stableLayoutDirty = true;
     m_layoutCacheList.clear();
+}
+
+void MarkdownDocumentLayout::onTailGenerationChanged(quint64 generation)
+{
+    // Tell the engine which generation this tail parse belongs to.
+    // This prevents the InlineCache from returning stale PreparedInlines
+    // when the allocator reuses AST node addresses across tail re-parses.
+    m_engine.setTailGeneration(generation);
+    // Evict any cached entries from previous tail generations to bound memory usage.
+    m_engine.clearTailCache();
 }
 
 void MarkdownDocumentLayout::onStreamingChanged(bool streaming)
@@ -263,13 +296,16 @@ void MarkdownDocumentLayout::relayout()
     ++m_metrics.tailLayoutCount;
 
     auto layout = std::make_shared<ui::markdown::DocumentLayout>(*m_stableLayout);
+    // Use contentEndY (the authoritative layout cursor) rather than
+    // inferring from lastBlock.rect.bottom() + blockGap (which varies by block type).
     const qreal yOffset = (m_stableLayout && !m_stableLayout->blocks.isEmpty())
-        ? (m_stableLayout->blocks.back().rect.bottom() + m_theme.blockGap - m_theme.contentMargins.top())
+        ? (m_stableLayout->contentEndY - m_theme.contentMargins.top())
         : 0;
     const int textOffset = m_stableLayout ? m_stableLayout->textLength() : 0;
     for (ui::markdown::BlockLayout block : tail.blocks) {
-        block.rect.translate(0, yOffset);
-        block.copyButtonRect.translate(0, yOffset);
+        // translate() moves ALL geometry fields (rect, copyButtonRect,
+        //        taskCheckRect, scrollInfo.viewportRect, hScrollBarRect, vScrollBarRect).
+        block.translate(0, yOffset);
         block.documentTextOffset += textOffset;
         layout->blocks.push_back(std::move(block));
     }

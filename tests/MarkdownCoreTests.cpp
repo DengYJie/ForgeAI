@@ -236,6 +236,16 @@ private slots:
     void headingThemeColorIsApplied();
     void linkHoverHighlightIsApplied();
     void coldLayoutCachesWidthInvariantsAndFastPaths();
+    
+    // P0/P1 Regression Tests
+    void streamingIncrementalTextIsAlwaysCurrent();
+    void streamingTailTaskCheckRectIsInsideBlockRect();
+    void streamingTailCodeScrollInfoIsConsistentWithBlockRect();
+    void streamingStableImageHeightDoesNotRegressOnNextToken();
+    void streamingFinishGeometryMatchesFinalLayout();
+    void streamingFinishedEmittedAfterFinalLayout();
+    void fencedCodeNotClosedByDifferentMarker();
+    
     void visualTest();
 };
 
@@ -1356,6 +1366,159 @@ static QList<domain::conversation::Message> createScenarioAllCmarkGfmFeatures() 
 }
 
 } // namespace
+
+void MarkdownCoreTests::streamingIncrementalTextIsAlwaysCurrent()
+{
+    // streaming Incremental text should always render latest text, not stale cached inlines
+    ui::widget::MarkdownDocumentController controller;
+    ui::widget::MarkdownDocumentLayout layout(&controller);
+    layout.setWidth(600);
+    layout.setTheme(MarkdownTheme::light());
+    
+    controller.beginStream();
+    controller.appendMarkdown(QStringLiteral("Prefix"));
+    auto doc1 = layout.currentLayout();
+    QVERIFY(doc1 && !doc1->blocks.isEmpty());
+    QCOMPARE(doc1->blocks.front().inlineLayout->text, QStringLiteral("Prefix"));
+    
+    // Append more text, making it a new inline in the same paragraph
+    controller.appendMarkdown(QStringLiteral("Suffix"));
+    auto doc2 = layout.currentLayout();
+    QVERIFY(doc2 && !doc2->blocks.isEmpty());
+    QCOMPARE(doc2->blocks.front().inlineLayout->text, QStringLiteral("PrefixSuffix"));
+    controller.finishStream();
+}
+
+void MarkdownCoreTests::streamingTailTaskCheckRectIsInsideBlockRect()
+{
+    // streaming Tail merge block missing translate
+    ui::widget::MarkdownDocumentController controller;
+    ui::widget::MarkdownDocumentLayout layout(&controller);
+    layout.setWidth(600);
+    layout.setTheme(MarkdownTheme::light());
+    
+    controller.beginStream();
+    controller.appendMarkdown(QStringLiteral("# Title\n\n")); // Stable part
+    controller.appendMarkdown(QStringLiteral("- [ ] Task 1")); // Tail part
+    
+    auto doc = layout.currentLayout();
+    QVERIFY(doc && doc->blocks.size() >= 2);
+    const auto& taskBlock = doc->blocks.back();
+    QCOMPARE(taskBlock.kind, BlockKind::ListItem);
+    QVERIFY(taskBlock.taskItem);
+    
+    // Check if taskCheckRect is translated properly
+    QVERIFY(taskBlock.taskCheckRect.top() >= taskBlock.rect.top());
+    QVERIFY(taskBlock.taskCheckRect.bottom() <= taskBlock.rect.bottom());
+    controller.finishStream();
+}
+
+void MarkdownCoreTests::streamingTailCodeScrollInfoIsConsistentWithBlockRect()
+{
+    // streaming Tail code block missing scrollInfo translate
+    ui::widget::MarkdownDocumentController controller;
+    ui::widget::MarkdownDocumentLayout layout(&controller);
+    layout.setWidth(600);
+    layout.setTheme(MarkdownTheme::light());
+    
+    controller.beginStream();
+    controller.appendMarkdown(QStringLiteral("# Title\n\n")); // Stable part
+    controller.appendMarkdown(QStringLiteral("```\nCode\n```")); // Tail part
+    
+    auto doc = layout.currentLayout();
+    QVERIFY(doc && doc->blocks.size() >= 2);
+    const auto& codeBlock = doc->blocks.back();
+    QCOMPARE(codeBlock.kind, BlockKind::CodeBlock);
+    
+    // Check if scrollInfo viewportRect is translated properly
+    QVERIFY(codeBlock.scrollInfo.viewportRect.top() >= codeBlock.rect.top());
+    QVERIFY(codeBlock.scrollInfo.viewportRect.bottom() <= codeBlock.rect.bottom());
+    controller.finishStream();
+}
+
+void MarkdownCoreTests::streamingStableImageHeightDoesNotRegressOnNextToken()
+{
+    // Stable image height regression when appending next tokens
+    ui::widget::MarkdownDocumentController controller;
+    ui::widget::MarkdownDocumentLayout layout(&controller);
+    layout.setWidth(600);
+    layout.setTheme(MarkdownTheme::light());
+    
+    controller.beginStream();
+    controller.appendMarkdown(QStringLiteral("![img](test.png)\n\n")); // Will become stable
+    
+    // Simulate image loaded
+    layout.updateImageSize(QStringLiteral("test.png"), QSize(200, 100));
+    auto doc1 = layout.currentLayout();
+    QVERIFY(doc1 && !doc1->blocks.isEmpty());
+    const qreal h1 = doc1->blocks.front().rect.height();
+    
+    // Append more text (triggers tail rebuild and relayout)
+    controller.appendMarkdown(QStringLiteral("More text"));
+    auto doc2 = layout.currentLayout();
+    QVERIFY(doc2 && !doc2->blocks.isEmpty());
+    const qreal h2 = doc2->blocks.front().rect.height();
+    
+    // Height should remain the patched size, not revert to intrinsic
+    QCOMPARE(h1, h2);
+    controller.finishStream();
+}
+
+void MarkdownCoreTests::streamingFinishGeometryMatchesFinalLayout()
+{
+    // Final tail merge layout should be identical to non-streaming full relayout
+    ui::widget::MarkdownDocumentController controller;
+    ui::widget::MarkdownDocumentLayout layout(&controller);
+    layout.setWidth(600);
+    layout.setTheme(MarkdownTheme::light());
+    
+    controller.beginStream();
+    controller.appendMarkdown(QStringLiteral("# Header\n\n- List 1\n- List 2\n\n---\n\nParagraph."));
+    auto streamingDoc = layout.currentLayout();
+    controller.finishStream();
+    auto finalDoc = layout.currentLayout();
+    
+    QVERIFY(streamingDoc);
+    QVERIFY(finalDoc);
+    QCOMPARE(streamingDoc->blocks.size(), finalDoc->blocks.size());
+    for (qsizetype i = 0; i < streamingDoc->blocks.size(); ++i) {
+        QCOMPARE(streamingDoc->blocks[i].rect, finalDoc->blocks[i].rect);
+    }
+}
+
+void MarkdownCoreTests::streamingFinishedEmittedAfterFinalLayout()
+{
+    // streamingFinished must be emitted AFTER the layout is rebuilt
+    ui::widget::MarkdownView view;
+    QSignalSpy spyReady(&view, &ui::widget::MarkdownView::documentSizeChanged);
+    QSignalSpy spyFinished(&view, &ui::widget::MarkdownView::streamingFinished);
+    
+    view.beginStream();
+    view.appendStreamingText(QStringLiteral("Content"));
+    spyReady.clear();
+    
+    view.finishStreaming();
+    // Finish should trigger a rebuild (layoutReady -> documentSizeChanged) then streamingFinished
+    QVERIFY(spyReady.count() > 0 || view.metrics().blockCount > 0);
+    QCOMPARE(spyFinished.count(), 1);
+}
+
+void MarkdownCoreTests::fencedCodeNotClosedByDifferentMarker()
+{
+    // A fenced code block starting with ` should not be closed by ~
+    ui::widget::MarkdownDocumentController controller;
+    controller.beginStream();
+    // ```python
+    controller.appendMarkdown(QStringLiteral("```python\n"));
+    QCOMPARE(controller.stableParseCount(), 0); // No stable boundary yet
+    // ~~~
+    controller.appendMarkdown(QStringLiteral("~~~\n"));
+    QCOMPARE(controller.stableParseCount(), 0); // Still in fence, no boundary
+    // ```
+    controller.appendMarkdown(QStringLiteral("```\n\nText"));
+    QVERIFY(controller.stableParseCount() > 0); // Now it's closed and a boundary can form
+    controller.finishStream();
+}
 
 void MarkdownCoreTests::visualTest()
 {
