@@ -199,6 +199,8 @@ MessageCardWidget* MessageListView::acquireCard()
         card = new MessageCardWidget(m_container);
         connect(card, &MessageCardWidget::contentHeightChanged, this, &MessageListView::onCardHeightChanged);
     }
+    card->setAvatarVisible(m_avatarVisible);
+    card->setHeaderVisible(m_headerVisible);
     return card;
 }
 
@@ -318,6 +320,12 @@ void MessageListView::setAvatarVisible(bool visible)
 {
     if (m_avatarVisible == visible) return;
     m_avatarVisible = visible;
+    for (MessageCardWidget* card : m_cardMap) {
+        if (card) card->setAvatarVisible(visible);
+    }
+    for (MessageCardWidget* card : m_recycledCards) {
+        if (card) card->setAvatarVisible(visible);
+    }
     invalidateMeasuredHeights();
 }
 
@@ -325,6 +333,12 @@ void MessageListView::setHeaderVisible(bool visible)
 {
     if (m_headerVisible == visible) return;
     m_headerVisible = visible;
+    for (MessageCardWidget* card : m_cardMap) {
+        if (card) card->setHeaderVisible(visible);
+    }
+    for (MessageCardWidget* card : m_recycledCards) {
+        if (card) card->setHeaderVisible(visible);
+    }
     invalidateMeasuredHeights();
 }
 

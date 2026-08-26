@@ -1,5 +1,6 @@
 #include "MarkdownLayout.h"
 
+#include <QElapsedTimer>
 #include <QFontMetricsF>
 #include <QTextCharFormat>
 #include <algorithm>
@@ -144,8 +145,25 @@ int DocumentLayout::textLength() const
     return result;
 }
 
-std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNode& node, const QFont& font,
-                                                               const MarkdownTheme& theme, qreal width) const
+void MarkdownLayoutEngine::clearCache()
+{
+    m_inlineCache.clear();
+    m_codeBlockCache.clear();
+    m_tableCache.clear();
+}
+
+MarkdownLayoutMetrics MarkdownLayoutEngine::metrics() const noexcept
+{
+    return m_metrics;
+}
+
+void MarkdownLayoutEngine::resetMetrics() noexcept
+{
+    m_metrics = {};
+}
+
+PreparedInline MarkdownLayoutEngine::prepareInline(const MarkdownNode& node, const QFont& font,
+                                                   const MarkdownTheme& theme) const
 {
     InlineBuilder builder{{}, {}, {}, {}, theme};
     if (node.type == MarkdownNodeType::Html && !node.literal.isEmpty())
@@ -156,7 +174,61 @@ std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNod
         base.setForeground(node.type == MarkdownNodeType::Heading ? theme.heading : theme.text);
         builder.formats.prepend({0, static_cast<int>(builder.text.size()), base});
     }
-    return std::make_shared<InlineLayout>(builder.text, font, builder.formats, builder.links, builder.codeSpans, width);
+
+    PreparedInline prepared;
+    prepared.text = std::move(builder.text);
+    prepared.formats = std::move(builder.formats);
+    prepared.links = std::move(builder.links);
+    prepared.codeSpans = std::move(builder.codeSpans);
+    prepared.font = font;
+    prepared.hasExplicitLineBreaks = prepared.text.contains(u'\n');
+
+    // Build intrinsic layout with NoWrap to capture exact shaping and un-wrapped size
+    prepared.intrinsicLayout = std::make_shared<InlineLayout>(
+        prepared.text, prepared.font, prepared.formats, prepared.links, prepared.codeSpans, 1.0, false);
+    prepared.intrinsicWidth = prepared.intrinsicLayout->usedWidth;
+    prepared.intrinsicHeight = prepared.intrinsicLayout->height;
+
+    return prepared;
+}
+
+const PreparedInline& MarkdownLayoutEngine::prepareCachedInline(const MarkdownNode& node, const QFont& font,
+                                                                const MarkdownTheme& theme) const
+{
+    const int pixelSize = font.pixelSize() > 0 ? font.pixelSize() : qRound(font.pointSizeF() * 10);
+    const InlineCacheKey key{&node, theme.version, pixelSize, static_cast<int>(font.weight())};
+    auto it = m_inlineCache.find(key);
+    if (it == m_inlineCache.end()) {
+        it = m_inlineCache.insert(key, prepareInline(node, font, theme));
+    }
+    return it.value();
+}
+
+std::shared_ptr<InlineLayout> MarkdownLayoutEngine::layoutInline(const PreparedInline& prepared,
+                                                                qreal availableWidth, bool wrap) const
+{
+    if (!wrap || availableWidth >= prepared.intrinsicWidth - 0.5) {
+        ++m_metrics.intrinsicFastPathHits;
+        return prepared.intrinsicLayout;
+    }
+
+    ++m_metrics.inlineLayoutCount;
+    return std::make_shared<InlineLayout>(
+        prepared.text, prepared.font, prepared.formats, prepared.links, prepared.codeSpans, availableWidth, true);
+}
+
+std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeIntrinsicInline(const MarkdownNode& node, const QFont& font,
+                                                                        const MarkdownTheme& theme) const
+{
+    const auto& prepared = prepareCachedInline(node, font, theme);
+    return prepared.intrinsicLayout;
+}
+
+std::shared_ptr<InlineLayout> MarkdownLayoutEngine::makeInline(const MarkdownNode& node, const QFont& font,
+                                                               const MarkdownTheme& theme, qreal width) const
+{
+    const auto& prepared = prepareCachedInline(node, font, theme);
+    return layoutInline(prepared, width, true);
 }
 
 void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,
@@ -183,7 +255,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                     block.taskChecked = node.attributes.taskChecked;
                     block.taskSourceLine = node.sourceRange.startLine;
                     block.quoteIndent = quoteDepth * 18; block.contentX = indent + theme.listIndent;
-                    block.inlineLayout = makeInline(*child, theme.bodyFont, theme, right - block.contentX);
+                    block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme), right - block.contentX);
                     block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
                     block.rect = QRectF(indent, y, right - indent, block.inlineLayout->height + 4);
                     if (block.taskItem) block.taskCheckRect = QRectF(indent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
@@ -209,7 +281,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                         block.taskChecked = item.attributes.taskChecked;
                         block.taskSourceLine = item.sourceRange.startLine;
                         block.quoteIndent = quoteDepth * 18; block.contentX = markerIndent + theme.listIndent;
-                        block.inlineLayout = makeInline(*child, theme.bodyFont, theme, right - block.contentX);
+                        block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme), right - block.contentX);
                         block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
                         block.rect = QRectF(markerIndent, y, right - markerIndent, block.inlineLayout->height + 4);
                         if (block.taskItem) block.taskCheckRect = QRectF(markerIndent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
@@ -231,70 +303,161 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         if (node.type == MarkdownNodeType::CodeBlock) {
             QString codeText = node.literal;
             if (codeText.endsWith(u'\n')) codeText.chop(1);
-            BlockLayout block; block.kind = BlockKind::CodeBlock; block.code = codeText; block.language = languageName(node.attributes.fenceInfo);
-            block.quoteIndent = quoteDepth * 18; block.contentX = indent + 12;
-            const QStringList lines = codeText.split(u'\n'); qreal codeHeight = 0;
-            const qreal available = qMax<qreal>(1, right - block.contentX - 12);
-            int codeOffset = 0;
-            qreal maxLineWidth = 0;
-            for (const QString& line : lines) {
-                QTextCharFormat base; base.setForeground(theme.text);
-                QVector<QTextLayout::FormatRange> formats{{0, static_cast<int>(line.size()), base}};
-                formats += m_syntaxHighlighter.highlightLine(line, block.language, theme);
-                auto l = std::make_shared<InlineLayout>(line, theme.codeFont, formats, QVector<LinkRange>{}, 4096, false);
-                maxLineWidth = qMax(maxLineWidth, l->usedWidth);
-                codeHeight += l->height; block.codeLines.push_back(l); block.codeLineOffsets.push_back(codeOffset);
-                codeOffset += static_cast<int>(line.size()) + 1;
+            const QString language = languageName(node.attributes.fenceInfo);
+            const size_t textHash = qHash(codeText);
+            const CodeCacheKey cacheKey{theme.version, language, textHash};
+
+            auto it = m_codeBlockCache.find(cacheKey);
+            if (it == m_codeBlockCache.end()) {
+                ++m_metrics.codeBlockCacheMisses;
+                CodeBlockContentLayout content;
+                const QStringList lines = codeText.split(u'\n');
+                int codeOffset = 0;
+                for (const QString& line : lines) {
+                    QTextCharFormat base; base.setForeground(theme.text);
+                    QVector<QTextLayout::FormatRange> formats{{0, static_cast<int>(line.size()), base}};
+                    formats += m_syntaxHighlighter.highlightLine(line, language, theme);
+                    auto l = std::make_shared<InlineLayout>(line, theme.codeFont, formats, QVector<LinkRange>{}, 4096, false);
+                    content.contentWidth = qMax(content.contentWidth, l->usedWidth);
+                    content.contentHeight += l->height;
+                    content.lines.push_back(std::move(l));
+                    content.lineOffsets.push_back(codeOffset);
+                    codeOffset += static_cast<int>(line.size()) + 1;
+                }
+                it = m_codeBlockCache.insert(cacheKey, std::move(content));
+            } else {
+                ++m_metrics.codeBlockCacheHits;
             }
-            block.rect = QRectF(indent, y, right - indent, 30 + 6 + codeHeight + 6);
+
+            const auto& content = it.value();
+            BlockLayout block;
+            block.kind = BlockKind::CodeBlock;
+            block.code = codeText;
+            block.language = language;
+            block.quoteIndent = quoteDepth * 18;
+            block.contentX = indent + 12;
+            block.codeLines = content.lines;
+            block.codeLineOffsets = content.lineOffsets;
+            block.rect = QRectF(indent, y, right - indent, 30 + 6 + content.contentHeight + 6);
             block.copyButtonRect = QRectF(right - 34, y + 4, 24, 22);
             block.scrollInfo.viewportRect = QRectF(block.rect.left() + 8, block.rect.top() + 30, block.rect.width() - 16, block.rect.height() - 34);
-            block.scrollInfo.contentSize = QSizeF(maxLineWidth, codeHeight);
+            block.scrollInfo.contentSize = QSizeF(content.contentWidth, content.contentHeight);
             if (block.scrollInfo.hasHorizontalScroll()) {
                 block.scrollInfo.hScrollBarRect = QRectF(block.scrollInfo.viewportRect.left() + 4, block.rect.bottom() - 7, block.scrollInfo.viewportRect.width() - 8, 4);
             }
-            block.documentTextOffset = textOffset; textOffset += static_cast<int>(codeText.size()) + 1; result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + theme.blockGap; continue;
+            block.documentTextOffset = textOffset;
+            textOffset += static_cast<int>(codeText.size()) + 1;
+            result.blocks.push_back(std::move(block));
+            y += result.blocks.back().rect.height() + theme.blockGap;
+            continue;
         }
         if (node.type == MarkdownNodeType::Table) {
-            auto data = std::make_shared<TableLayoutData>(); int columns = 0;
-            for (const auto& row : node.children) columns = qMax(columns, static_cast<int>(row->children.size()));
-            if (columns == 0) continue;
-            const qreal availableWidth = right - indent;
-            QVector<qreal> preferred(columns, 64);
-            for (const auto& row : node.children) {
-                for (int column = 0; column < row->children.size(); ++column) {
-                    const auto intrinsic = makeInline(*row->children.at(column), theme.bodyFont, theme, 4096);
-                    preferred[column] = qMax(preferred[column], intrinsic->layout.maximumWidth() + 16);
+            const TableCacheKey tableKey{&node, theme.version};
+            auto tableIt = m_tableCache.find(tableKey);
+            if (tableIt == m_tableCache.end()) {
+                auto intrinsicData = std::make_shared<TableIntrinsicData>();
+                int columns = 0;
+                for (const auto& row : node.children) columns = qMax(columns, static_cast<int>(row->children.size()));
+                if (columns == 0) continue;
+                intrinsicData->columns = columns;
+                intrinsicData->preferredWidths.resize(columns, 64);
+
+                for (const auto& row : node.children) {
+                    const bool isHeader = row->attributes.tableHeader;
+                    const QFont cellFont = [&] {
+                        QFont font = theme.bodyFont;
+                        if (isHeader) font.setWeight(QFont::DemiBold);
+                        return font;
+                    }();
+
+                    QVector<std::shared_ptr<InlineLayout>> rowIntrinsicCells;
+                    for (int column = 0; column < row->children.size(); ++column) {
+                        auto cellIntrinsic = makeIntrinsicInline(*row->children.at(column), cellFont, theme);
+                        intrinsicData->preferredWidths[column] = qMax(
+                            intrinsicData->preferredWidths[column], cellIntrinsic->usedWidth + 16);
+                        rowIntrinsicCells.push_back(std::move(cellIntrinsic));
+                    }
+                    while (rowIntrinsicCells.size() < columns) {
+                        rowIntrinsicCells.push_back(plainInline({}, cellFont, theme, 64, false));
+                    }
+                    intrinsicData->intrinsicCells.push_back(std::move(rowIntrinsicCells));
+                    intrinsicData->headerRows.push_back(isHeader);
                 }
+                tableIt = m_tableCache.insert(tableKey, std::move(intrinsicData));
             }
+
+            const auto& intrinsic = *tableIt.value();
+            if (intrinsic.columns == 0) continue;
+
+            const qreal availableWidth = right - indent;
+            auto data = std::make_shared<TableLayoutData>();
+            data->columnWidths.resize(intrinsic.columns);
+            data->headerRows = intrinsic.headerRows;
+
             qreal preferredTotal = 0;
-            for (const qreal value : preferred) preferredTotal += value;
-            data->columnWidths.resize(columns);
+            for (const qreal value : intrinsic.preferredWidths) preferredTotal += value;
+
             if (preferredTotal <= availableWidth) {
-                const qreal extra = (availableWidth - preferredTotal) / columns;
-                for (int column = 0; column < columns; ++column) data->columnWidths[column] = preferred[column] + extra;
+                const qreal extra = (availableWidth - preferredTotal) / intrinsic.columns;
+                for (int column = 0; column < intrinsic.columns; ++column) {
+                    data->columnWidths[column] = intrinsic.preferredWidths[column] + extra;
+                }
             } else {
                 const qreal scale = availableWidth / preferredTotal;
-                for (int column = 0; column < columns; ++column) data->columnWidths[column] = qMax<qreal>(24, preferred[column] * scale);
-            }
-            qreal totalHeight = 0;
-            for (const auto& row : node.children) {
-                QVector<std::shared_ptr<InlineLayout>> cells; qreal rowHeight = 0;
-                const QFont cellFont = [&] { QFont font = theme.bodyFont; if (row->attributes.tableHeader) font.setWeight(QFont::DemiBold); return font; }();
-                for (int column = 0; column < row->children.size(); ++column) {
-                    auto value = makeInline(*row->children.at(column), cellFont, theme, data->columnWidths[column] - 16);
-                    rowHeight = qMax(rowHeight, value->height); cells.push_back(value);
+                for (int column = 0; column < intrinsic.columns; ++column) {
+                    data->columnWidths[column] = qMax<qreal>(24, intrinsic.preferredWidths[column] * scale);
                 }
-                while (cells.size() < columns) cells.push_back(plainInline({}, cellFont, theme, data->columnWidths[cells.size()] - 16));
-                data->cells.push_back(cells); data->rowHeights.push_back(rowHeight + 16); data->headerRows.push_back(row->attributes.tableHeader); totalHeight += rowHeight + 16;
             }
-            BlockLayout block; block.kind = BlockKind::Table; block.table = data; block.quoteIndent = quoteDepth * 18; block.documentTextOffset = textOffset++;
-            block.rect = QRectF(indent, y, right - indent, totalHeight); result.blocks.push_back(std::move(block)); y += totalHeight + theme.blockGap; continue;
+
+            qreal totalHeight = 0;
+            for (int row = 0; row < node.children.size(); ++row) {
+                const auto& rowNode = node.children.at(row);
+                const bool isHeader = intrinsic.headerRows.value(row);
+                const QFont cellFont = [&] {
+                    QFont font = theme.bodyFont;
+                    if (isHeader) font.setWeight(QFont::DemiBold);
+                    return font;
+                }();
+
+                QVector<std::shared_ptr<InlineLayout>> cells;
+                qreal rowHeight = 0;
+                for (int column = 0; column < rowNode->children.size(); ++column) {
+                    const qreal colInnerWidth = data->columnWidths[column] - 16;
+                    const auto& intrinsicCell = intrinsic.intrinsicCells[row][column];
+
+                    if (colInnerWidth >= intrinsicCell->usedWidth - 0.5) {
+                        ++m_metrics.tableCellFastPathHits;
+                        cells.push_back(intrinsicCell);
+                        rowHeight = qMax(rowHeight, intrinsicCell->height);
+                    } else {
+                        ++m_metrics.tableCellWrappedCount;
+                        auto value = makeInline(*rowNode->children.at(column), cellFont, theme, colInnerWidth);
+                        rowHeight = qMax(rowHeight, value->height);
+                        cells.push_back(std::move(value));
+                    }
+                }
+                while (cells.size() < intrinsic.columns) {
+                    cells.push_back(plainInline({}, cellFont, theme, data->columnWidths[cells.size()] - 16));
+                }
+                data->cells.push_back(std::move(cells));
+                data->rowHeights.push_back(rowHeight + 16);
+                totalHeight += rowHeight + 16;
+            }
+
+            BlockLayout block;
+            block.kind = BlockKind::Table;
+            block.table = data;
+            block.quoteIndent = quoteDepth * 18;
+            block.documentTextOffset = textOffset++;
+            block.rect = QRectF(indent, y, right - indent, totalHeight);
+            result.blocks.push_back(std::move(block));
+            y += totalHeight + theme.blockGap;
+            continue;
         }
         if (node.type == MarkdownNodeType::Paragraph && node.children.size() == 1 && node.children.front()->type == MarkdownNodeType::Image) {
             const MarkdownNode& imageNode = *node.children.front();
             BlockLayout block; block.kind = BlockKind::Image; block.imageUrl = imageNode.attributes.url;
-            block.imageAlt = makeInline(imageNode, theme.bodyFont, theme, right - indent)->text;
+            block.imageAlt = prepareCachedInline(imageNode, theme.bodyFont, theme).text;
             block.documentTextOffset = textOffset++;
             QSizeF intrinsic(360, 180);
             if (const auto imgIt = images.constFind(block.imageUrl); imgIt != images.constEnd() && !imgIt->isNull()) {
@@ -335,7 +498,8 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         BlockLayout block; block.kind = node.type == MarkdownNodeType::Heading ? BlockKind::Heading : (node.type == MarkdownNodeType::Html ? BlockKind::Html : (quoteDepth ? BlockKind::QuoteContent : BlockKind::Paragraph));
         block.quoteIndent = quoteDepth * 18; block.contentX = indent;
         const QFont font = node.type == MarkdownNodeType::Heading ? theme.headingFont(node.attributes.headingLevel) : theme.bodyFont;
-        block.inlineLayout = makeInline(node, font, theme, right - indent); block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
+        block.inlineLayout = layoutInline(prepareCachedInline(node, font, theme), right - indent);
+        block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
         const qreal top = node.type == MarkdownNodeType::Heading ? theme.blockGap * .65 : 0;
         block.rect = QRectF(indent, y + top, right - indent, block.inlineLayout->height); result.blocks.push_back(std::move(block)); y += top + result.blocks.back().rect.height() + theme.blockGap;
     }
@@ -344,6 +508,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
 DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qreal width, const MarkdownTheme& theme,
                                             const QHash<QString, QImage>& images) const
 {
+    QElapsedTimer timer; timer.start();
     DocumentLayout result; result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
     appendNodes(document.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
@@ -361,6 +526,8 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
     const qreal emptyWidth = theme.contentMargins.left() + theme.contentMargins.right();
     const qreal usedWidth = maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : qMin(result.width, emptyWidth);
     result.size = QSizeF(usedWidth, totalHeight);
+    m_metrics.lastLayoutUs = timer.nsecsElapsed() / 1000;
+    ++m_metrics.totalLayouts;
     return result;
 }
 
@@ -368,6 +535,7 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
                                             qreal width, const MarkdownTheme& theme,
                                             const QHash<QString, QImage>& images) const
 {
+    QElapsedTimer timer; timer.start();
     DocumentLayout result; result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
     qreal y = theme.contentMargins.top();
     appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images);
@@ -386,6 +554,8 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
     const qreal emptyWidth = theme.contentMargins.left() + theme.contentMargins.right();
     const qreal usedWidth = maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : qMin(result.width, emptyWidth);
     result.size = QSizeF(usedWidth, totalHeight);
+    m_metrics.lastLayoutUs = timer.nsecsElapsed() / 1000;
+    ++m_metrics.totalLayouts;
     return result;
 }
 

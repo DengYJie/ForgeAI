@@ -63,6 +63,7 @@ private slots:
     void inlineCodeSelectionPaintsSelectionBackground();
     void headingThemeColorIsApplied();
     void linkHoverHighlightIsApplied();
+    void coldLayoutCachesWidthInvariantsAndFastPaths();
     void visualTest();
 };
 
@@ -571,6 +572,53 @@ void MarkdownCoreTests::linkHoverHighlightIsApplied()
     p2.end();
 
     QVERIFY(normal != hovered);
+}
+
+void MarkdownCoreTests::coldLayoutCachesWidthInvariantsAndFastPaths()
+{
+    MarkdownParser parser;
+    const MarkdownDocument document = parser.parse(QStringLiteral(
+        "# Heading 1\n\n"
+        "Short paragraph that fits without wrapping.\n\n"
+        "```cpp\n"
+        "int calculateHeight(int width) {\n"
+        "    return width * 2;\n"
+        "}\n"
+        "```\n\n"
+        "| Header A | Header B |\n"
+        "|---|---|\n"
+        "| Cell 1 | Cell 2 |\n"
+        "| Cell 3 | Cell 4 |\n"
+    ));
+    const MarkdownTheme theme = MarkdownTheme::light();
+    MarkdownLayoutEngine engine;
+
+    // Pass 1: Cold width 800
+    const DocumentLayout l1 = engine.layout(document, 800, theme);
+    QVERIFY(!l1.blocks.isEmpty());
+    const auto m1 = engine.metrics();
+    QCOMPARE(m1.totalLayouts, 1ULL);
+    QCOMPARE(m1.codeBlockCacheMisses, 1ULL);
+    QCOMPARE(m1.codeBlockCacheHits, 0ULL);
+    QVERIFY(m1.intrinsicFastPathHits > 0);
+
+    // Pass 2: Cold width 750 (never seen before)
+    const DocumentLayout l2 = engine.layout(document, 750, theme);
+    QVERIFY(!l2.blocks.isEmpty());
+    const auto m2 = engine.metrics();
+    QCOMPARE(m2.totalLayouts, 2ULL);
+    QCOMPARE(m2.codeBlockCacheMisses, 1ULL); // Miss count must NOT increase!
+    QCOMPARE(m2.codeBlockCacheHits, 1ULL);   // Code block MUST hit cache!
+    QVERIFY(m2.tableCellFastPathHits >= 4);   // Table cells must hit fast path!
+    QVERIFY(m2.intrinsicFastPathHits > m1.intrinsicFastPathHits); // Headings/short paragraphs hit fast path!
+
+    // Pass 3: Cold width 700 (never seen before)
+    const DocumentLayout l3 = engine.layout(document, 700, theme);
+    QVERIFY(!l3.blocks.isEmpty());
+    const auto m3 = engine.metrics();
+    QCOMPARE(m3.totalLayouts, 3ULL);
+    QCOMPARE(m3.codeBlockCacheMisses, 1ULL);
+    QCOMPARE(m3.codeBlockCacheHits, 2ULL);
 }
 
 namespace {

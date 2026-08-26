@@ -55,6 +55,7 @@ void MarkdownDocumentLayout::insertCachedLayout(qreal width, ui::markdown::Docum
 void MarkdownDocumentLayout::invalidateLayoutCache()
 {
     m_layoutCacheList.clear();
+    m_engine.clearCache();
 }
 
 void MarkdownDocumentLayout::setWidth(qreal width)
