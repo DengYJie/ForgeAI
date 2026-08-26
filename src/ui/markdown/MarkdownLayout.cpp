@@ -341,7 +341,9 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
     const qreal totalHeight = result.blocks.isEmpty()
         ? (theme.contentMargins.top() + theme.contentMargins.bottom())
         : (result.blocks.back().rect.bottom() + theme.contentMargins.bottom());
-    result.size = QSizeF(maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : result.width, totalHeight);
+    const qreal emptyWidth = theme.contentMargins.left() + theme.contentMargins.right();
+    const qreal usedWidth = maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : qMin(result.width, emptyWidth);
+    result.size = QSizeF(usedWidth, totalHeight);
     return result;
 }
 
@@ -364,7 +366,9 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
     const qreal totalHeight = result.blocks.isEmpty()
         ? (theme.contentMargins.top() + theme.contentMargins.bottom())
         : (result.blocks.back().rect.bottom() + theme.contentMargins.bottom());
-    result.size = QSizeF(maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : result.width, totalHeight);
+    const qreal emptyWidth = theme.contentMargins.left() + theme.contentMargins.right();
+    const qreal usedWidth = maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : qMin(result.width, emptyWidth);
+    result.size = QSizeF(usedWidth, totalHeight);
     return result;
 }
 
