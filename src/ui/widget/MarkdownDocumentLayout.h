@@ -51,7 +51,7 @@ private:
     void onDocumentRebuilt();
     void onStableDocumentAppended();
     void onTailDocumentChanged();
-    void onStreamingStarted();
+    void onStreamingChanged(bool streaming);
     void relayout();
 
     MarkdownDocumentController* m_controller;

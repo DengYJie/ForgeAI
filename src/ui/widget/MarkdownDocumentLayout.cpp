@@ -15,6 +15,8 @@ MarkdownDocumentLayout::MarkdownDocumentLayout(MarkdownDocumentController* contr
             this, &MarkdownDocumentLayout::onStableDocumentAppended);
     connect(controller, &MarkdownDocumentController::tailDocumentChanged,
             this, &MarkdownDocumentLayout::onTailDocumentChanged);
+    connect(controller, &MarkdownDocumentController::streamingChanged,
+            this, &MarkdownDocumentLayout::onStreamingChanged);
 }
 
 ui::markdown::DocumentLayoutPtr MarkdownDocumentLayout::findCachedLayout(qreal width) const
@@ -192,7 +194,10 @@ MarkdownDocumentLayoutMetrics MarkdownDocumentLayout::metrics() const
 
 void MarkdownDocumentLayout::onDocumentRebuilt()
 {
+    m_stableLayout = nullptr;
     m_stableLayoutDirty = true;
+    m_stableLayoutWidth = -1;
+    m_stableLayoutThemeVersion = 0;
     invalidateLayoutCache();
     relayout();
 }
@@ -201,6 +206,19 @@ void MarkdownDocumentLayout::onStableDocumentAppended()
 {
     m_stableLayoutDirty = true;
     m_layoutCacheList.clear();
+}
+
+void MarkdownDocumentLayout::onStreamingChanged(bool streaming)
+{
+    if (streaming) {
+        m_stableLayout = nullptr;
+        m_stableLayoutDirty = true;
+        m_stableLayoutWidth = -1;
+        m_stableLayoutThemeVersion = 0;
+        m_currentLayout = std::make_shared<ui::markdown::DocumentLayout>();
+        m_layoutCacheList.clear();
+        emit layoutReady(m_currentLayout);
+    }
 }
 
 void MarkdownDocumentLayout::onTailDocumentChanged()
@@ -228,7 +246,7 @@ void MarkdownDocumentLayout::relayout()
         return;
     }
 
-    if (m_stableLayoutDirty || !qFuzzyCompare(m_stableLayoutWidth, m_width) || m_stableLayoutThemeVersion != m_theme.version) {
+    if (!m_stableLayout || m_stableLayoutDirty || !qFuzzyCompare(m_stableLayoutWidth, m_width) || m_stableLayoutThemeVersion != m_theme.version) {
         QElapsedTimer t; t.start();
         m_stableLayout = std::make_shared<ui::markdown::DocumentLayout>(
             m_engine.layout(m_controller->stableDocument(), m_width, m_theme, images));
@@ -245,7 +263,9 @@ void MarkdownDocumentLayout::relayout()
     ++m_metrics.tailLayoutCount;
 
     auto layout = std::make_shared<ui::markdown::DocumentLayout>(*m_stableLayout);
-    const qreal yOffset = m_stableLayout ? (m_stableLayout->size.height() - m_theme.contentMargins.bottom() - m_theme.contentMargins.top()) : 0;
+    const qreal yOffset = (m_stableLayout && !m_stableLayout->blocks.isEmpty())
+        ? (m_stableLayout->blocks.back().rect.bottom() + m_theme.blockGap - m_theme.contentMargins.top())
+        : 0;
     const int textOffset = m_stableLayout ? m_stableLayout->textLength() : 0;
     for (ui::markdown::BlockLayout block : tail.blocks) {
         block.rect.translate(0, yOffset);
@@ -253,7 +273,11 @@ void MarkdownDocumentLayout::relayout()
         block.documentTextOffset += textOffset;
         layout->blocks.push_back(std::move(block));
     }
-    layout->size = QSizeF(m_width, yOffset + tail.size.height());
+    const qreal totalHeight = layout->blocks.isEmpty()
+        ? (m_theme.contentMargins.top() + m_theme.contentMargins.bottom())
+        : (layout->blocks.back().rect.bottom() + m_theme.contentMargins.bottom());
+    const qreal emptyWidth = m_theme.contentMargins.left() + m_theme.contentMargins.right();
+    layout->size = QSizeF(qMax(m_width, emptyWidth), totalHeight);
     layout->width = m_width;
     layout->themeVersion = m_theme.version;
 

@@ -95,8 +95,16 @@ void MarkdownView::clear() { setMarkdown({}); }
 void MarkdownView::beginStream()
 {
     m_metrics = {};
+    m_documentLayout = std::make_shared<ui::markdown::DocumentLayout>();
+    m_preferredContentSize = QSizeF();
+    m_preferredSizeDirty = true;
+    m_lastAutoFitHeight = 0;
+    if (verticalScrollBar()) {
+        verticalScrollBar()->setValue(0);
+    }
     m_controller->beginStream();
     updateAutoFitHeight();
+    viewport()->update();
 }
 
 void MarkdownView::appendMarkdown(const QString &chunk) { m_controller->appendMarkdown(chunk); }
