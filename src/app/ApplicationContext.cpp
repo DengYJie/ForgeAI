@@ -110,7 +110,6 @@ namespace app {
         // 2.5 Agent 运行时与 UseCases 初始化
         m_agentRuntime = std::make_unique<agent::runtime::AgentRuntime>(
             m_chatGateway.get(),
-            m_conversationService.get(),
             m_toolRegistry.get(),
             m_agentCheckpointRepo.get(),
             m_processTaskRuntime
@@ -124,7 +123,8 @@ namespace app {
             m_projectContextService.get(),
             m_mcpProjectRuntimeCoordinator.get(),
             m_agentRepo.get(),
-            m_skillRegistry.get()
+            m_skillRegistry.get(),
+            m_conversationService.get()
         );
         m_cancelAgentRunUseCase = std::make_unique<application::usecase::agent::CancelAgentRunUseCase>(
             m_agentRuntime.get()

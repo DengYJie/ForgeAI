@@ -13,6 +13,7 @@ namespace llm::protocol::openai_responses {
         m_currentEventType.clear();
         m_indexToTool.clear();
         m_itemIdToCallId.clear();
+        m_finishedToolCallIds.clear();
         m_currentCallId.clear();
         m_hasFinished = false;
         m_isFinished = false;
@@ -134,19 +135,7 @@ namespace llm::protocol::openai_responses {
                 events.append(domain::llm::EventToolCallDelta{callId, delta});
             }
         } else if (type == "response.function_call_arguments.done") {
-            QString itemId = obj.value("item_id").toString();
-            int outputIndex = obj.value("output_index").toInt(-1);
-            QString callId;
-            if (m_itemIdToCallId.contains(itemId)) {
-                callId = m_itemIdToCallId.value(itemId);
-            } else if (outputIndex >= 0 && m_indexToTool.contains(outputIndex)) {
-                callId = m_indexToTool.value(outputIndex).callId;
-            } else {
-                callId = m_currentCallId;
-            }
-            if (!callId.isEmpty()) {
-                events.append(domain::llm::EventToolCallFinished{callId});
-            }
+            // 参数字符串流结束，无需重复发送 EventToolCallFinished，由随后的 output_item.done 统一触发
         } else if (type == "response.output_item.done") {
             if (obj.contains("item") && obj.value("item").isObject()) {
                 QJsonObject itemObj = obj.value("item").toObject();
@@ -157,7 +146,8 @@ namespace llm::protocol::openai_responses {
                         callId = m_itemIdToCallId.value(itemId);
                     }
                     if (callId.isEmpty()) callId = m_currentCallId;
-                    if (!callId.isEmpty()) {
+                    if (!callId.isEmpty() && !m_finishedToolCallIds.contains(callId)) {
+                        m_finishedToolCallIds.insert(callId);
                         events.append(domain::llm::EventToolCallFinished{callId});
                     }
                 }

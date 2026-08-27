@@ -115,7 +115,7 @@ void AbstractToolBlockWidget::updateHeader()
 
     m_expander->setLeadingIcon(icon);
     m_expander->setTitle(title);
-    m_expander->setSubtitle(m_status == Status::Running ? QStringLiteral("· ⏳") : (m_status == Status::Error ? QStringLiteral("· ✕") : QString{}));
+    m_expander->setSubtitle(m_status == Status::Running ? QStringLiteral("· 运行中") : (m_status == Status::Error ? QStringLiteral("· 失败") : QString{}));
     m_expander->setChevronPosition(FlatExpander::ChevronPosition::InlineRight);
     m_expander->setHeaderCompact(true);
 }

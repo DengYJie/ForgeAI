@@ -159,7 +159,7 @@ void WorkIntegrationTests::testAgentRuntimeExecutesBuiltinTools() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_test_exec");
@@ -220,7 +220,7 @@ void WorkIntegrationTests::testAgentRuntimePermissionAskUserAndGrant() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_test_perm");
@@ -287,7 +287,7 @@ void WorkIntegrationTests::testAgentRuntimeSuspendAndResume() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_test_suspend");
@@ -369,7 +369,7 @@ void WorkIntegrationTests::testWorkViewModelUdfProjection() {
     auto toolRegistry = std::make_unique<agent::tool::ToolRegistry>();
     toolRegistry->registerProvider(builtinProvider);
 
-    auto runtime = std::make_unique<agent::runtime::AgentRuntime>(&mockGateway, nullptr, toolRegistry.get());
+    auto runtime = std::make_unique<agent::runtime::AgentRuntime>(&mockGateway, toolRegistry.get());
 
     // 构造模拟 ModelService
     auto modelRepo = std::make_shared<data::repository::SqliteModelRepository>();
@@ -469,7 +469,7 @@ void WorkIntegrationTests::testAgentRuntimeStateRealtimeSynchronization() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_state_sync");
@@ -529,7 +529,7 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
 
     // 实例 1 启动运行直至暂停并写入快照
     {
-        agent::runtime::AgentRuntime runtime1(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+        agent::runtime::AgentRuntime runtime1(&mockGateway, &toolRegistry, &cpRepo);
         bool paused = false;
         QEventLoop loop1;
         connect(&runtime1, &agent::runtime::AgentRuntime::permissionRequested, [&](const QString&, const domain::agent::ToolCall&, const domain::agent::ToolPermission&) {
@@ -559,7 +559,7 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
-    agent::runtime::AgentRuntime runtime2(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime2(&mockGateway, &toolRegistry, &cpRepo);
 
     bool permRequested2 = false;
     QString pendingCallId2;
@@ -619,7 +619,7 @@ void WorkIntegrationTests::testAgentRuntimeMaxToolRoundsStrictLimit() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_max_rounds");
@@ -667,7 +667,7 @@ void WorkIntegrationTests::testAgentRuntimeEnforcesEnabledToolsFiltering() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_filter_tools");
@@ -747,7 +747,7 @@ void WorkIntegrationTests::testAgentRuntimeParallelToolExecution() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_parallel");
@@ -792,7 +792,7 @@ void WorkIntegrationTests::testAgentRuntimeTimeoutWatchdog() {
     toolRegistry.registerProvider(builtinProvider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_timeout");
@@ -957,7 +957,7 @@ void WorkIntegrationTests::testAgentRuntimeConcurrentMcpToolCallsSafety() {
     toolRegistry.registerProvider(provider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_mcp_concurrency");
@@ -1012,7 +1012,7 @@ void WorkIntegrationTests::testAgentRuntimeToolExecutionTimeoutProtection() {
     toolRegistry.registerProvider(provider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_tool_timeout");
@@ -1068,7 +1068,7 @@ void WorkIntegrationTests::testAgentRuntimeSingleSlowToolTimeoutProtection() {
     toolRegistry.registerProvider(provider);
 
     data::repository::SqliteAgentCheckpointRepository cpRepo;
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, &cpRepo);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_single_slow_tool");
@@ -1150,7 +1150,7 @@ void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
     agent::tool::ToolRegistry toolRegistry;
     toolRegistry.registerProvider(provider);
 
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, nullptr);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, nullptr);
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_cancel_test");
     context.workspaceRoot = m_tempDir.path();
@@ -1243,7 +1243,7 @@ void WorkIntegrationTests::testAgentRuntimeUncooperativeToolRuntimeDestructionSa
     context.policy.allowParallelToolExecution = true;
 
     // 使用堆分配，以便于随时 delete
-    auto* runtime = new agent::runtime::AgentRuntime(&mockGateway, nullptr, &toolRegistry, nullptr);
+    auto* runtime = new agent::runtime::AgentRuntime(&mockGateway, &toolRegistry, nullptr);
 
     QEventLoop loop;
     connect(runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult&) {
@@ -1302,7 +1302,7 @@ void WorkIntegrationTests::testAgentRuntimeImmediateToolCheckpointRecovery() {
 
     // 实例 1：执行第一个工具后立即模拟崩溃销毁
     {
-        auto* runtime1 = new agent::runtime::AgentRuntime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+        auto* runtime1 = new agent::runtime::AgentRuntime(&mockGateway, &toolRegistry, &cpRepo);
         QEventLoop loop1;
         int toolResultsReceived = 0;
         connect(runtime1, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
@@ -1330,7 +1330,7 @@ void WorkIntegrationTests::testAgentRuntimeImmediateToolCheckpointRecovery() {
 
     // 实例 2：模拟应用重启恢复
     {
-        agent::runtime::AgentRuntime runtime2(&mockGateway, nullptr, &toolRegistry, &cpRepo);
+        agent::runtime::AgentRuntime runtime2(&mockGateway, &toolRegistry, &cpRepo);
         bool completed = false;
         QList<QString> executedToolIds;
         QEventLoop loop2;
@@ -1391,7 +1391,7 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeRunApproval() {
     agent::tool::ToolRegistry toolRegistry;
     toolRegistry.registerProvider(builtinProvider);
 
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, nullptr);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, nullptr);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_perm_scope_test");
@@ -1467,7 +1467,7 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeProjectAndGlobalApprov
     agent::tool::ToolRegistry toolRegistry;
     toolRegistry.registerProvider(builtinProvider);
 
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, nullptr);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, nullptr);
 
     const QUuid projectAId = QUuid::createUuid();
 
@@ -1573,7 +1573,7 @@ void WorkIntegrationTests::testAgentRuntimeToolOutputTruncation() {
     agent::tool::ToolRegistry toolRegistry;
     toolRegistry.registerProvider(provider);
 
-    agent::runtime::AgentRuntime runtime(&mockGateway, nullptr, &toolRegistry, nullptr);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, nullptr);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_truncation_test");
@@ -1672,11 +1672,7 @@ void WorkIntegrationTests::testAgentRuntimeParallelResultOrderPreservation() {
     agent::tool::ToolRegistry toolRegistry;
     toolRegistry.registerProvider(provider);
 
-    auto convRepo = std::make_unique<data::repository::SqliteConversationRepository>();
-    auto transcriptRepo = std::make_unique<data::repository::JsonlMessageRepository>(m_tempDir.path());
-    services::conversation::ConversationService convService(convRepo.get(), transcriptRepo.get());
-
-    agent::runtime::AgentRuntime runtime(&mockGateway, &convService, &toolRegistry, nullptr);
+    agent::runtime::AgentRuntime runtime(&mockGateway, &toolRegistry, nullptr);
 
     agent::runtime::AgentRunContext context;
     context.sessionId = QStringLiteral("sess_order_test");

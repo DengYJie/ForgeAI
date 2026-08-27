@@ -142,13 +142,13 @@ namespace llm::protocol::openai {
 
         if (choice.contains("finish_reason") && !choice.value("finish_reason").isNull()) {
             const QString reason = choice.value("finish_reason").toString();
-            for (const auto& state : m_toolCalls) {
-                if (!state.id.isEmpty()) {
-                    events.append(domain::llm::EventToolCallFinished{state.id});
-                }
-            }
             if (!m_hasFinished) {
                 m_hasFinished = true;
+                for (const auto& state : m_toolCalls) {
+                    if (!state.id.isEmpty()) {
+                        events.append(domain::llm::EventToolCallFinished{state.id});
+                    }
+                }
                 events.append(domain::llm::EventFinished{reason});
             }
         }

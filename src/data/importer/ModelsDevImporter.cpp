@@ -282,6 +282,7 @@ namespace data::importer {
                 const QString &cId = *binding.canonicalModelId;
                 if (!result.canonicalModels.contains(cId)) {
                     result.unresolvedBindingsCount++;
+                    binding.canonicalModelId = std::nullopt;
                 }
             }
         }

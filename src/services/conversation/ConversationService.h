@@ -24,7 +24,7 @@ namespace services::conversation {
 
         ~ConversationService() override = default;
 
-        QList<ui::screen::chat::ChatSessionItemData> loadSessions() override;
+        QList<ui::screen::chat::ChatSessionItemData> loadSessions(const std::optional<QUuid>& projectId = std::nullopt) override;
 
         QList<domain::conversation::Message> loadMessages(const QString &sessionId) override;
 

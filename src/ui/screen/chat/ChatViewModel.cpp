@@ -69,6 +69,7 @@ namespace ui::screen::chat {
                 s.sessions = m_useCases.loadSessions->execute();
                 s.sessions.erase(std::remove_if(s.sessions.begin(), s.sessions.end(),
                     [](const ChatSessionItemData& session) { return session.projectId.has_value(); }), s.sessions.end());
+                qInfo().noquote() << QStringLiteral("[ChatViewModel] Initialized with %1 pure chat sessions").arg(s.sessions.size());
             }
             if (!s.sessions.isEmpty()) {
                 s.currentSessionId = s.sessions.first().id;

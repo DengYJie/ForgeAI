@@ -319,7 +319,7 @@ namespace data::repository {
             "  is_custom INTEGER DEFAULT 0,"
             "  origin TEXT DEFAULT 'BuiltIn',"
             "  PRIMARY KEY (provider_id, remote_model_id),"
-            "  FOREIGN KEY (canonical_model_id) REFERENCES canonical_models(id) ON DELETE SET NULL"
+            "  FOREIGN KEY (canonical_model_id) REFERENCES preset_canonical_models(id) ON DELETE SET NULL"
             ");"
         ), db);
 

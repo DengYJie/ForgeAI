@@ -6,6 +6,7 @@
 #include <QFileInfoList>
 #include <QSet>
 #include <QUuid>
+#include <QDebug>
 
 namespace services::conversation {
     namespace {
@@ -27,24 +28,46 @@ namespace services::conversation {
     ) : IConversationService(parent), m_conversationRepo(conversationRepo), m_transcriptRepo(transcriptRepo) {
     }
 
-    QList<ui::screen::chat::ChatSessionItemData> ConversationService::loadSessions() {
+    QList<ui::screen::chat::ChatSessionItemData> ConversationService::loadSessions(const std::optional<QUuid>& projectId) {
         QList<ui::screen::chat::ChatSessionItemData> list;
         if (m_conversationRepo) {
-            for (const auto& conversation : m_conversationRepo->getAllConversations()) {
+            const auto allConvs = m_conversationRepo->getAllConversations();
+            for (const auto& conversation : allConvs) {
+                // 严格进行项目归属隔离过滤：
+                // 若指定了 projectId，仅返回归属于该项目的会话；
+                // 若未指定 projectId（即常规 Chat 页面），仅返回无 projectId 的普通全局对话！
+                if (projectId.has_value()) {
+                    if (!conversation.projectId.has_value() || *conversation.projectId != *projectId) {
+                        continue;
+                    }
+                } else {
+                    if (conversation.projectId.has_value()) {
+                        continue;
+                    }
+                }
+
                 auto session = makeSession(conversation.id.toString(), conversation.title, conversation.isPinned, conversation.isArchived);
                 session.projectId = conversation.projectId;
                 session.timestamp = conversation.updatedAt.toMSecsSinceEpoch();
                 list.append(std::move(session));
             }
-            // The initial ViewModel can be created before SQLite opens. Recover
-            // transcripts created in that window instead of silently losing them.
-            if (m_transcriptRepo) {
+
+            qInfo().noquote() << QStringLiteral("[ConversationService] loadSessions -> filter projectId: %1, total in repo: %2, filtered: %3")
+                .arg(projectId.has_value() ? projectId->toString() : QStringLiteral("None (Global Chat)"),
+                     QString::number(allConvs.size()), QString::number(list.size()));
+
+            // 仅对无 projectId 的普通对话执行未持久化转录文件的容灾恢复
+            if (m_transcriptRepo && !projectId.has_value()) {
                 QSet<QString> knownIds;
-                for (const auto& session : list) knownIds.insert(session.id);
+                for (const auto& conversation : allConvs) {
+                    knownIds.insert(conversation.id.toString());
+                    knownIds.insert(conversation.id.toString(QUuid::WithoutBraces));
+                }
                 const QDir sessionDir(QDir::homePath() + QStringLiteral("/.forgeai/sessions"));
                 for (const QFileInfo& file : sessionDir.entryInfoList({QStringLiteral("*.jsonl")}, QDir::Files)) {
-                    const QUuid id(file.completeBaseName());
-                    if (id.isNull() || knownIds.contains(id.toString())) continue;
+                    const QString baseName = file.completeBaseName();
+                    const QUuid id = QUuid::fromString(baseName);
+                    if (id.isNull() || knownIds.contains(id.toString()) || knownIds.contains(id.toString(QUuid::WithoutBraces))) continue;
                     const auto messages = m_transcriptRepo->getMessagesByConversationId(id);
                     QString title = QStringLiteral("新对话");
                     for (const auto& message : messages) {
@@ -61,19 +84,9 @@ namespace services::conversation {
                     conversation.updatedAt = QDateTime::fromMSecsSinceEpoch(file.lastModified().toMSecsSinceEpoch());
                     m_conversationRepo->saveConversation(conversation);
                     list.append(makeSession(id.toString(), title));
+                    qInfo().noquote() << QStringLiteral("[ConversationService] Recovered untracked transcript: %1 (%2)").arg(id.toString(), title);
                 }
             }
-        }
-        if (!list.isEmpty()) return list;
-        const QString id = QUuid::createUuid().toString();
-        list.append(makeSession(id, QStringLiteral("新对话")));
-        if (m_conversationRepo) {
-            domain::conversation::Conversation conversation;
-            conversation.id = QUuid(id);
-            conversation.title = QStringLiteral("新对话");
-            conversation.createdAt = QDateTime::currentDateTime();
-            conversation.updatedAt = conversation.createdAt;
-            m_conversationRepo->saveConversation(conversation);
         }
         return list;
     }
@@ -90,19 +103,28 @@ namespace services::conversation {
 
     void ConversationService::saveMessages(const QString &sessionId, const QList<domain::conversation::Message> &messages) {
         m_memoryMessages[sessionId] = messages;
+        const QUuid id = QUuid::fromString(sessionId);
         if (m_transcriptRepo) {
-            const QUuid id(sessionId);
             m_transcriptRepo->deleteTranscript(id);
             for (const auto& message : messages) m_transcriptRepo->appendMessage(id, message);
         }
         if (m_conversationRepo) {
-            const auto conversation = m_conversationRepo->getConversation(QUuid(sessionId));
+            const auto conversation = m_conversationRepo->getConversation(id);
             auto updated = conversation.value_or(domain::conversation::Conversation{});
-            updated.id = QUuid(sessionId);
+            updated.id = id;
+            if (conversation.has_value()) {
+                updated.projectId = conversation->projectId;
+                updated.agentId = conversation->agentId;
+                if (!conversation->title.isEmpty()) updated.title = conversation->title;
+            }
             if (updated.title.isEmpty()) updated.title = QStringLiteral("新对话");
             if (!updated.createdAt.isValid()) updated.createdAt = QDateTime::currentDateTime();
             updated.updatedAt = QDateTime::currentDateTime();
             m_conversationRepo->saveConversation(updated);
+
+            qInfo().noquote() << QStringLiteral("[ConversationService] saveMessages -> sessionId: %1, messages: %2, projectId: %3, title: %4")
+                .arg(sessionId, QString::number(messages.size()),
+                     updated.projectId.has_value() ? updated.projectId->toString() : QStringLiteral("None"), updated.title);
         }
     }
 

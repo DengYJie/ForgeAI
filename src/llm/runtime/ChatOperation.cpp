@@ -132,6 +132,7 @@ namespace llm::runtime {
         auto httpReq = m_adapter->buildChatRequest(m_model, m_request, options);
         httpReq.timeoutMs = m_timeoutPolicy.connectTimeoutMs;
 
+        m_finishedEventEmitted = false;
         m_currentParser = m_adapter->createStreamParser();
         m_currentHttpOp = m_httpClient->send(httpReq);
 
@@ -208,11 +209,13 @@ namespace llm::runtime {
                         m_idleTimer->start(m_timeoutPolicy.idleTimeoutMs);
                     }
                 } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
+                    m_finishedEventEmitted = true;
                     core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("Finish reason received"), QMap<QString, QString>{
                         {QStringLiteral("req"), m_metrics.requestId},
                         {QStringLiteral("reason"), arg.finishReason}
                     });
                 } else if constexpr (std::is_same_v<T, domain::llm::EventError>) {
+                    m_finishedEventEmitted = true;
                     core::logging::LoggingService::instance().warning(core::logging::Category::LlmRequest, QStringLiteral("Stream error event"), QMap<QString, QString>{
                         {QStringLiteral("req"), m_metrics.requestId},
                         {QStringLiteral("error"), arg.error.message}
@@ -232,6 +235,12 @@ namespace llm::runtime {
         if (m_currentParser) {
             auto events = m_currentParser->finish();
             for (const auto &evt : events) {
+                std::visit([this](const auto &arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, domain::llm::EventFinished> || std::is_same_v<T, domain::llm::EventError>) {
+                        m_finishedEventEmitted = true;
+                    }
+                }, evt);
                 emit eventReceived(evt);
             }
         }
@@ -456,9 +465,15 @@ namespace llm::runtime {
         }
 
         if (error.has_value()) {
-            emit eventReceived(domain::llm::EventError{*error});
+            if (!m_finishedEventEmitted) {
+                m_finishedEventEmitted = true;
+                emit eventReceived(domain::llm::EventError{*error});
+            }
         } else if (finalState == RequestState::Completed) {
-            emit eventReceived(domain::llm::EventFinished{"stop"});
+            if (!m_finishedEventEmitted) {
+                m_finishedEventEmitted = true;
+                emit eventReceived(domain::llm::EventFinished{"stop"});
+            }
         }
     }
 

@@ -2,7 +2,6 @@
 
 #include "application/ports/IAgentRuntime.h"
 #include "application/ports/IChatModelGateway.h"
-#include "domain/service/IConversationService.h"
 #include "domain/repository/IAgentCheckpointRepository.h"
 #include "domain/agent/ToolPermission.h"
 #include "agent/runtime/AgentRunContext.h"
@@ -25,23 +24,20 @@ namespace agent::runtime {
     public:
         explicit AgentRuntime(
             application::ports::IChatModelGateway* chatGateway,
-            domain::service::IConversationService* conversationService,
-            agent::tool::ToolRegistry* toolRegistry,
-            domain::repository::IAgentCheckpointRepository* checkpointRepo,
-            QObject* parent
-        );
-
-        explicit AgentRuntime(
-            application::ports::IChatModelGateway* chatGateway,
-            domain::service::IConversationService* conversationService,
             agent::tool::ToolRegistry* toolRegistry,
             domain::repository::IAgentCheckpointRepository* checkpointRepo = nullptr,
             std::shared_ptr<application::ports::IProcessTaskRuntime> taskRuntime = nullptr,
             QObject* parent = nullptr
         );
+
         ~AgentRuntime() override;
 
-        void startRun(const AgentRunContext& context, const QString& prompt) override;
+        void startRun(
+            const AgentRunContext& context,
+            const QString& prompt,
+            const QList<domain::conversation::Message>& history = {}
+        ) override;
+
         void cancelRun() override;
         void suspendRun() override;
         void resumeRun(const AgentRunContext& context) override;
@@ -66,7 +62,7 @@ namespace agent::runtime {
         void handleModelStreamFinished();
         domain::llm::ChatRequest buildChatRequest(const QList<domain::conversation::Message>& history) const;
         domain::conversation::Message makeAssistantMessage() const;
-        void saveMessage(const domain::conversation::Message& message);
+        void updateAssistantMessageInHistory(const domain::conversation::Message& message);
         void cleanupCurrentOp();
         void saveCheckpoint();
         void processExecutableToolCalls();
@@ -75,7 +71,6 @@ namespace agent::runtime {
         void finishToolExecutionRound();
 
         application::ports::IChatModelGateway* m_chatGateway = nullptr;
-        domain::service::IConversationService* m_conversationService = nullptr;
         agent::tool::ToolRegistry* m_toolRegistry = nullptr;
         domain::repository::IAgentCheckpointRepository* m_checkpointRepo = nullptr;
 
@@ -87,6 +82,8 @@ namespace agent::runtime {
         QString m_replyBuffer;
         QString m_thoughtBuffer;
         QUuid m_currentAssistantMessageId;
+        QList<domain::conversation::MessageBlock> m_accumulatedBlocks;
+        QList<domain::conversation::Message> m_history;
         QList<QString> m_toolCallOrder;
         QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
         QList<domain::agent::ToolResult> m_pendingToolResults;
@@ -99,7 +96,6 @@ namespace agent::runtime {
         QSet<QString> m_globalApprovedCommands;
         QList<QList<domain::agent::ToolCall>> m_pendingBatches;
         std::vector<std::unique_ptr<application::ports::IToolOperation>> m_activeOperations;
-        QHash<QString, QList<domain::conversation::Message>> m_transientHistories;
 
         application::ports::CancellationToken m_runCancellationToken;
         std::shared_ptr<application::ports::IProcessTaskRuntime> m_taskRuntime;

@@ -23,7 +23,11 @@ namespace application::ports {
         /**
          * @brief 启动 Agent 执行循环
          */
-        virtual void startRun(const agent::runtime::AgentRunContext& context, const QString& prompt) = 0;
+        virtual void startRun(
+            const agent::runtime::AgentRunContext& context,
+            const QString& prompt,
+            const QList<domain::conversation::Message>& history = {}
+        ) = 0;
 
         /**
          * @brief 取消当前运行中的任务

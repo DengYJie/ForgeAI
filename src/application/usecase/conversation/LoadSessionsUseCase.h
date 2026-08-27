@@ -25,10 +25,10 @@ namespace application::usecase::conversation {
         ~LoadSessionsUseCase() override = default;
 
         /**
-         * @brief 执行拉取全量会话列表
+         * @brief 执行拉取会话列表（可按项目 ID 隔离，默认仅加载全局普通对话）
          * @return 会话元数据列表
          */
-        QList<ui::screen::chat::ChatSessionItemData> execute();
+        QList<ui::screen::chat::ChatSessionItemData> execute(const std::optional<QUuid>& projectId = std::nullopt);
 
     private:
         domain::service::IConversationService *m_conversationService = nullptr;

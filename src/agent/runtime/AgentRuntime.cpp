@@ -16,23 +16,12 @@ namespace agent::runtime {
 
     AgentRuntime::AgentRuntime(
         application::ports::IChatModelGateway* chatGateway,
-        domain::service::IConversationService* conversationService,
-        agent::tool::ToolRegistry* toolRegistry,
-        domain::repository::IAgentCheckpointRepository* checkpointRepo,
-        QObject* parent
-    ) : AgentRuntime(chatGateway, conversationService, toolRegistry, checkpointRepo, nullptr, parent) {
-    }
-
-    AgentRuntime::AgentRuntime(
-        application::ports::IChatModelGateway* chatGateway,
-        domain::service::IConversationService* conversationService,
         agent::tool::ToolRegistry* toolRegistry,
         domain::repository::IAgentCheckpointRepository* checkpointRepo,
         std::shared_ptr<application::ports::IProcessTaskRuntime> taskRuntime,
         QObject* parent
     ) : application::ports::IAgentRuntime(parent),
         m_chatGateway(chatGateway),
-        m_conversationService(conversationService),
         m_toolRegistry(toolRegistry),
         m_checkpointRepo(checkpointRepo),
         m_taskRuntime(std::move(taskRuntime)) {
@@ -124,9 +113,13 @@ namespace agent::runtime {
         m_checkpointRepo->saveCheckpoint(cp);
     }
 
-    void AgentRuntime::startRun(const AgentRunContext& context, const QString& prompt) {
+    void AgentRuntime::startRun(
+        const AgentRunContext& context,
+        const QString& prompt,
+        const QList<domain::conversation::Message>& history
+    ) {
         const QString trimmed = prompt.trimmed();
-        if (trimmed.isEmpty() || context.sessionId.isEmpty()) return;
+        if (trimmed.isEmpty()) return;
 
         cancelRun();
         m_runCancellationToken = application::ports::CancellationToken();
@@ -153,26 +146,40 @@ namespace agent::runtime {
 
         setState(domain::agent::AgentRunStatus::Preparing);
 
-        // 1. 构建并持久化用户消息
-        domain::conversation::Message userMsg;
-        userMsg.id = QUuid::createUuid();
-        userMsg.role = domain::MessageRole::User;
-        userMsg.status = domain::MessageStatus::Sent;
-        userMsg.createdAt = QDateTime::currentDateTime();
-        userMsg.blocks.append(domain::conversation::MessageBlock(
-            domain::BlockType::Text,
-            domain::conversation::TextBlock{trimmed}
-        ));
-
-        if (m_conversationService) {
-            auto history = m_conversationService->loadMessages(context.sessionId);
-            history.append(userMsg);
-            m_conversationService->saveMessages(context.sessionId, history);
-        } else {
-            m_transientHistories[context.sessionId].append(userMsg);
+        // 1. 初始化纯内存历史并确保当前 User 消息在历史末尾
+        m_history = history;
+        bool hasCurrentPrompt = false;
+        if (!m_history.isEmpty() && m_history.last().role == domain::MessageRole::User) {
+            for (const auto& b : m_history.last().blocks) {
+                if (b.isText() && std::get<domain::conversation::TextBlock>(b.payload).text == trimmed) {
+                    hasCurrentPrompt = true;
+                    break;
+                }
+            }
         }
 
-        emit userMessageCreated(context.sessionId, userMsg);
+        if (!hasCurrentPrompt) {
+            domain::conversation::Message userMsg;
+            userMsg.id = QUuid::createUuid();
+            userMsg.role = domain::MessageRole::User;
+            userMsg.status = domain::MessageStatus::Sent;
+            userMsg.createdAt = QDateTime::currentDateTime();
+            userMsg.blocks.append(domain::conversation::MessageBlock(
+                domain::BlockType::Text,
+                domain::conversation::TextBlock{trimmed}
+            ));
+            m_history.append(userMsg);
+            emit userMessageCreated(context.sessionId, userMsg);
+        }
+
+        m_accumulatedBlocks.clear();
+        m_currentAssistantMessageId = QUuid::createUuid();
+        domain::conversation::Message assistantPlaceholder;
+        assistantPlaceholder.id = m_currentAssistantMessageId;
+        assistantPlaceholder.role = domain::MessageRole::Assistant;
+        assistantPlaceholder.status = domain::MessageStatus::Sending;
+        assistantPlaceholder.createdAt = QDateTime::currentDateTime();
+        emit assistantMessageStarted(context.sessionId, assistantPlaceholder);
 
         // 2. 发起第一轮模型请求
         startNextModelRequest();
@@ -202,19 +209,17 @@ namespace agent::runtime {
         m_pendingToolResults.clear();
         m_pendingPermissions.clear();
 
-        m_currentAssistantMessageId = QUuid::createUuid();
-        domain::conversation::Message assistantPlaceholder;
-        assistantPlaceholder.id = m_currentAssistantMessageId;
-        assistantPlaceholder.role = domain::MessageRole::Assistant;
-        assistantPlaceholder.status = domain::MessageStatus::Sending;
-        assistantPlaceholder.createdAt = QDateTime::currentDateTime();
-        emit assistantMessageStarted(m_context.sessionId, assistantPlaceholder);
+        if (m_currentAssistantMessageId.isNull()) {
+            m_currentAssistantMessageId = QUuid::createUuid();
+            domain::conversation::Message assistantPlaceholder;
+            assistantPlaceholder.id = m_currentAssistantMessageId;
+            assistantPlaceholder.role = domain::MessageRole::Assistant;
+            assistantPlaceholder.status = domain::MessageStatus::Sending;
+            assistantPlaceholder.createdAt = QDateTime::currentDateTime();
+            emit assistantMessageStarted(m_context.sessionId, assistantPlaceholder);
+        }
 
-        const auto history = m_conversationService
-            ? m_conversationService->loadMessages(m_context.sessionId)
-            : m_transientHistories.value(m_context.sessionId);
-
-        const auto request = buildChatRequest(history);
+        const auto request = buildChatRequest(m_history);
 
         cleanupCurrentOp();
         if (m_context.policy.timeoutMs > 0 && m_timeoutTimer) {
@@ -276,38 +281,88 @@ namespace agent::runtime {
         for (const auto& msg : history) {
             if (msg.status != domain::MessageStatus::Sent) continue;
 
-            domain::llm::ChatMessage llmMsg;
-            llmMsg.role = msg.role;
-            QList<domain::agent::ToolResult> results;
+            if (msg.role != domain::MessageRole::Assistant) {
+                domain::llm::ChatMessage llmMsg;
+                llmMsg.role = msg.role;
+                for (const auto& block : msg.blocks) {
+                    if (block.isText()) {
+                        if (!llmMsg.content.isEmpty()) llmMsg.content += QLatin1Char('\n');
+                        llmMsg.content += std::get<domain::conversation::TextBlock>(block.payload).text;
+                    }
+                }
+                if (!llmMsg.content.isEmpty()) {
+                    request.messages.append(llmMsg);
+                }
+                continue;
+            }
+
+            // Assistant 消息可能包含多轮 ReAct 交互块（Text/Thought/ToolCall/ToolResult）
+            // 必须按轮次拆解为严格交替的 Assistant(tool_calls) -> Tool(results) 轮次
+            domain::llm::ChatMessage currentAssistantMsg;
+            currentAssistantMsg.role = domain::MessageRole::Assistant;
 
             for (const auto& block : msg.blocks) {
                 if (block.isText()) {
-                    if (!llmMsg.content.isEmpty()) llmMsg.content += QLatin1Char('\n');
-                    llmMsg.content += std::get<domain::conversation::TextBlock>(block.payload).text;
+                    if (!currentAssistantMsg.content.isEmpty()) currentAssistantMsg.content += QLatin1Char('\n');
+                    currentAssistantMsg.content += std::get<domain::conversation::TextBlock>(block.payload).text;
                 } else if (block.isThought()) {
-                    if (!llmMsg.reasoningContent.isEmpty()) llmMsg.reasoningContent += QLatin1Char('\n');
-                    llmMsg.reasoningContent += std::get<domain::conversation::ThoughtBlock>(block.payload).thought;
+                    if (!currentAssistantMsg.reasoningContent.isEmpty()) currentAssistantMsg.reasoningContent += QLatin1Char('\n');
+                    currentAssistantMsg.reasoningContent += std::get<domain::conversation::ThoughtBlock>(block.payload).thought;
                 } else if (block.isToolCall()) {
-                    llmMsg.toolCalls = std::get<domain::conversation::ToolCallBlock>(block.payload).calls;
-                    for (const auto& call : llmMsg.toolCalls.value()) {
+                    const auto calls = std::get<domain::conversation::ToolCallBlock>(block.payload).calls;
+                    currentAssistantMsg.toolCalls = calls;
+                    for (const auto& call : calls) {
                         toolNames.insert(call.id, call.name);
                     }
                 } else if (block.isToolResult()) {
-                    results.append(std::get<domain::conversation::ToolResultBlock>(block.payload).results);
+                    auto results = std::get<domain::conversation::ToolResultBlock>(block.payload).results;
+                    QSet<QString> fulfilledCallIds;
+                    for (const auto& res : results) {
+                        fulfilledCallIds.insert(res.toolCallId);
+                    }
+
+                    // 协议完整性保障：如果当前 assistant 的 toolCalls 中有未执行完的调用，自动补齐占位
+                    if (currentAssistantMsg.toolCalls.has_value()) {
+                        for (const auto& call : currentAssistantMsg.toolCalls.value()) {
+                            if (!fulfilledCallIds.contains(call.id)) {
+                                results.append({call.id, QStringLiteral("{\"status\":\"aborted\",\"message\":\"操作因任务中断而未完成\"}"), true});
+                            }
+                        }
+                    }
+
+                    if (!currentAssistantMsg.content.isEmpty() || !currentAssistantMsg.reasoningContent.isEmpty() || currentAssistantMsg.toolCalls.has_value()) {
+                        request.messages.append(currentAssistantMsg);
+                    }
+                    currentAssistantMsg = domain::llm::ChatMessage{};
+                    currentAssistantMsg.role = domain::MessageRole::Assistant;
+
+                    // 紧跟追加对应的 Tool 响应消息
+                    for (const auto& result : results) {
+                        domain::llm::ChatMessage toolMessage;
+                        toolMessage.role = domain::MessageRole::Tool;
+                        toolMessage.toolCallId = result.toolCallId;
+                        toolMessage.name = toolNames.value(result.toolCallId);
+                        toolMessage.content = result.content;
+                        request.messages.append(toolMessage);
+                    }
                 }
             }
 
-            if (!llmMsg.content.isEmpty() || !llmMsg.reasoningContent.isEmpty() || llmMsg.toolCalls.has_value()) {
-                request.messages.append(llmMsg);
-            }
-
-            for (const auto& result : results) {
-                domain::llm::ChatMessage toolMessage;
-                toolMessage.role = domain::MessageRole::Tool;
-                toolMessage.toolCallId = result.toolCallId;
-                toolMessage.name = toolNames.value(result.toolCallId);
-                toolMessage.content = result.content;
-                request.messages.append(toolMessage);
+            // 提交末尾未闭环的 Assistant 消息（例如最终轮回答，或者异常中断未能生成 ToolResult 的末尾轮次）
+            if (!currentAssistantMsg.content.isEmpty() || !currentAssistantMsg.reasoningContent.isEmpty() || currentAssistantMsg.toolCalls.has_value()) {
+                if (currentAssistantMsg.toolCalls.has_value()) {
+                    request.messages.append(currentAssistantMsg);
+                    for (const auto& call : currentAssistantMsg.toolCalls.value()) {
+                        domain::llm::ChatMessage toolMessage;
+                        toolMessage.role = domain::MessageRole::Tool;
+                        toolMessage.toolCallId = call.id;
+                        toolMessage.name = call.name;
+                        toolMessage.content = QStringLiteral("{\"status\":\"aborted\",\"message\":\"操作因任务中断而未完成\"}");
+                        request.messages.append(toolMessage);
+                    }
+                } else {
+                    request.messages.append(currentAssistantMsg);
+                }
             }
         }
 
@@ -324,6 +379,7 @@ namespace agent::runtime {
         message.role = domain::MessageRole::Assistant;
         message.status = domain::MessageStatus::Sent;
         message.createdAt = QDateTime::currentDateTime();
+        message.blocks = m_accumulatedBlocks;
 
         if (!m_thoughtBuffer.isEmpty()) {
             message.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{m_thoughtBuffer, 0}});
@@ -331,36 +387,57 @@ namespace agent::runtime {
         if (!m_replyBuffer.isEmpty()) {
             message.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{m_replyBuffer}});
         }
-        if (!m_activeToolCalls.isEmpty()) {
-            domain::conversation::ToolCallBlock calls;
-            if (!m_toolCallOrder.isEmpty()) {
-                for (const auto& id : m_toolCallOrder) {
-                    if (m_activeToolCalls.contains(id)) {
-                        calls.calls.append(m_activeToolCalls.value(id));
-                    }
+
+        // 收集已提交到 m_accumulatedBlocks 的 callId 与 resultId，杜绝重复添加
+        QSet<QString> committedCallIds;
+        QSet<QString> committedResultIds;
+        for (const auto& b : m_accumulatedBlocks) {
+            if (b.isToolCall()) {
+                for (const auto& c : std::get<domain::conversation::ToolCallBlock>(b.payload).calls) {
+                    committedCallIds.insert(c.id);
                 }
-            } else {
-                calls.calls = m_activeToolCalls.values();
+            } else if (b.isToolResult()) {
+                for (const auto& r : std::get<domain::conversation::ToolResultBlock>(b.payload).results) {
+                    committedResultIds.insert(r.toolCallId);
+                }
             }
-            message.blocks.append({domain::BlockType::ToolCall, calls});
         }
+
+        if (!m_activeToolCalls.isEmpty()) {
+            domain::conversation::ToolCallBlock uncommittedCalls;
+            const auto order = !m_toolCallOrder.isEmpty() ? m_toolCallOrder : m_activeToolCalls.keys();
+            for (const auto& id : order) {
+                if (m_activeToolCalls.contains(id) && !committedCallIds.contains(id)) {
+                    uncommittedCalls.calls.append(m_activeToolCalls.value(id));
+                }
+            }
+            if (!uncommittedCalls.calls.isEmpty()) {
+                message.blocks.append({domain::BlockType::ToolCall, uncommittedCalls});
+            }
+        }
+
         if (!m_pendingToolResults.isEmpty()) {
-            domain::conversation::ToolResultBlock results;
-            results.results = m_pendingToolResults;
-            message.blocks.append({domain::BlockType::ToolResult, results});
+            domain::conversation::ToolResultBlock uncommittedResults;
+            for (const auto& r : m_pendingToolResults) {
+                if (!committedResultIds.contains(r.toolCallId)) {
+                    uncommittedResults.results.append(r);
+                }
+            }
+            if (!uncommittedResults.results.isEmpty()) {
+                message.blocks.append({domain::BlockType::ToolResult, uncommittedResults});
+            }
         }
+
         return message;
     }
 
-    void AgentRuntime::saveMessage(const domain::conversation::Message& message) {
-        if (m_context.sessionId.isEmpty()) return;
-        if (!m_conversationService) {
-            m_transientHistories[m_context.sessionId].append(message);
-            return;
+    void AgentRuntime::updateAssistantMessageInHistory(const domain::conversation::Message& message) {
+        auto it = std::find_if(m_history.begin(), m_history.end(), [&](const auto& m) { return m.id == message.id; });
+        if (it != m_history.end()) {
+            *it = message;
+        } else {
+            m_history.append(message);
         }
-        auto history = m_conversationService->loadMessages(m_context.sessionId);
-        history.append(message);
-        m_conversationService->saveMessages(m_context.sessionId, history);
     }
 
     void AgentRuntime::cancelRun() {
@@ -388,6 +465,13 @@ namespace agent::runtime {
             op->cancel(); // stop timeout watchdog; background thread result will be discarded via QPointer
         } // op destroyed here — background threads see weakSelf==null and exit cleanly
         m_pendingBatches.clear();
+
+        if (!m_pendingToolResults.isEmpty() && !m_currentAssistantMessageId.isNull()) {
+            m_accumulatedBlocks.append({domain::BlockType::ToolResult, domain::conversation::ToolResultBlock{m_pendingToolResults}});
+            const auto assistantMsg = makeAssistantMessage();
+            updateAssistantMessageInHistory(assistantMsg);
+            emit replyGenerated(m_context.sessionId, assistantMsg);
+        }
 
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
@@ -572,7 +656,7 @@ namespace agent::runtime {
                     break;
                 }
             }
-            if (alreadyExecuted) continue;
+            if (alreadyExecuted || m_pendingPermissions.contains(call.id)) continue;
 
             const bool toolDisallowed = (m_context.toolSelectionMode == ToolSelectionMode::None)
                 || (m_context.toolSelectionMode == ToolSelectionMode::Selected && !m_context.enabledTools.contains(call.name));
@@ -812,17 +896,14 @@ namespace agent::runtime {
 
         setState(domain::agent::AgentRunStatus::PersistingToolResult);
 
-        // 保存包含 ToolResult 的消息记录
+        // 将当前轮的 ToolResult 记录到累积 blocks 中并就地更新当前 Assistant 消息
         if (!m_pendingToolResults.isEmpty()) {
-            domain::conversation::Message resultMsg;
-            resultMsg.id = QUuid::createUuid();
-            resultMsg.role = domain::MessageRole::Tool;
-            resultMsg.status = domain::MessageStatus::Sent;
-            resultMsg.createdAt = QDateTime::currentDateTime();
             domain::conversation::ToolResultBlock rb;
             rb.results = m_pendingToolResults;
-            resultMsg.blocks.append({domain::BlockType::ToolResult, rb});
-            saveMessage(resultMsg);
+            m_accumulatedBlocks.append({domain::BlockType::ToolResult, rb});
+
+            auto currentMsg = makeAssistantMessage();
+            updateAssistantMessageInHistory(currentMsg);
         }
 
         saveCheckpoint();
@@ -902,11 +983,35 @@ namespace agent::runtime {
                 if (m_timeoutTimer) {
                     m_timeoutTimer->stop();
                 }
+                if (!isRunning() && m_state.status != domain::agent::AgentRunStatus::CallingModel) {
+                    return;
+                }
                 qInfo().noquote() << QStringLiteral("[AgentRuntime] EventFinished -> reason: %1, replyLen: %2, thoughtLen: %3, toolCalls: %4")
                     .arg(arg.finishReason, QString::number(m_replyBuffer.length()),
                          QString::number(m_thoughtBuffer.length()), QString::number(m_activeToolCalls.size()));
+
+                if (!m_thoughtBuffer.isEmpty()) {
+                    m_accumulatedBlocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{m_thoughtBuffer, 0}});
+                    m_thoughtBuffer.clear();
+                }
+                if (!m_replyBuffer.isEmpty()) {
+                    m_accumulatedBlocks.append({domain::BlockType::Text, domain::conversation::TextBlock{m_replyBuffer}});
+                    m_replyBuffer.clear();
+                }
+                if (!m_activeToolCalls.isEmpty()) {
+                    domain::conversation::ToolCallBlock calls;
+                    if (!m_toolCallOrder.isEmpty()) {
+                        for (const auto& id : m_toolCallOrder) {
+                            if (m_activeToolCalls.contains(id)) calls.calls.append(m_activeToolCalls.value(id));
+                        }
+                    } else {
+                        calls.calls = m_activeToolCalls.values();
+                    }
+                    m_accumulatedBlocks.append({domain::BlockType::ToolCall, calls});
+                }
+
                 const auto assistantMsg = makeAssistantMessage();
-                saveMessage(assistantMsg);
+                updateAssistantMessageInHistory(assistantMsg);
                 emit replyGenerated(m_context.sessionId, assistantMsg);
 
                 // 判断是否需要执行工具并 continuation

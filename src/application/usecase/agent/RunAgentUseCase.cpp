@@ -14,6 +14,7 @@ namespace application::usecase::agent {
         ports::IProjectRuntimeCoordinator* runtimeCoordinator,
         domain::repository::IAgentRepository* agentRepository,
         ::agent::skill::SkillRegistry* skillRegistry,
+        domain::service::IConversationService* conversationService,
         QObject* parent
     ) : QObject(parent),
         m_runtime(runtime),
@@ -21,10 +22,21 @@ namespace application::usecase::agent {
         m_projectContextService(projectContextService),
         m_runtimeCoordinator(runtimeCoordinator),
         m_agentRepository(agentRepository),
-        m_skillRegistry(skillRegistry) {
+        m_skillRegistry(skillRegistry),
+        m_conversationService(conversationService) {
 
         if (m_runtime) {
-            connect(m_runtime, &ports::IAgentRuntime::userMessageCreated, this, &RunAgentUseCase::userMessageCreated);
+            connect(m_runtime, &ports::IAgentRuntime::userMessageCreated, this, [this](const QString& sid, const domain::conversation::Message& msg) {
+                if (m_conversationService) {
+                    auto history = m_conversationService->loadMessages(sid);
+                    auto it = std::find_if(history.begin(), history.end(), [&](const auto& m) { return m.id == msg.id; });
+                    if (it == history.end()) {
+                        history.append(msg);
+                        m_conversationService->saveMessages(sid, history);
+                    }
+                }
+                emit userMessageCreated(sid, msg);
+            });
             connect(m_runtime, &ports::IAgentRuntime::assistantMessageStarted, this, &RunAgentUseCase::assistantMessageStarted);
             connect(m_runtime, &ports::IAgentRuntime::stateChanged, this, &RunAgentUseCase::stateChanged);
             connect(m_runtime, &ports::IAgentRuntime::tokenReceived, this, &RunAgentUseCase::tokenReceived);
@@ -32,9 +44,30 @@ namespace application::usecase::agent {
             connect(m_runtime, &ports::IAgentRuntime::toolCallFinished, this, &RunAgentUseCase::toolCallFinished);
             connect(m_runtime, &ports::IAgentRuntime::toolResultReady, this, &RunAgentUseCase::toolResultReady);
             connect(m_runtime, &ports::IAgentRuntime::permissionRequested, this, &RunAgentUseCase::permissionRequested);
-            connect(m_runtime, &ports::IAgentRuntime::replyGenerated, this, &RunAgentUseCase::replyGenerated);
+            connect(m_runtime, &ports::IAgentRuntime::replyGenerated, this, [this](const QString& sid, const domain::conversation::Message& msg) {
+                if (m_conversationService) {
+                    auto history = m_conversationService->loadMessages(sid);
+                    auto it = std::find_if(history.begin(), history.end(), [&](const auto& m) { return m.id == msg.id; });
+                    if (it != history.end()) {
+                        *it = msg;
+                    } else {
+                        history.append(msg);
+                    }
+                    m_conversationService->saveMessages(sid, history);
+                }
+                emit replyGenerated(sid, msg);
+            });
             connect(m_runtime, &ports::IAgentRuntime::runCompleted, this, &RunAgentUseCase::runCompleted);
-            connect(m_runtime, &ports::IAgentRuntime::runFailed, this, &RunAgentUseCase::runFailed);
+            connect(m_runtime, &ports::IAgentRuntime::runFailed, this, [this](const QString& sid, const domain::llm::ChatError& err) {
+                if (m_conversationService) {
+                    auto history = m_conversationService->loadMessages(sid);
+                    if (!history.isEmpty() && history.last().role == domain::MessageRole::Assistant) {
+                        history.last().status = domain::MessageStatus::Failed;
+                        m_conversationService->saveMessages(sid, history);
+                    }
+                }
+                emit runFailed(sid, err);
+            });
         }
     }
 
@@ -249,7 +282,12 @@ namespace application::usecase::agent {
             context.systemPrompt = m_contextBuilder.buildSystemPrompt(context, projCtx, filteredSkills);
         }
 
-        m_runtime->startRun(context, prompt);
+        QList<domain::conversation::Message> history;
+        if (m_conversationService) {
+            history = m_conversationService->loadMessages(sessionId);
+        }
+
+        m_runtime->startRun(context, prompt, history);
     }
 
 } // namespace application::usecase::agent

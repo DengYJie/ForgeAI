@@ -108,6 +108,7 @@ private slots:
     void testAnthropicParallelToolBlocksStream();
     void testGeminiThoughtSignatureRoundTrip();
     void testOpenAIResponsesReasoningSummaryAndIndex();
+    void testOpenAIResponsesDuplicateEventDeduplication();
     void testOllamaEffortAndUuidToolCalls();
 
     // ModelsDevImporter 元数据解析测试
@@ -319,11 +320,21 @@ void AgentProtocolTests::openAIResponsesToolStream() {
     QVERIFY(std::holds_alternative<domain::llm::EventToolCallDelta>(events2[0]));
     QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events2[0]).argumentsDelta, QStringLiteral("{\"content\": \"abc\"}"));
 
-    QByteArray doneChunk = "event: response.function_call_arguments.done\ndata: {\"item_id\":\"item_1\"}\n\n";
-    auto events3 = parser.feed(doneChunk);
-    QCOMPARE(events3.size(), 1);
-    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(events3[0]));
-    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(events3[0]).id, QStringLiteral("call_resp_1"));
+    // function_call_arguments.done 只表示参数流传输结束，不应产生 Finished 事件
+    QByteArray argsDoneChunk = "event: response.function_call_arguments.done\ndata: {\"item_id\":\"item_1\"}\n\n";
+    auto events3 = parser.feed(argsDoneChunk);
+    QCOMPARE(events3.size(), 0);
+
+    // 完整的 output_item.done 触发单次且唯一的 EventToolCallFinished
+    QByteArray itemDoneChunk = "event: response.output_item.done\ndata: {\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_resp_1\",\"name\":\"edit_file\"}}\n\n";
+    auto events4 = parser.feed(itemDoneChunk);
+    QCOMPARE(events4.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(events4[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(events4[0]).id, QStringLiteral("call_resp_1"));
+
+    // 重复投递 output_item.done 幂等防重生效，不会产生二次 Finished
+    auto events5 = parser.feed(itemDoneChunk);
+    QCOMPARE(events5.size(), 0);
 }
 
 void AgentProtocolTests::testResolverMaxTokensClamp() {
@@ -620,12 +631,17 @@ void AgentProtocolTests::testOpenAIResponsesReasoningSummaryAndIndex() {
     QCOMPARE(std::get<domain::llm::EventToolCallDelta>(ev3[0]).id, QStringLiteral("call_resp_001"));
     QCOMPARE(std::get<domain::llm::EventToolCallDelta>(ev3[0]).argumentsDelta, QStringLiteral("{\"cmd\": \"ls\"}"));
 
-    // 4. Arguments done via output_index
+    // 4. Arguments done via output_index (不应产生 Finished 事件)
     QByteArray argsDone = "event: response.function_call_arguments.done\ndata: {\"output_index\":0}\n\n";
     auto ev4 = parser.feed(argsDone);
-    QCOMPARE(ev4.size(), 1);
-    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(ev4[0]));
-    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(ev4[0]).id, QStringLiteral("call_resp_001"));
+    QCOMPARE(ev4.size(), 0);
+
+    // 4.1 Output item done 触发唯一 Finished 事件
+    QByteArray itemDone = "event: response.output_item.done\ndata: {\"output_index\":0,\"item\":{\"id\":\"item_001\",\"type\":\"function_call\",\"call_id\":\"call_resp_001\",\"name\":\"run_command\"}}\n\n";
+    auto ev4_1 = parser.feed(itemDone);
+    QCOMPARE(ev4_1.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(ev4_1[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(ev4_1[0]).id, QStringLiteral("call_resp_001"));
 
     // 5. Completed + [DONE] -> single EventFinished
     QByteArray completed = "event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n";
@@ -637,6 +653,30 @@ void AgentProtocolTests::testOpenAIResponsesReasoningSummaryAndIndex() {
 
     auto ev6 = parser.feed(done);
     QCOMPARE(ev6.size(), 0);
+}
+
+void AgentProtocolTests::testOpenAIResponsesDuplicateEventDeduplication() {
+    llm::protocol::openai_responses::OpenAIResponsesStreamParser parser;
+
+    // 模拟真实场景下包含全部事件的 SSE 流
+    QByteArray stream = 
+        "event: response.output_item.added\ndata: {\"output_index\":0,\"item\":{\"id\":\"item_123\",\"type\":\"function_call\",\"call_id\":\"call_dup_1\",\"name\":\"list_files\"}}\n\n"
+        "event: response.function_call_arguments.delta\ndata: {\"output_index\":0,\"delta\":\"{\\\"path\\\": \\\".\\\"}\"}\n\n"
+        "event: response.function_call_arguments.done\ndata: {\"output_index\":0}\n\n"
+        "event: response.output_item.done\ndata: {\"output_index\":0,\"item\":{\"id\":\"item_123\",\"type\":\"function_call\",\"call_id\":\"call_dup_1\",\"name\":\"list_files\"}}\n\n"
+        "event: response.output_item.done\ndata: {\"output_index\":0,\"item\":{\"id\":\"item_123\",\"type\":\"function_call\",\"call_id\":\"call_dup_1\",\"name\":\"list_files\"}}\n\n"
+        "event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n";
+
+    auto events = parser.feed(stream);
+    int toolFinishedCount = 0;
+    for (const auto& ev : events) {
+        if (std::holds_alternative<domain::llm::EventToolCallFinished>(ev)) {
+            toolFinishedCount++;
+            QCOMPARE(std::get<domain::llm::EventToolCallFinished>(ev).id, QStringLiteral("call_dup_1"));
+        }
+    }
+    // 必须严格保证整个流过程中 EventToolCallFinished 只触发 1 次！
+    QCOMPARE(toolFinishedCount, 1);
 }
 
 void AgentProtocolTests::testOllamaEffortAndUuidToolCalls() {

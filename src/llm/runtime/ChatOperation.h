@@ -83,6 +83,7 @@ namespace llm::runtime {
         RequestState m_state = RequestState::Created;
         int m_currentAttempt = 0;
         bool m_hasEmittedVisibleTokens = false;
+        bool m_finishedEventEmitted = false;
 
         network::HttpOperation *m_currentHttpOp = nullptr;
         std::unique_ptr<protocol::IStreamParser> m_currentParser;

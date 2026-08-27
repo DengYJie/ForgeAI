@@ -59,6 +59,8 @@ WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& use
             sessions.append({conversation.id.toString(), conversation.title, conversation.isPinned, conversation.isArchived,
                              conversation.updatedAt.toMSecsSinceEpoch(), conversation.projectId});
         }
+        qInfo().noquote() << QStringLiteral("[WorkViewModel] Initialized with %1 project sessions across %2 projects")
+            .arg(QString::number(sessions.size()), QString::number(projects.size()));
         updateState([this, projects, sessions](WorkState& state) { 
             state.projects = projects; 
             state.sessions = sessions; 
@@ -123,7 +125,12 @@ void WorkViewModel::setupUseCaseConnections() {
             qInfo().noquote() << QStringLiteral("[WorkViewModel] assistantMessageStarted -> sessionId: %1, msgId: %2")
                 .arg(sessionId, message.id.toString(QUuid::WithoutBraces));
             updateState([message](WorkState& state) {
-                state.messages.append(message);
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == message.id;
+                });
+                if (it == state.messages.end()) {
+                    state.messages.append(message);
+                }
             });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::tokenReceived, this,
@@ -219,22 +226,17 @@ void WorkViewModel::setupUseCaseConnections() {
             if (sessionId != m_agentSessionId) return;
             qInfo().noquote() << QStringLiteral("[WorkViewModel] toolResultReady -> id: %1, isError: %2, content: %3")
                 .arg(result.toolCallId).arg(result.isError).arg(result.content.left(100));
-            updateState([result](WorkState& state) {
-                auto it = std::find_if(state.messages.rbegin(), state.messages.rend(), [](const auto& msg) {
-                    return msg.role == domain::MessageRole::Tool;
+            updateState([messageId, result](WorkState& state) {
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == messageId;
                 });
-                if (it != state.messages.rend()) {
-                    domain::conversation::ToolResultBlock results; results.results.append(result);
+                if (it == state.messages.end() && !state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant) {
+                    it = std::prev(state.messages.end());
+                }
+                if (it != state.messages.end()) {
+                    domain::conversation::ToolResultBlock results;
+                    results.results.append(result);
                     it->blocks.append({domain::BlockType::ToolResult, results});
-                } else {
-                    domain::conversation::Message toolMsg;
-                    toolMsg.id = QUuid::createUuid();
-                    toolMsg.role = domain::MessageRole::Tool;
-                    toolMsg.status = domain::MessageStatus::Sent;
-                    toolMsg.createdAt = QDateTime::currentDateTime();
-                    domain::conversation::ToolResultBlock results; results.results.append(result);
-                    toolMsg.blocks.append({domain::BlockType::ToolResult, results});
-                    state.messages.append(toolMsg);
                 }
 
                 auto eventIt = std::find_if(state.toolEvents.begin(), state.toolEvents.end(), [&](const auto& ev) {
@@ -285,22 +287,13 @@ void WorkViewModel::setupUseCaseConnections() {
                 state.agentUiState.status = domain::agent::AgentRunStatus::Failed;
                 state.agentUiState.isWaitingPermission = false;
 
-                // 如果存在未完成的 Assistant 消息占位，将其标记为失败并写入错误信息
+                // 如果存在未完成的 Assistant 消息占位，将其标记为失败并在末尾追加错误信息
                 if (!state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant) {
                     auto& lastMsg = state.messages.last();
                     lastMsg.status = domain::MessageStatus::Failed;
-                    bool hasText = false;
-                    for (const auto& b : lastMsg.blocks) {
-                        if (b.isText() && !std::get<domain::conversation::TextBlock>(b.payload).text.isEmpty()) {
-                            hasText = true;
-                            break;
-                        }
-                    }
-                    if (!hasText) {
-                        lastMsg.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{
-                            QStringLiteral("⚠️ **任务执行失败**：%1").arg(displayErr)
-                        }});
-                    }
+                    lastMsg.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{
+                        QStringLiteral("**任务执行失败**：%1").arg(displayErr)
+                    }});
                 }
             });
         });
@@ -563,6 +556,8 @@ void WorkViewModel::newSession() {
         conversation.id = QUuid(id); conversation.title = QStringLiteral("新对话");
         conversation.projectId = m_currentProjectId; conversation.createdAt = QDateTime::currentDateTime(); conversation.updatedAt = conversation.createdAt;
         m_conversationRepository->saveConversation(conversation);
+        qInfo().noquote() << QStringLiteral("[WorkViewModel] newSession created -> sessionId: %1, projectId: %2")
+            .arg(id, m_currentProjectId.toString(QUuid::WithoutBraces));
     }
     updateState([this, id](WorkState& state) {
         state.currentProjectId = m_currentProjectId;
@@ -598,6 +593,9 @@ void WorkViewModel::loadSession(const QString& sessionId) {
     const auto loadedMessages = m_conversationService
         ? m_conversationService->loadMessages(sessionId)
         : QList<domain::conversation::Message>{};
+
+    qInfo().noquote() << QStringLiteral("[WorkViewModel] loadSession -> sessionId: %1, projectId: %2, loaded %3 messages")
+        .arg(sessionId, projectId.toString(QUuid::WithoutBraces), QString::number(loadedMessages.size()));
 
     updateState([this, sessionId, projectId, loadedMessages](WorkState& state) {
         state.currentProjectId = projectId;

@@ -18,9 +18,9 @@ namespace domain::service {
         ~IConversationService() override = default;
 
         /**
-         * @brief 加载初始化会话列表
+         * @brief 加载初始化会话列表（可按项目 ID 隔离过滤，默认 std::nullopt 表示仅加载全局普通对话）
          */
-        virtual QList<ui::screen::chat::ChatSessionItemData> loadSessions() = 0;
+        virtual QList<ui::screen::chat::ChatSessionItemData> loadSessions(const std::optional<QUuid>& projectId = std::nullopt) = 0;
 
         /**
          * @brief 加载指定会话的消息历史

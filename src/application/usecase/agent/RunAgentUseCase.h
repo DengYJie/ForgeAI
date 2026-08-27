@@ -4,6 +4,7 @@
 #include <QString>
 #include <QUuid>
 #include "application/ports/IAgentRuntime.h"
+#include "domain/service/IConversationService.h"
 #include "domain/service/IModelService.h"
 #include "domain/service/IProjectContextService.h"
 #include "domain/repository/IAgentRepository.h"
@@ -26,6 +27,7 @@ namespace application::usecase::agent {
             ports::IProjectRuntimeCoordinator* runtimeCoordinator = nullptr,
             domain::repository::IAgentRepository* agentRepository = nullptr,
             ::agent::skill::SkillRegistry* skillRegistry = nullptr,
+            domain::service::IConversationService* conversationService = nullptr,
             QObject* parent = nullptr
         );
         ~RunAgentUseCase() override = default;
@@ -75,6 +77,7 @@ namespace application::usecase::agent {
         ports::IProjectRuntimeCoordinator* m_runtimeCoordinator = nullptr;
         domain::repository::IAgentRepository* m_agentRepository = nullptr;
         ::agent::skill::SkillRegistry* m_skillRegistry = nullptr;
+        domain::service::IConversationService* m_conversationService = nullptr;
         ::agent::runtime::AgentContextBuilder m_contextBuilder;
     };
 

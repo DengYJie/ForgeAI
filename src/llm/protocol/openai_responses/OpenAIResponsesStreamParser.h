@@ -2,6 +2,7 @@
 #include <QString>
 #include <QByteArray>
 #include <QList>
+#include <QSet>
 #include "llm/protocol/IStreamParser.h"
 
 namespace llm::protocol::openai_responses {
@@ -33,6 +34,7 @@ namespace llm::protocol::openai_responses {
         QString m_currentEventType;
         QHash<int, ResponseToolCallState> m_indexToTool;
         QHash<QString, QString> m_itemIdToCallId;
+        QSet<QString> m_finishedToolCallIds;
         QString m_currentCallId;
         bool m_hasFinished = false;
         bool m_isFinished = false;
