@@ -50,7 +50,7 @@ namespace agent::tool::builtin {
     ) {
         return std::make_unique<application::ports::ThreadedToolOperation>(
             call.id,
-            [this, call, context]() {
+            [this, call, context]() -> domain::agent::ToolResult {
                 return executeInternal(call, context);
             },
             context.timeoutMs > 0 ? context.timeoutMs : 30000

@@ -47,6 +47,13 @@ namespace agent::runtime {
             m_currentOp->cancel();
             cleanupCurrentOp();
         }
+        for (auto& op : m_activeOperations) {
+            if (op) {
+                disconnect(op.get(), &application::ports::IToolOperation::finished, this, nullptr);
+                op->cancel();
+            }
+        }
+        m_activeOperations.clear();
     }
 
     bool AgentRuntime::isRunning() const {
@@ -189,6 +196,7 @@ namespace agent::runtime {
 
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
+        m_toolCallOrder.clear();
         m_activeToolCalls.clear();
         m_pendingToolResults.clear();
         m_pendingPermissions.clear();
@@ -242,16 +250,16 @@ namespace agent::runtime {
         request.reasoningEffort = m_context.reasoningEffort;
 
         const bool supportsToolCalling = m_context.model.effectiveCapabilities().testFlag(domain::model::ModelCapability::ToolCalling);
-        if (supportsToolCalling && m_toolRegistry) {
+        if (supportsToolCalling && m_toolRegistry && m_context.toolSelectionMode != ToolSelectionMode::None) {
             const auto allDefs = m_toolRegistry->definitions();
             QList<domain::agent::ToolDefinition> defs;
-            if (!m_context.enabledTools.isEmpty()) {
+            if (m_context.toolSelectionMode == ToolSelectionMode::Selected) {
                 for (const auto& def : allDefs) {
                     if (m_context.enabledTools.contains(def.name)) {
                         defs.append(def);
                     }
                 }
-            } else {
+            } else if (m_context.toolSelectionMode == ToolSelectionMode::All) {
                 defs = allDefs;
             }
             if (!defs.isEmpty()) {
@@ -324,7 +332,15 @@ namespace agent::runtime {
         }
         if (!m_activeToolCalls.isEmpty()) {
             domain::conversation::ToolCallBlock calls;
-            calls.calls = m_activeToolCalls.values();
+            if (!m_toolCallOrder.isEmpty()) {
+                for (const auto& id : m_toolCallOrder) {
+                    if (m_activeToolCalls.contains(id)) {
+                        calls.calls.append(m_activeToolCalls.value(id));
+                    }
+                }
+            } else {
+                calls.calls = m_activeToolCalls.values();
+            }
             message.blocks.append({domain::BlockType::ToolCall, calls});
         }
         if (!m_pendingToolResults.isEmpty()) {
@@ -374,6 +390,7 @@ namespace agent::runtime {
 
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
+        m_toolCallOrder.clear();
         m_activeToolCalls.clear();
         m_pendingToolResults.clear();
         m_pendingPermissions.clear();
@@ -407,8 +424,10 @@ namespace agent::runtime {
             if (cpOpt.has_value()) {
                 m_state.round = cpOpt->roundIndex;
                 m_state.runId = cpOpt->runId;
+                m_toolCallOrder.clear();
                 m_activeToolCalls.clear();
                 for (const auto& call : cpOpt->pendingToolCalls) {
+                    m_toolCallOrder.append(call.id);
                     m_activeToolCalls[call.id] = call;
                 }
                 m_pendingToolResults = cpOpt->pendingToolResults;
@@ -513,7 +532,17 @@ namespace agent::runtime {
         bool hasPendingPermission = false;
         QList<domain::agent::ToolCall> executableCalls;
 
-        for (const auto& call : m_activeToolCalls) {
+        QList<domain::agent::ToolCall> callsToProcess;
+        for (const auto& id : m_toolCallOrder) {
+            if (m_activeToolCalls.contains(id)) {
+                callsToProcess.append(m_activeToolCalls.value(id));
+            }
+        }
+        if (callsToProcess.isEmpty()) {
+            callsToProcess = m_activeToolCalls.values();
+        }
+
+        for (const auto& call : callsToProcess) {
             bool alreadyExecuted = false;
             for (const auto& existingRes : m_pendingToolResults) {
                 if (existingRes.toolCallId == call.id) {
@@ -523,7 +552,9 @@ namespace agent::runtime {
             }
             if (alreadyExecuted) continue;
 
-            if (!m_context.enabledTools.isEmpty() && !m_context.enabledTools.contains(call.name)) {
+            const bool toolDisallowed = (m_context.toolSelectionMode == ToolSelectionMode::None)
+                || (m_context.toolSelectionMode == ToolSelectionMode::Selected && !m_context.enabledTools.contains(call.name));
+            if (toolDisallowed) {
                 core::logging::LoggingService::instance().warn(core::logging::Category::AgentRuntime, QStringLiteral("工具未在启用列表中被拦截"), {
                     {QStringLiteral("toolName"), call.name},
                     {QStringLiteral("callId"), call.id}
@@ -719,9 +750,9 @@ namespace agent::runtime {
 
         // 结果保序重排
         QList<domain::agent::ToolResult> orderedResults;
-        for (const auto& call : m_activeToolCalls) {
+        for (const auto& callId : m_toolCallOrder) {
             for (const auto& res : m_pendingToolResults) {
-                if (res.toolCallId == call.id) {
+                if (res.toolCallId == callId) {
                     orderedResults.append(res);
                     break;
                 }
@@ -795,13 +826,26 @@ namespace agent::runtime {
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallStarted>) {
                 qInfo().noquote() << QStringLiteral("[AgentRuntime] EventToolCallStarted -> tool: %1, id: %2").arg(arg.functionName, arg.id);
                 domain::agent::ToolCall call{arg.id, arg.functionName, {}};
+                call.protocolMetadata = arg.protocolMetadata; // 必须完整保留 thoughtSignature
+                if (!m_toolCallOrder.contains(arg.id)) {
+                    m_toolCallOrder.append(arg.id);
+                }
                 m_activeToolCalls[arg.id] = call;
-                m_state.pendingCalls = m_activeToolCalls.values();
+
+                QList<domain::agent::ToolCall> orderedCalls;
+                for (const auto& callId : m_toolCallOrder) {
+                    if (m_activeToolCalls.contains(callId)) orderedCalls.append(m_activeToolCalls.value(callId));
+                }
+                m_state.pendingCalls = orderedCalls;
                 emit stateChanged(m_state);
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallDelta>) {
                 if (m_activeToolCalls.contains(arg.id)) {
                     m_activeToolCalls[arg.id].arguments += arg.argumentsDelta;
-                    m_state.pendingCalls = m_activeToolCalls.values();
+                    QList<domain::agent::ToolCall> orderedCalls;
+                    for (const auto& callId : m_toolCallOrder) {
+                        if (m_activeToolCalls.contains(callId)) orderedCalls.append(m_activeToolCalls.value(callId));
+                    }
+                    m_state.pendingCalls = orderedCalls;
                 } else {
                     qWarning().noquote() << QStringLiteral("[AgentRuntime] EventToolCallDelta for unknown id: %1").arg(arg.id);
                 }
@@ -809,7 +853,11 @@ namespace agent::runtime {
                 if (m_activeToolCalls.contains(arg.id)) {
                     const auto call = m_activeToolCalls[arg.id];
                     qInfo().noquote() << QStringLiteral("[AgentRuntime] EventToolCallFinished -> id: %1, totalArgs: %2").arg(arg.id, call.arguments);
-                    m_state.pendingCalls = m_activeToolCalls.values();
+                    QList<domain::agent::ToolCall> orderedCalls;
+                    for (const auto& callId : m_toolCallOrder) {
+                        if (m_activeToolCalls.contains(callId)) orderedCalls.append(m_activeToolCalls.value(callId));
+                    }
+                    m_state.pendingCalls = orderedCalls;
                     emit toolCallFinished(m_context.sessionId, m_currentAssistantMessageId, call);
                     emit stateChanged(m_state);
                 }

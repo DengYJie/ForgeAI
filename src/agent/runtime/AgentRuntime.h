@@ -84,6 +84,7 @@ namespace agent::runtime {
         QString m_replyBuffer;
         QString m_thoughtBuffer;
         QUuid m_currentAssistantMessageId;
+        QList<QString> m_toolCallOrder;
         QMap<QString, domain::agent::ToolCall> m_activeToolCalls;
         QList<domain::agent::ToolResult> m_pendingToolResults;
         QMap<QString, std::pair<domain::agent::ToolCall, domain::agent::ToolPermission>> m_pendingPermissions;

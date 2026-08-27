@@ -19,6 +19,15 @@ namespace domain::repository { class IConversationRepository; class IProjectRepo
 namespace ui::screen::work {
 
     /**
+     * @brief 待处理权限请求项
+     */
+    struct PendingPermission {
+        domain::agent::ToolCall call;
+        domain::agent::ToolPermission permission;
+        bool operator==(const PendingPermission&) const = default;
+    };
+
+    /**
      * @brief Agent 运行时的表现层 UI 状态投影
      */
     struct AgentRunUiState {
@@ -29,14 +38,14 @@ namespace ui::screen::work {
         QString activeToolName;
         QString statusMessage;
         bool isWaitingPermission = false;
-        domain::agent::ToolCall permissionPendingCall;
-        domain::agent::ToolPermission permissionRequired;
+        QList<PendingPermission> pendingPermissions;
 
         bool operator==(const AgentRunUiState&) const = default;
     };
 
     struct WorkState {
         struct ToolEvent {
+            QString toolCallId;
             QString name;
             QString arguments;
             QString result;
@@ -102,7 +111,11 @@ namespace ui::screen::work {
         /**
          * @brief 响应用户对敏感工具操作的权限授权
          */
-        void grantPermission(const QString& toolCallId, bool granted);
+        void grantPermission(
+            const QString& toolCallId,
+            bool granted,
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+        );
 
         void setProjectRoot(const QString& rootPath);
         void selectProject(const QUuid& projectId);
@@ -120,7 +133,7 @@ namespace ui::screen::work {
         void setReasoningEffort(const QString &effort);
         void setWebSearchEnabled(bool enabled);
         void setDeepThinkingEnabled(bool enabled);
-        void refreshAvailableModels(WorkState &state);
+        void refreshAvailableModels();
 
     Q_SIGNALS:
         void stateChanged(const ui::screen::work::WorkState &state);
@@ -129,6 +142,7 @@ namespace ui::screen::work {
         void emitStateChanged() override;
 
     private:
+        void refreshAvailableModels(WorkState &state);
         void setupUseCaseConnections();
         static QString taskTitle(const QString& task);
 

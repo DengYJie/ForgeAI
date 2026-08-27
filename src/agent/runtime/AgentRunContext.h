@@ -8,6 +8,15 @@
 namespace agent::runtime {
 
     /**
+     * @brief 工具启用选择模式
+     */
+    enum class ToolSelectionMode {
+        None,      ///< 禁用任何工具
+        Selected,  ///< 仅启用 enabledTools 列表中指定的工具
+        All        ///< 启用注册表中的所有可用工具
+    };
+
+    /**
      * @brief Agent 单次运行的上下文配置参数
      */
     struct AgentRunContext {
@@ -32,6 +41,7 @@ namespace agent::runtime {
         bool useDeepThinking = false;
         QString reasoningEffort;
 
+        ToolSelectionMode toolSelectionMode = ToolSelectionMode::All;
         QStringList enabledTools;
 
         domain::agent::AgentPolicy policy;

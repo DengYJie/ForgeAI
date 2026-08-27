@@ -47,7 +47,8 @@ namespace data::repository {
             callsArr.append(QJsonObject{
                 {QStringLiteral("id"), call.id},
                 {QStringLiteral("name"), call.name},
-                {QStringLiteral("arguments"), call.arguments}
+                {QStringLiteral("arguments"), call.arguments},
+                {QStringLiteral("protocolMetadata"), call.protocolMetadata}
             });
         }
 
@@ -103,7 +104,8 @@ namespace data::repository {
                 cp.pendingToolCalls.append(domain::agent::ToolCall{
                     obj.value(QStringLiteral("id")).toString(),
                     obj.value(QStringLiteral("name")).toString(),
-                    obj.value(QStringLiteral("arguments")).toString()
+                    obj.value(QStringLiteral("arguments")).toString(),
+                    obj.value(QStringLiteral("protocolMetadata")).toObject()
                 });
             }
 

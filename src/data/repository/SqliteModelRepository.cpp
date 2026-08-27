@@ -194,7 +194,7 @@ namespace data::repository {
                 "  COALESCE(uo.is_enabled, cp.is_enabled, 0), uo.base_url_override, COALESCE(uo.api_key, cp.api_key), "
                 "  ucm.provider_id, ucm.remote_model_id, ucm.canonical_model_id, "
                 "  0.0, 0.0, 0.0, 0.0, 'USD', "
-                "  NULL, NULL, NULL, NULL, '', ucm.is_enabled, 0, ucm.origin, "
+                "  NULL, NULL, NULL, ucm.capabilities_override, '', ucm.is_enabled, 1, ucm.origin, "
                 "  cm.id, cm.name, cm.family, cm.description, cm.capabilities, "
                 "  cm.context_limit, cm.max_input_limit, cm.max_output_limit, "
                 "  cm.modalities_input, cm.modalities_output, "
@@ -365,13 +365,18 @@ namespace data::repository {
             "  remote_model_id TEXT NOT NULL,"
             "  display_name TEXT NOT NULL,"
             "  canonical_model_id TEXT,"
+            "  capabilities_override INTEGER,"
             "  is_enabled INTEGER DEFAULT 1,"
             "  origin TEXT NOT NULL DEFAULT 'User',"
             "  PRIMARY KEY (provider_id, remote_model_id)"
             ");"
         ), db);
 
-        // 校验 Hash，如有更新则原子重建 Preset 表
+        // 校验 Hash，如有更新则原子重建 Preset 表（若未提供预置文件路径，如在单元测试中，跳过 Preset 表填充）
+        if (apiJsonPath.isEmpty() && modelsJsonPath.isEmpty()) {
+            return true;
+        }
+
         QByteArray hashContent;
         {
             QFile apiF(apiJsonPath);
@@ -752,11 +757,12 @@ namespace data::repository {
             || binding.origin == domain::model::DataOrigin::Discovered)) {
             QSqlQuery q(db);
             q.prepare(QStringLiteral(
-                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, canonical_model_id, is_enabled, origin) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
+                "INSERT INTO user_custom_models (provider_id, remote_model_id, display_name, canonical_model_id, capabilities_override, is_enabled, origin) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(provider_id, remote_model_id) DO UPDATE SET "
                 "  display_name = excluded.display_name, "
                 "  canonical_model_id = excluded.canonical_model_id, "
+                "  capabilities_override = excluded.capabilities_override, "
                 "  is_enabled = excluded.is_enabled, origin = excluded.origin;"
             ));
             q.bindValue(0, binding.providerId);
@@ -764,8 +770,10 @@ namespace data::repository {
             q.bindValue(2, binding.remoteModelId);
             q.bindValue(3, binding.canonicalModelId.has_value()
                 ? QVariant(binding.canonicalModelId.value()) : QVariant());
-            q.bindValue(4, binding.isEnabled ? 1 : 0);
-            q.bindValue(5, originToString(binding.origin));
+            q.bindValue(4, binding.capabilitiesOverride.has_value()
+                ? QVariant(static_cast<qlonglong>(binding.capabilitiesOverride.value())) : QVariant());
+            q.bindValue(5, binding.isEnabled ? 1 : 0);
+            q.bindValue(6, originToString(binding.origin));
             if (!q.exec()) qWarning() << "[saveProviderModel] custom error:" << q.lastError().text();
         } else {
             QSqlQuery q(db);

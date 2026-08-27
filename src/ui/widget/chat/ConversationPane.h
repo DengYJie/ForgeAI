@@ -39,6 +39,7 @@ public:
     void setAnchorBarVisible(bool visible);
     void setEmptyStateVisible(bool visible);
     void setStatusLabelVisible(bool visible);
+    void insertWidgetBeforeInput(QWidget* widget);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -54,6 +55,8 @@ private:
     ChatAnchorBar* m_anchorBar = nullptr;
     QWidget* m_conversationColumn = nullptr;
     message::MessageListView* m_messageList = nullptr;
+    QWidget* m_inputContainer = nullptr;
+    QVBoxLayout* m_inputLayout = nullptr;
     ChatInputBox* m_inputBox = nullptr;
     fluent::textfields::Label* m_emptyStateLabel = nullptr;
     fluent::textfields::Label* m_statusLabel = nullptr;

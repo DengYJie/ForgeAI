@@ -177,8 +177,16 @@ void WorkViewModel::setupUseCaseConnections() {
                 .arg(call.name, call.id, permission.reason);
             updateState([call, permission](WorkState& state) {
                 state.agentUiState.isWaitingPermission = true;
-                state.agentUiState.permissionPendingCall = call;
-                state.agentUiState.permissionRequired = permission;
+                bool exists = false;
+                for (const auto& item : state.agentUiState.pendingPermissions) {
+                    if (item.call.id == call.id) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    state.agentUiState.pendingPermissions.append({call, permission});
+                }
                 state.statusMessage = QStringLiteral("等待用户授权操作: %1").arg(permission.reason);
             });
         });
@@ -198,6 +206,7 @@ void WorkViewModel::setupUseCaseConnections() {
 
                 state.agentUiState.activeToolName = call.name;
                 state.toolEvents.append(WorkState::ToolEvent{
+                    call.id,
                     call.name,
                     call.arguments,
                     {},
@@ -210,21 +219,30 @@ void WorkViewModel::setupUseCaseConnections() {
             if (sessionId != m_agentSessionId) return;
             qInfo().noquote() << QStringLiteral("[WorkViewModel] toolResultReady -> id: %1, isError: %2, content: %3")
                 .arg(result.toolCallId).arg(result.isError).arg(result.content.left(100));
-            updateState([messageId, result](WorkState& state) {
-                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
-                    return msg.id == messageId;
+            updateState([result](WorkState& state) {
+                auto it = std::find_if(state.messages.rbegin(), state.messages.rend(), [](const auto& msg) {
+                    return msg.role == domain::MessageRole::Tool;
                 });
-                if (it != state.messages.end()) {
+                if (it != state.messages.rend()) {
                     domain::conversation::ToolResultBlock results; results.results.append(result);
                     it->blocks.append({domain::BlockType::ToolResult, results});
+                } else {
+                    domain::conversation::Message toolMsg;
+                    toolMsg.id = QUuid::createUuid();
+                    toolMsg.role = domain::MessageRole::Tool;
+                    toolMsg.status = domain::MessageStatus::Sent;
+                    toolMsg.createdAt = QDateTime::currentDateTime();
+                    domain::conversation::ToolResultBlock results; results.results.append(result);
+                    toolMsg.blocks.append({domain::BlockType::ToolResult, results});
+                    state.messages.append(toolMsg);
                 }
 
-                for (auto rit = state.toolEvents.rbegin(); rit != state.toolEvents.rend(); ++rit) {
-                    if (rit->result.isEmpty()) {
-                        rit->result = result.content;
-                        rit->isError = result.isError;
-                        break;
-                    }
+                auto eventIt = std::find_if(state.toolEvents.begin(), state.toolEvents.end(), [&](const auto& ev) {
+                    return ev.toolCallId == result.toolCallId;
+                });
+                if (eventIt != state.toolEvents.end()) {
+                    eventIt->result = result.content;
+                    eventIt->isError = result.isError;
                 }
             });
         });
@@ -289,13 +307,20 @@ void WorkViewModel::setupUseCaseConnections() {
     }
 }
 
-void WorkViewModel::grantPermission(const QString& toolCallId, bool granted) {
+void WorkViewModel::grantPermission(const QString& toolCallId, bool granted, domain::agent::PermissionScope scope) {
     if (m_agentSessionId.isEmpty() || !m_useCases.runAgent) return;
-    qInfo().noquote() << QStringLiteral("[WorkViewModel] grantPermission -> toolCallId: %1, granted: %2").arg(toolCallId).arg(granted);
-    updateState([](WorkState& state) {
-        state.agentUiState.isWaitingPermission = false;
+    qInfo().noquote() << QStringLiteral("[WorkViewModel] grantPermission -> toolCallId: %1, granted: %2, scope: %3")
+        .arg(toolCallId).arg(granted).arg(static_cast<int>(scope));
+    updateState([toolCallId](WorkState& state) {
+        state.agentUiState.pendingPermissions.removeIf([&](const auto& p) {
+            return p.call.id == toolCallId;
+        });
+        state.agentUiState.isWaitingPermission = !state.agentUiState.pendingPermissions.isEmpty();
+        if (!state.agentUiState.isWaitingPermission) {
+            state.statusMessage.clear();
+        }
     });
-    m_useCases.runAgent->grantPermission(m_agentSessionId, toolCallId, granted);
+    m_useCases.runAgent->grantPermission(m_agentSessionId, toolCallId, granted, scope);
 }
 
 QString WorkViewModel::taskTitle(const QString& task) {
@@ -373,9 +398,14 @@ void WorkViewModel::selectProject(const QUuid& projectId) {
     if (projectId.isNull()) return;
     const auto it = std::find_if(m_state.projects.cbegin(), m_state.projects.cend(), [projectId](const auto& project) { return project.id == projectId; });
     if (it == m_state.projects.cend()) return;
+
+    cancelTask();
     m_currentProjectId = projectId;
     setProjectRoot(it->rootPath);
-    updateState([projectId](WorkState& state) { state.currentProjectId = projectId; });
+    updateState([projectId](WorkState& state) {
+        state.currentProjectId = projectId;
+    });
+    newSession();
 }
 
 void WorkViewModel::addProject(const QString& rootPath, const QString& displayName) {
@@ -395,6 +425,8 @@ void WorkViewModel::addProject(const QString& rootPath, const QString& displayNa
 }
 
 void WorkViewModel::removeProject(const QUuid& projectId) {
+    if (projectId.isNull()) return;
+
     QString targetRoot;
     for (const auto& p : m_state.projects) {
         if (p.id == projectId) {
@@ -409,38 +441,44 @@ void WorkViewModel::removeProject(const QUuid& projectId) {
     if (m_projectRepository) {
         m_projectRepository->deleteProject(projectId);
     }
-    
-    updateState([this, projectId](WorkState& state) {
-        // Cascade delete all conversations associated with this project
-        QList<QString> sessionsToDelete;
-        for (const auto& s : state.sessions) {
+
+    if (m_conversationRepository) {
+        for (const auto& s : m_state.sessions) {
             if (s.projectId == projectId) {
-                sessionsToDelete.append(s.id);
+                m_conversationRepository->deleteConversation(QUuid(s.id));
             }
         }
-        for (const auto& sessionId : sessionsToDelete) {
-            if (m_conversationService) {
-                QString dummyCurrent;
-                m_conversationService->deleteSession(state.sessions, sessionId, dummyCurrent);
-            }
-        }
-        
+    }
+
+    const bool isCurrent = (m_currentProjectId == projectId);
+    if (isCurrent) {
+        cancelTask();
+        m_agentSessionId.clear();
+    }
+
+    QUuid nextProjectId;
+    updateState([projectId, isCurrent, &nextProjectId](WorkState& state) {
         state.projects.removeIf([&](const auto& p) { return p.id == projectId; });
         state.sessions.removeIf([&](const auto& s) { return s.projectId == projectId; });
         state.pinnedProjects.remove(projectId);
-        
-        if (state.currentProjectId == projectId) {
-            cancelTask();
-            m_agentSessionId.clear();
+
+        if (isCurrent) {
             if (!state.projects.isEmpty()) {
-                selectProject(state.projects.first().id);
+                nextProjectId = state.projects.first().id;
             } else {
                 state.currentProjectId = {};
                 state.currentSessionId.clear();
+                state.currentTask.clear();
                 state.messages.clear();
+                state.toolEvents.clear();
+                state.agentUiState = {};
             }
         }
     });
+
+    if (isCurrent && !nextProjectId.isNull()) {
+        selectProject(nextProjectId);
+    }
 }
 
 void WorkViewModel::renameProject(const QUuid& projectId, const QString& newName) {
@@ -527,9 +565,12 @@ void WorkViewModel::newSession() {
         m_conversationRepository->saveConversation(conversation);
     }
     updateState([this, id](WorkState& state) {
+        state.currentProjectId = m_currentProjectId;
         state.currentSessionId = id;
         state.currentTask.clear();
         state.messages.clear();
+        state.toolEvents.clear();
+        state.agentUiState = {};
         state.sessions.prepend({id, QStringLiteral("新对话"), false, false, QDateTime::currentMSecsSinceEpoch(), m_currentProjectId});
     });
 }
@@ -537,23 +578,40 @@ void WorkViewModel::newSession() {
 void WorkViewModel::loadSession(const QString& sessionId) {
     if (sessionId == m_agentSessionId) return;
     cancelTask();
+    QUuid projectId = m_currentProjectId;
+    QString rootPath;
     if (m_conversationRepository && m_projectRepository) {
         const auto conversation = m_conversationRepository->getConversation(QUuid(sessionId));
         if (conversation && conversation->projectId.has_value()) {
             const auto project = m_projectRepository->getProject(*conversation->projectId);
             if (project) {
-                m_currentProjectId = project->id;
-                setProjectRoot(project->rootPath);
+                projectId = project->id;
+                rootPath = project->rootPath;
             }
         }
     }
+    m_currentProjectId = projectId;
+    if (!rootPath.isEmpty()) {
+        setProjectRoot(rootPath);
+    }
     m_agentSessionId = sessionId;
-    updateState([this, sessionId](WorkState& state) {
-        state.currentProjectId = m_currentProjectId;
+    const auto loadedMessages = m_conversationService
+        ? m_conversationService->loadMessages(sessionId)
+        : QList<domain::conversation::Message>{};
+
+    updateState([this, sessionId, projectId, loadedMessages](WorkState& state) {
+        state.currentProjectId = projectId;
         state.currentSessionId = sessionId;
         state.currentTask = QStringLiteral("新对话");
-        for (const auto& item : state.sessions) if (item.id == sessionId) { state.currentTask = item.title; break; }
-        state.messages = m_conversationService ? m_conversationService->loadMessages(sessionId) : QList<domain::conversation::Message>{};
+        for (const auto& item : state.sessions) {
+            if (item.id == sessionId) {
+                state.currentTask = item.title;
+                break;
+            }
+        }
+        state.messages = loadedMessages;
+        state.toolEvents.clear();
+        state.agentUiState = {};
     });
 }
 
@@ -561,30 +619,54 @@ void WorkViewModel::setSessionPinned(const QString& sessionId, bool pinned) {
     updateState([this, sessionId, pinned](WorkState& state) {
         if (m_conversationService) {
             m_conversationService->setSessionPinned(state.sessions, sessionId, pinned);
+        } else {
+            for (auto& s : state.sessions) {
+                if (s.id == sessionId) {
+                    s.isPinned = pinned;
+                    break;
+                }
+            }
         }
     });
 }
 
 void WorkViewModel::setSessionArchived(const QString& sessionId, bool archived) {
-    updateState([this, sessionId, archived](WorkState& state) {
+    bool shouldSwitch = false;
+    QString nextSessionId;
+    const bool isCurrent = (m_agentSessionId == sessionId);
+
+    updateState([this, sessionId, archived, isCurrent, &shouldSwitch, &nextSessionId](WorkState& state) {
         if (m_conversationService) {
             m_conversationService->setSessionArchived(state.sessions, sessionId, archived);
+        } else {
+            for (auto& s : state.sessions) {
+                if (s.id == sessionId) {
+                    s.isArchived = archived;
+                    break;
+                }
+            }
         }
-        if (archived && state.currentSessionId == sessionId) {
-            cancelTask();
-            m_agentSessionId.clear();
+        if (archived && isCurrent) {
+            shouldSwitch = true;
             const auto projId = state.currentProjectId;
             const auto it = std::find_if(state.sessions.cbegin(), state.sessions.cend(), [projId](const auto& item) { 
                 return !item.isArchived && item.projectId == projId; 
             });
             if (it != state.sessions.cend()) { 
-                const QString next = it->id; 
-                QTimer::singleShot(0, this, [this, next] { loadSession(next); }); 
-            } else {
-                QTimer::singleShot(0, this, &WorkViewModel::newSession);
+                nextSessionId = it->id; 
             }
         }
     });
+
+    if (shouldSwitch) {
+        cancelTask();
+        m_agentSessionId.clear();
+        if (!nextSessionId.isEmpty()) {
+            loadSession(nextSessionId);
+        } else {
+            newSession();
+        }
+    }
 }
 
 void WorkViewModel::setWebSearchEnabled(bool enabled) {
@@ -611,8 +693,16 @@ void WorkViewModel::setModel(const QString &providerId, const QString &modelId) 
         s.currentModelProviderId = it->providerId;
         s.currentModelId = it->modelId;
         s.currentModelName = it->displayName;
+        s.useDeepThinking = s.useDeepThinking && it->supportsDeepThinking;
+        s.useWebSearch = s.useWebSearch && it->supportsWebSearch;
         s.reasoningEffort = it->reasoningEfforts.contains(QStringLiteral("medium"))
             ? QStringLiteral("medium") : (it->reasoningEfforts.isEmpty() ? QString() : it->reasoningEfforts.first());
+    });
+}
+
+void WorkViewModel::refreshAvailableModels() {
+    updateState([this](WorkState& state) {
+        refreshAvailableModels(state);
     });
 }
 
@@ -623,22 +713,30 @@ void WorkViewModel::refreshAvailableModels(WorkState &s) {
     for (const auto& model : models) {
         const auto capabilities = model.effectiveCapabilities();
         QStringList efforts;
-        const QJsonArray options = QJsonDocument::fromJson(model.binding.reasoningOptionsJson.toUtf8()).array();
-        for (const auto& option : options) {
-            const QJsonObject object = option.toObject();
-            if (object.value(QStringLiteral("type")).toString() != QStringLiteral("effort")) continue;
-            for (const auto& value : object.value(QStringLiteral("values")).toArray()) efforts.append(value.toString());
+        if (model.binding.reasoningSupport.has_value()) {
+            efforts = model.binding.reasoningSupport->effortLevels;
         }
-        if (efforts.isEmpty() && model.binding.canonicalModelId.has_value())
+        if (efforts.isEmpty() && model.binding.canonicalModelId.has_value()) {
             efforts = canonicalReasoningEfforts(*model.binding.canonicalModelId);
+        }
+
+        const bool supportsAttachments = capabilities.testFlag(domain::model::ModelCapability::Vision)
+            || capabilities.testFlag(domain::model::ModelCapability::Pdf)
+            || capabilities.testFlag(domain::model::ModelCapability::Audio)
+            || capabilities.testFlag(domain::model::ModelCapability::Video);
+        const bool supportsWeb = (model.provider.protocol == domain::model::ProtocolType::OpenAIResponses);
+        const bool supportsThinking = capabilities.testFlag(domain::model::ModelCapability::Thinking)
+            || (model.binding.reasoningSupport.has_value() && model.binding.reasoningSupport->supported);
+
         s.availableModels.append({
-            model.provider.id, model.requestModelId(), model.displayName(), model.provider.name,
-            capabilities.testFlag(domain::model::ModelCapability::Vision)
-                || capabilities.testFlag(domain::model::ModelCapability::Pdf)
-                || capabilities.testFlag(domain::model::ModelCapability::Audio)
-                || capabilities.testFlag(domain::model::ModelCapability::Video),
-            model.provider.protocol == domain::model::ProtocolType::OpenAIResponses,
-            capabilities.testFlag(domain::model::ModelCapability::Thinking), efforts
+            model.provider.id,
+            model.requestModelId(),
+            model.displayName(),
+            model.provider.name,
+            supportsAttachments,
+            supportsWeb,
+            supportsThinking,
+            efforts
         });
     }
     if (s.availableModels.isEmpty()) {
@@ -655,6 +753,8 @@ void WorkViewModel::refreshAvailableModels(WorkState &s) {
         s.currentModelProviderId = fallback.providerId;
         s.currentModelId = fallback.modelId;
         s.currentModelName = fallback.displayName;
+        s.useDeepThinking = s.useDeepThinking && fallback.supportsDeepThinking;
+        s.useWebSearch = s.useWebSearch && fallback.supportsWebSearch;
         s.reasoningEffort = fallback.reasoningEfforts.contains(QStringLiteral("medium"))
             ? QStringLiteral("medium") : (fallback.reasoningEfforts.isEmpty() ? QString() : fallback.reasoningEfforts.first());
     }

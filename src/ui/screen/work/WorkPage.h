@@ -22,6 +22,7 @@ namespace ui::screen::work {
     class WorkViewModel;
     struct WorkState;
     class ProjectHeader;
+    class PermissionFloatingCard;
 
     /**
      * @brief 工作流主界面 (纯 View)，接收注入的 WorkViewModel
@@ -67,6 +68,7 @@ namespace ui::screen::work {
         QStyledItemDelegate *m_sessionTreeDelegate = nullptr;
         QWidget *m_workAreaWidget = nullptr;
         ui::widget::chat::ConversationPane *m_pane = nullptr;
+        PermissionFloatingCard *m_permissionCard = nullptr;
 
         QVector<ModelChoice> m_modelChoices;
         QString m_currentModelProviderId;

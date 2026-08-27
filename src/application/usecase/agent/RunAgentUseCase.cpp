@@ -52,9 +52,14 @@ namespace application::usecase::agent {
         }
     }
 
-    void RunAgentUseCase::grantPermission(const QString& sessionId, const QString& toolCallId, bool granted) {
+    void RunAgentUseCase::grantPermission(
+        const QString& sessionId,
+        const QString& toolCallId,
+        bool granted,
+        domain::agent::PermissionScope scope
+    ) {
         if (m_runtime) {
-            m_runtime->grantPermission(sessionId, toolCallId, granted);
+            m_runtime->grantPermission(sessionId, toolCallId, granted, scope);
         }
     }
 
@@ -166,12 +171,20 @@ namespace application::usecase::agent {
             return;
         }
 
+        ::agent::runtime::ToolSelectionMode toolMode = ::agent::runtime::ToolSelectionMode::All;
         QStringList enabledTools;
         if (agentConfig.has_value()) {
-            enabledTools = agentConfig->enabledTools;
+            if (agentConfig->enabledTools.isEmpty()) {
+                toolMode = ::agent::runtime::ToolSelectionMode::None;
+            } else {
+                toolMode = ::agent::runtime::ToolSelectionMode::Selected;
+                enabledTools = agentConfig->enabledTools;
+            }
+        } else {
+            toolMode = ::agent::runtime::ToolSelectionMode::All;
         }
 
-        if (!enabledTools.isEmpty() && !caps.testFlag(domain::model::ModelCapability::ToolCalling)) {
+        if (toolMode != ::agent::runtime::ToolSelectionMode::None && !caps.testFlag(domain::model::ModelCapability::ToolCalling)) {
             domain::llm::ChatError err;
             err.category = domain::llm::ChatErrorCategory::Configuration;
             err.code = QStringLiteral("AgentModelToolCallingUnsupported");
@@ -181,8 +194,8 @@ namespace application::usecase::agent {
             return;
         }
 
-        qInfo().noquote() << QStringLiteral("[RunAgentUseCase] execute -> resolved model: %1 (%2)")
-            .arg(selected->displayName(), selected->requestModelId());
+        qInfo().noquote() << QStringLiteral("[RunAgentUseCase] execute -> resolved model: %1 (%2), toolMode: %3")
+            .arg(selected->displayName(), selected->requestModelId(), QString::number(static_cast<int>(toolMode)));
 
         // 通过项目运行时协调器挂载项目关联资源（如 MCP 外部扩展）
         if (m_runtimeCoordinator && !workspaceRoot.isEmpty()) {
@@ -198,6 +211,7 @@ namespace application::usecase::agent {
         context.useWebSearch = useWebSearch;
         context.useDeepThinking = useDeepThinking;
         context.reasoningEffort = reasoningEffort;
+        context.toolSelectionMode = toolMode;
         context.enabledTools = enabledTools;
 
         if (!effSystemPrompt.trimmed().isEmpty()) {

@@ -1,8 +1,8 @@
-#include <QtTest>
-#include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
+#include <QTemporaryDir>
 #include <QTimer>
+#include <QtTest>
 // Recompiled against updated McpClient.h and AgentRunState.h
 #include <QEventLoop>
 
@@ -43,7 +43,7 @@ public:
                     if (m_cancelled) break;
                     emit eventReceived(ev);
                 }
-            });
+                });
         }
     }
 
@@ -60,7 +60,7 @@ private:
 class MockChatGateway final : public application::ports::IChatModelGateway {
 public:
     void enqueueResponse(QList<domain::llm::ChatEvent> events, int delayMs = 10) {
-        m_responseQueue.append({std::move(events), delayMs});
+        m_responseQueue.append({ std::move(events), delayMs });
     }
 
     application::ports::IChatOperation* sendRequest(
@@ -76,9 +76,10 @@ public:
             auto item = m_responseQueue.takeFirst();
             events = item.first;
             delayMs = item.second;
-        } else {
+        }
+        else {
             events.append(domain::llm::EventStarted{});
-            events.append(domain::llm::EventTextDelta{QStringLiteral("默认模型回答")});
+            events.append(domain::llm::EventTextDelta{ QStringLiteral("默认模型回答") });
             events.append(domain::llm::EventFinished{});
         }
 
@@ -139,16 +140,16 @@ void WorkIntegrationTests::testAgentRuntimeExecutesBuiltinTools() {
     // Round 1: 模型返回 write_file 工具调用
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_write_1"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_write_1"), QStringLiteral(R"({"path":"agent_test.txt","content":"hello forgeai"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_write_1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_write_1"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_write_1"), QStringLiteral(R"({"path":"agent_test.txt","content":"hello forgeai"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_write_1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     // Round 2: 收到工具结果后，模型生成最终回答
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("文件创建完成！")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("文件创建完成！") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -170,11 +171,11 @@ void WorkIntegrationTests::testAgentRuntimeExecutesBuiltinTools() {
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
     connect(&runtime, &agent::runtime::AgentRuntime::runFailed, [&](const QString&, const domain::llm::ChatError& err) {
         qWarning() << "Run failed:" << err.userMessage;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("请创建 agent_test.txt 文件"));
@@ -200,16 +201,16 @@ void WorkIntegrationTests::testAgentRuntimePermissionAskUserAndGrant() {
     // Round 1: 模型请求写文件
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_perm_1"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_perm_1"), QStringLiteral(R"({"path":"perm_test.txt","content":"sensitive content"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_perm_1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_perm_1"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_perm_1"), QStringLiteral(R"({"path":"perm_test.txt","content":"sensitive content"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_perm_1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     // Round 2: 授权后模型返回完成
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("已成功写入！")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("已成功写入！") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -237,7 +238,7 @@ void WorkIntegrationTests::testAgentRuntimePermissionAskUserAndGrant() {
         permissionRequestedReceived = true;
         pendingToolCallId = call.id;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("请写敏感文件"));
@@ -258,7 +259,7 @@ void WorkIntegrationTests::testAgentRuntimePermissionAskUserAndGrant() {
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completeReceived = true;
         completeLoop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &completeLoop, &QEventLoop::quit);
     runtime.grantPermission(QStringLiteral("sess_test_perm"), pendingToolCallId, true);
@@ -275,8 +276,8 @@ void WorkIntegrationTests::testAgentRuntimeSuspendAndResume() {
 
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_sus_1"), QStringLiteral("read_file")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_sus_1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_sus_1"), QStringLiteral("read_file") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_sus_1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
@@ -305,7 +306,7 @@ void WorkIntegrationTests::testAgentRuntimeSuspendAndResume() {
     // 恢复运行
     QList<domain::llm::ChatEvent> rResume;
     rResume.append(domain::llm::EventStarted{});
-    rResume.append(domain::llm::EventTextDelta{QStringLiteral("恢复后的回复")});
+    rResume.append(domain::llm::EventTextDelta{ QStringLiteral("恢复后的回复") });
     rResume.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(rResume);
 
@@ -314,7 +315,7 @@ void WorkIntegrationTests::testAgentRuntimeSuspendAndResume() {
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         resumeCompleted = true;
         resumeLoop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &resumeLoop, &QEventLoop::quit);
     runtime.resumeRun(context);
@@ -351,15 +352,15 @@ void WorkIntegrationTests::testWorkViewModelUdfProjection() {
 
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_udf_1"), QStringLiteral("list_files")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_udf_1"), QStringLiteral(R"({"path":"."})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_udf_1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_udf_1"), QStringLiteral("list_files") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_udf_1"), QStringLiteral(R"({"path":"."})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_udf_1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("所有文件列表已找到")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("所有文件列表已找到") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -392,6 +393,7 @@ void WorkIntegrationTests::testWorkViewModelUdfProjection() {
     binding.isEnabled = true;
     binding.isCustom = true;
     binding.origin = domain::model::DataOrigin::User;
+    binding.capabilitiesOverride = domain::model::ModelCapability::Chat | domain::model::ModelCapability::ToolCalling;
     modelService->saveProviderModel(binding);
 
     auto runAgentUseCase = std::make_unique<application::usecase::agent::RunAgentUseCase>(
@@ -400,15 +402,22 @@ void WorkIntegrationTests::testWorkViewModelUdfProjection() {
     );
 
     auto projRepo = std::make_unique<data::repository::SqliteProjectRepository>();
+    projRepo->initializeDatabase();
     auto convRepo = std::make_unique<data::repository::SqliteConversationRepository>();
-    services::project::ProjectContextService projContextService;
+    convRepo->initializeDatabase();
+    auto getModelsUseCase = std::make_unique<application::usecase::settings::GetModelsUseCase>(modelService.get());
 
     application::usecase::work::WorkUseCases useCases;
     useCases.runAgent = runAgentUseCase.get();
     useCases.projectRepository = projRepo.get();
     useCases.conversationRepository = convRepo.get();
+    useCases.modelService = modelService.get();
+    useCases.getModels = getModelsUseCase.get();
 
+    services::project::ProjectContextService projContextService;
     ui::screen::work::WorkViewModel vm(useCases, &projContextService);
+    vm.refreshAvailableModels();
+    vm.setModel(QStringLiteral("mock_prov"), QStringLiteral("mock-model"));
     vm.addProject(m_tempDir.path(), QStringLiteral("TestProject"));
     vm.newSession();
 
@@ -417,11 +426,11 @@ void WorkIntegrationTests::testWorkViewModelUdfProjection() {
     connect(runAgentUseCase.get(), &application::usecase::agent::RunAgentUseCase::runCompleted, [&]() {
         udfCompleted = true;
         loop.quit();
-    });
+        });
     connect(runAgentUseCase.get(), &application::usecase::agent::RunAgentUseCase::runFailed, [&](const QString& sid, const domain::llm::ChatError& err) {
         qWarning() << "[TEST FAIL REASON]" << sid << err.code << err.userMessage << err.message;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     vm.startTask(QStringLiteral("列出文件"));
@@ -442,15 +451,15 @@ void WorkIntegrationTests::testAgentRuntimeStateRealtimeSynchronization() {
 
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_sync_1"), QStringLiteral("list_files")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_sync_1"), QStringLiteral(R"({"path":"."})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_sync_1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_sync_1"), QStringLiteral("list_files") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_sync_1"), QStringLiteral(R"({"path":"."})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_sync_1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("完成")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("完成") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -476,14 +485,14 @@ void WorkIntegrationTests::testAgentRuntimeStateRealtimeSynchronization() {
         if (!s.results.isEmpty()) {
             sawResultsInState = true;
         }
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("测试状态同步"));
@@ -500,9 +509,9 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
     // Round 1: 模型返回写文件工具请求
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_rec_1"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_rec_1"), QStringLiteral(R"({"path":"recovered_file.txt","content":"checkpoint data"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_rec_1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_rec_1"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_rec_1"), QStringLiteral(R"({"path":"recovered_file.txt","content":"checkpoint data"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_rec_1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
@@ -523,10 +532,10 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
         agent::runtime::AgentRuntime runtime1(&mockGateway, nullptr, &toolRegistry, &cpRepo);
         bool paused = false;
         QEventLoop loop1;
-        connect(&runtime1, &agent::runtime::AgentRuntime::permissionRequested, [&]() {
+        connect(&runtime1, &agent::runtime::AgentRuntime::permissionRequested, [&](const QString&, const domain::agent::ToolCall&, const domain::agent::ToolPermission&) {
             paused = true;
             loop1.quit();
-        });
+            });
 
         QTimer::singleShot(3000, &loop1, &QEventLoop::quit);
         runtime1.startRun(context, QStringLiteral("请写恢复文件"));
@@ -546,7 +555,7 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
     // 实例 2（模拟重启）恢复运行
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("恢复后完成写入")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("恢复后完成写入") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -561,7 +570,7 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
         permRequested2 = true;
         pendingCallId2 = call.id;
         loop2.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop2, &QEventLoop::quit);
     runtime2.resumeRun(context);
@@ -576,7 +585,7 @@ void WorkIntegrationTests::testAgentRuntimeCheckpointRecoveryWithPendingToolsAnd
     connect(&runtime2, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed2 = true;
         loopFinish.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loopFinish, &QEventLoop::quit);
     runtime2.grantPermission(QStringLiteral("sess_test_deep_recovery"), pendingCallId2, true);
@@ -597,9 +606,9 @@ void WorkIntegrationTests::testAgentRuntimeMaxToolRoundsStrictLimit() {
     for (int i = 0; i < 5; ++i) {
         QList<domain::llm::ChatEvent> r;
         r.append(domain::llm::EventStarted{});
-        r.append(domain::llm::EventToolCallStarted{QStringLiteral("call_%1").arg(i), QStringLiteral("list_files")});
-        r.append(domain::llm::EventToolCallDelta{QStringLiteral("call_%1").arg(i), QStringLiteral(R"({"path":"."})")});
-        r.append(domain::llm::EventToolCallFinished{QStringLiteral("call_%1").arg(i)});
+        r.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_%1").arg(i), QStringLiteral("list_files") });
+        r.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_%1").arg(i), QStringLiteral(R"({"path":"."})") });
+        r.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_%1").arg(i) });
         r.append(domain::llm::EventFinished{});
         mockGateway.enqueueResponse(r);
     }
@@ -622,7 +631,7 @@ void WorkIntegrationTests::testAgentRuntimeMaxToolRoundsStrictLimit() {
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("循环工具调用任务"));
@@ -639,16 +648,16 @@ void WorkIntegrationTests::testAgentRuntimeEnforcesEnabledToolsFiltering() {
     // 模型尝试调用 write_file
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_write"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_write"), QStringLiteral(R"({"path":"blocked.txt","content":"should not exist"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_write")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_write"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_write"), QStringLiteral(R"({"path":"blocked.txt","content":"should not exist"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_write") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     // 收到拒绝后模型直接输出文本
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("工具被安全策略拦截。")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("工具被安全策略拦截。") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -664,23 +673,24 @@ void WorkIntegrationTests::testAgentRuntimeEnforcesEnabledToolsFiltering() {
     context.sessionId = QStringLiteral("sess_filter_tools");
     context.workspaceRoot = m_tempDir.path();
     // 仅允许 list_files，不启用 write_file
-    context.enabledTools = {QStringLiteral("list_files")};
+    context.toolSelectionMode = agent::runtime::ToolSelectionMode::Selected;
+    context.enabledTools = { QStringLiteral("list_files") };
 
     bool toolResultError = false;
     QString toolResultContent;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         if (res.toolCallId == QStringLiteral("call_write")) {
             toolResultError = res.isError;
             toolResultContent = res.content;
         }
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("尝试调用未启用工具"));
@@ -715,19 +725,19 @@ void WorkIntegrationTests::testAgentRuntimeParallelToolExecution() {
     // 第一轮：并发调用两个 read_file
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p1"), QStringLiteral("read_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p1"), QStringLiteral(R"({"path":"p1.txt"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p1")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p2"), QStringLiteral("read_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p2"), QStringLiteral(R"({"path":"p2.txt"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p2")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_p1"), QStringLiteral("read_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_p1"), QStringLiteral(R"({"path":"p1.txt"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_p1") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_p2"), QStringLiteral("read_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_p2"), QStringLiteral(R"({"path":"p2.txt"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_p2") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     // 第二轮：汇总结果
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("并发读取完成")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("并发读取完成") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -745,16 +755,16 @@ void WorkIntegrationTests::testAgentRuntimeParallelToolExecution() {
     context.policy.allowParallelToolExecution = true;
 
     QMap<QString, QString> resultsMap;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         resultsMap.insert(res.toolCallId, res.content);
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("并发读取文件"));
@@ -772,7 +782,7 @@ void WorkIntegrationTests::testAgentRuntimeTimeoutWatchdog() {
     // 模拟网关延迟 500ms，而策略超时设定为 100ms
     QList<domain::llm::ChatEvent> slowResponse;
     slowResponse.append(domain::llm::EventStarted{});
-    slowResponse.append(domain::llm::EventTextDelta{QStringLiteral("迟到的回复")});
+    slowResponse.append(domain::llm::EventTextDelta{ QStringLiteral("迟到的回复") });
     slowResponse.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(slowResponse, 500);
 
@@ -796,7 +806,7 @@ void WorkIntegrationTests::testAgentRuntimeTimeoutWatchdog() {
         failed = true;
         errorCode = err.code;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("超时任务"));
@@ -859,7 +869,7 @@ public:
         return def;
     }
     application::ports::ToolExecutionTraits traits() const override {
-        return {true, true, false, QString()};
+        return { true, true, false, QString() };
     }
     std::unique_ptr<application::ports::IToolOperation> execute(
         const domain::agent::ToolCall& call,
@@ -867,21 +877,21 @@ public:
     ) override {
         return std::make_unique<application::ports::ThreadedToolOperation>(
             call.id,
-            [this, call, context]() {
+            [flag = wasCanceled, call, context]() {
                 for (int i = 0; i < 40; ++i) {
                     if (context.cancellationToken.isCanceled()) {
-                        wasCanceled = true;
-                        return domain::agent::ToolResult{call.id, QStringLiteral("操作已合作式取消"), true};
+                        *flag = true;
+                        return domain::agent::ToolResult{ call.id, QStringLiteral("操作已合作式取消"), true };
                     }
                     QThread::msleep(10);
                 }
-                return domain::agent::ToolResult{call.id, QStringLiteral("slow finish"), false};
+                return domain::agent::ToolResult{ call.id, QStringLiteral("slow finish"), false };
             },
             context.timeoutMs > 0 ? context.timeoutMs : 10000
         );
     }
 
-    std::atomic<bool> wasCanceled{false};
+    std::shared_ptr<std::atomic<bool>> wasCanceled = std::make_shared<std::atomic<bool>>(false);
 };
 
 // 模拟非线程安全 MCP 工具
@@ -894,7 +904,7 @@ public:
         return def;
     }
     application::ports::ToolExecutionTraits traits() const override {
-        return {false, true, false, QStringLiteral("mcp-session:%1").arg(m_name)};
+        return { false, true, false, QStringLiteral("mcp-session:%1").arg(m_name) };
     }
     std::unique_ptr<application::ports::IToolOperation> execute(
         const domain::agent::ToolCall& call,
@@ -904,7 +914,7 @@ public:
         return std::make_unique<application::ports::ImmediateToolOperation>(
             call.id,
             [this, call]() {
-                return domain::agent::ToolResult{call.id, QStringLiteral("mcp res: %1").arg(m_name), false};
+                return domain::agent::ToolResult{ call.id, QStringLiteral("mcp res: %1").arg(m_name), false };
             }
         );
     }
@@ -926,16 +936,16 @@ void WorkIntegrationTests::testAgentRuntimeConcurrentMcpToolCallsSafety() {
     // 模型下发两个并发 MCP 工具调用
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_mcp1"), QStringLiteral("mcp::server::tool1")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_mcp1")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_mcp2"), QStringLiteral("mcp::server::tool2")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_mcp2")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_mcp1"), QStringLiteral("mcp::server::tool1") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_mcp1") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_mcp2"), QStringLiteral("mcp::server::tool2") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_mcp2") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("MCP 工具调用完成")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("MCP 工具调用完成") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -955,16 +965,16 @@ void WorkIntegrationTests::testAgentRuntimeConcurrentMcpToolCallsSafety() {
     context.policy.allowParallelToolExecution = true;
 
     QMap<QString, QString> resultsMap;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         resultsMap.insert(res.toolCallId, res.content);
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("调用多个 MCP 工具"));
@@ -982,16 +992,16 @@ void WorkIntegrationTests::testAgentRuntimeToolExecutionTimeoutProtection() {
     // 模型下发两个并发工具调用（包含耗时 400ms 的慢速工具）
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow1"), QStringLiteral("slow_tool")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow1")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow2"), QStringLiteral("slow_tool")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow2")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_slow1"), QStringLiteral("slow_tool") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_slow1") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_slow2"), QStringLiteral("slow_tool") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_slow2") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("处理完毕")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("处理完毕") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -1011,16 +1021,16 @@ void WorkIntegrationTests::testAgentRuntimeToolExecutionTimeoutProtection() {
     context.policy.allowParallelToolExecution = true;
 
     QMap<QString, domain::agent::ToolResult> resultsMap;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         resultsMap.insert(res.toolCallId, res);
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     QElapsedTimer elapsed;
     elapsed.start();
@@ -1046,8 +1056,8 @@ void WorkIntegrationTests::testAgentRuntimeSingleSlowToolTimeoutProtection() {
     // 模型下发单个慢速工具调用
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow_single"), QStringLiteral("slow_tool")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow_single")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_slow_single"), QStringLiteral("slow_tool") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_slow_single") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
@@ -1067,14 +1077,14 @@ void WorkIntegrationTests::testAgentRuntimeSingleSlowToolTimeoutProtection() {
     context.policy.allowParallelToolExecution = true; // 这是默认开启的
 
     QMap<QString, domain::agent::ToolResult> resultsMap;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         resultsMap.insert(res.toolCallId, res);
-    });
+        });
 
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&loop]() {
         loop.quit();
-    });
+        });
 
     QElapsedTimer elapsed;
     elapsed.start();
@@ -1096,28 +1106,28 @@ void WorkIntegrationTests::testAgentRuntimeSingleSlowToolTimeoutProtection() {
 class EventLoopMockMcpTool final : public application::ports::ITool {
 public:
     domain::agent::ToolDefinition definition() const override {
-        return {QStringLiteral("mcp_loop_tool"), {}};
+        return { QStringLiteral("mcp_loop_tool"), {} };
     }
     application::ports::ToolExecutionTraits traits() const override {
-        return {false, true, false, QStringLiteral("mcp-session:mock_loop")};
+        return { false, true, false, QStringLiteral("mcp-session:mock_loop") };
     }
     std::unique_ptr<application::ports::IToolOperation> execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
         return std::make_unique<application::ports::ThreadedToolOperation>(
             call.id,
-            [this, call, context]() {
+            [flag = wasCanceled, call, context]() {
                 for (int i = 0; i < 80; ++i) {
                     if (context.cancellationToken.isCanceled()) {
-                        wasCanceled = true;
-                        return domain::agent::ToolResult{call.id, QStringLiteral("MCP_Cancelled_Via_Token"), true};
+                        *flag = true;
+                        return domain::agent::ToolResult{ call.id, QStringLiteral("MCP_Cancelled_Via_Token"), true };
                     }
                     QThread::msleep(10);
                 }
-                return domain::agent::ToolResult{call.id, QStringLiteral("MCP_Finished_Naturally"), false};
+                return domain::agent::ToolResult{ call.id, QStringLiteral("MCP_Finished_Naturally"), false };
             },
             context.timeoutMs > 0 ? context.timeoutMs : 10000
         );
     }
-    std::atomic<bool> wasCanceled{false};
+    std::shared_ptr<std::atomic<bool>> wasCanceled = std::make_shared<std::atomic<bool>>(false);
 };
 
 void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
@@ -1126,10 +1136,10 @@ void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
     // 模型下发两个工具：一个慢速并发工具（isThreadSafe=true），一个 MCP 模拟工具（isThreadSafe=false）
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_slow"), QStringLiteral("slow_tool")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_slow")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_mcp"), QStringLiteral("mcp_loop_tool")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_mcp")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_slow"), QStringLiteral("slow_tool") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_slow") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_mcp"), QStringLiteral("mcp_loop_tool") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_mcp") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
@@ -1148,22 +1158,22 @@ void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
     context.policy.allowParallelToolExecution = true;
 
     QMap<QString, domain::agent::ToolResult> resultsMap;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         resultsMap.insert(res.toolCallId, res);
-    });
+        });
 
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         loop.quit();
-    });
-    connect(&runtime, &agent::runtime::AgentRuntime::runFailed, [&]() {
+        });
+    connect(&runtime, &agent::runtime::AgentRuntime::runFailed, [&](const QString&, const domain::llm::ChatError&) {
         loop.quit();
-    });
+        });
 
     // 启动非阻塞取消定时器
     QTimer::singleShot(150, [&runtime]() {
         runtime.cancelRun();
-    });
+        });
 
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);
     runtime.startRun(context, QStringLiteral("触发取消"));
@@ -1176,14 +1186,14 @@ void WorkIntegrationTests::testAgentRuntimeCancelRunPropagatesToTools() {
 
     // 验证：
     // 1. 并发工具捕获到了取消信号（通过 CancellationToken 合作式传播）
-    QVERIFY2(slowTool->wasCanceled, "Slow built-in tool was not cooperatively cancelled");
+    QVERIFY2(slowTool->wasCanceled->load(), "Slow built-in tool was not cooperatively cancelled");
     QCOMPARE(resultsMap.size(), 2);
     // cancelRun() emits a generic "操作已取消" result for rapid cleanup; the thread's
     // cooperative result arrives later (discarded via QPointer) — so isError is the right check.
     QVERIFY(resultsMap.value(QStringLiteral("call_slow")).isError);
 
     // 2. MCP 模拟工具也捕获到了取消信号
-    QVERIFY2(mcpTool->wasCanceled, "MCP tool was not cooperatively cancelled");
+    QVERIFY2(mcpTool->wasCanceled->load(), "MCP tool was not cooperatively cancelled");
     QVERIFY(resultsMap.value(QStringLiteral("call_mcp")).isError);
 }
 
@@ -1195,14 +1205,14 @@ public:
         return def;
     }
     application::ports::ToolExecutionTraits traits() const override {
-        return {true, true, false, QString()};
+        return { true, true, false, QString() };
     }
     std::unique_ptr<application::ports::IToolOperation> execute(const domain::agent::ToolCall& call, const application::ports::ToolExecutionContext& context) override {
         return std::make_unique<application::ports::ThreadedToolOperation>(
             call.id,
             [call]() {
                 QThread::msleep(800);
-                return domain::agent::ToolResult{call.id, QStringLiteral("不合作执行完毕"), false};
+                return domain::agent::ToolResult{ call.id, QStringLiteral("不合作执行完毕"), false };
             },
             context.timeoutMs > 0 ? context.timeoutMs : 30000
         );
@@ -1215,8 +1225,8 @@ void WorkIntegrationTests::testAgentRuntimeUncooperativeToolRuntimeDestructionSa
     // 下发不合作工具
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_uncoop"), QStringLiteral("uncooperative_tool")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_uncoop")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_uncoop"), QStringLiteral("uncooperative_tool") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_uncoop") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
@@ -1236,14 +1246,14 @@ void WorkIntegrationTests::testAgentRuntimeUncooperativeToolRuntimeDestructionSa
     auto* runtime = new agent::runtime::AgentRuntime(&mockGateway, nullptr, &toolRegistry, nullptr);
 
     QEventLoop loop;
-    connect(runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult&) {
+    connect(runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult&) {
         // 一旦超时结果就绪，立刻销毁 runtime！
         runtime->deleteLater();
         loop.quit();
-    });
+        });
 
     runtime->startRun(context, QStringLiteral("执行不合作工具"));
-    
+
     QTimer::singleShot(2000, &loop, &QEventLoop::quit);
     loop.exec();
 
@@ -1261,19 +1271,19 @@ void WorkIntegrationTests::testAgentRuntimeImmediateToolCheckpointRecovery() {
     // 模型返回 2 个工具调用
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_a"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_a"), QStringLiteral(R"({"path":"file_a.txt","content":"data A"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_a")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_b"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_b"), QStringLiteral(R"({"path":"file_b.txt","content":"data B"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_b")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_a"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_a"), QStringLiteral(R"({"path":"file_a.txt","content":"data A"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_a") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_b"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_b"), QStringLiteral(R"({"path":"file_b.txt","content":"data B"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_b") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     // 恢复后的第 2 轮回答
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("全部写入完成")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("全部写入完成") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -1295,14 +1305,14 @@ void WorkIntegrationTests::testAgentRuntimeImmediateToolCheckpointRecovery() {
         auto* runtime1 = new agent::runtime::AgentRuntime(&mockGateway, nullptr, &toolRegistry, &cpRepo);
         QEventLoop loop1;
         int toolResultsReceived = 0;
-        connect(runtime1, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        connect(runtime1, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
             ++toolResultsReceived;
             if (res.toolCallId == QStringLiteral("call_a")) {
                 // 第一个工具一执行完，立刻模拟崩溃销毁 runtime1
                 runtime1->deleteLater();
                 loop1.quit();
             }
-        });
+            });
 
         runtime1->startRun(context, QStringLiteral("写两个文件"));
         QTimer::singleShot(2000, &loop1, &QEventLoop::quit);
@@ -1325,13 +1335,13 @@ void WorkIntegrationTests::testAgentRuntimeImmediateToolCheckpointRecovery() {
         QList<QString> executedToolIds;
         QEventLoop loop2;
 
-        connect(&runtime2, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+        connect(&runtime2, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
             executedToolIds.append(res.toolCallId);
-        });
+            });
         connect(&runtime2, &agent::runtime::AgentRuntime::runCompleted, [&]() {
             completed = true;
             loop2.quit();
-        });
+            });
 
         runtime2.resumeRun(context);
         QTimer::singleShot(3000, &loop2, &QEventLoop::quit);
@@ -1354,25 +1364,25 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeRunApproval() {
     // Round 1: 模型返回第 1 次 write_file
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_w1"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_w1"), QStringLiteral(R"({"path":"run_mem_1.txt","content":"data 1"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_w1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_w1"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_w1"), QStringLiteral(R"({"path":"run_mem_1.txt","content":"data 1"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_w1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     // Round 2: 模型返回第 2 次 write_file
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventToolCallStarted{QStringLiteral("call_w2"), QStringLiteral("write_file")});
-    r2.append(domain::llm::EventToolCallDelta{QStringLiteral("call_w2"), QStringLiteral(R"({"path":"run_mem_2.txt","content":"data 2"})")});
-    r2.append(domain::llm::EventToolCallFinished{QStringLiteral("call_w2")});
+    r2.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_w2"), QStringLiteral("write_file") });
+    r2.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_w2"), QStringLiteral(R"({"path":"run_mem_2.txt","content":"data 2"})") });
+    r2.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_w2") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
     // Round 3: 最终回复
     QList<domain::llm::ChatEvent> r3;
     r3.append(domain::llm::EventStarted{});
-    r3.append(domain::llm::EventTextDelta{QStringLiteral("两份文件全部写入完成")});
+    r3.append(domain::llm::EventTextDelta{ QStringLiteral("两份文件全部写入完成") });
     r3.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r3);
 
@@ -1397,16 +1407,16 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeRunApproval() {
             // 第一次被询问时，选择以 PermissionScope::Run 记忆授权！
             QTimer::singleShot(10, [&runtime, call]() {
                 runtime.grantPermission(QStringLiteral("sess_perm_scope_test"), call.id, true, domain::agent::PermissionScope::Run);
-            });
+                });
         }
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     runtime.startRun(context, QStringLiteral("写两个文件"));
     QTimer::singleShot(4000, &loop, &QEventLoop::quit);
@@ -1425,30 +1435,30 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeProjectAndGlobalApprov
     // Run 1 in Project A
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p1"), QStringLiteral("write_file")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p1"), QStringLiteral(R"({"path":"proj_a.txt","content":"proj A content"})")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p1")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_p1"), QStringLiteral("write_file") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_p1"), QStringLiteral(R"({"path":"proj_a.txt","content":"proj A content"})") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_p1") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("完成写入 A")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("完成写入 A") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
     // Run 2 in Project A (different session, same project)
     QList<domain::llm::ChatEvent> r3;
     r3.append(domain::llm::EventStarted{});
-    r3.append(domain::llm::EventToolCallStarted{QStringLiteral("call_p2"), QStringLiteral("write_file")});
-    r3.append(domain::llm::EventToolCallDelta{QStringLiteral("call_p2"), QStringLiteral(R"({"path":"proj_a2.txt","content":"proj A2 content"})")});
-    r3.append(domain::llm::EventToolCallFinished{QStringLiteral("call_p2")});
+    r3.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_p2"), QStringLiteral("write_file") });
+    r3.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_p2"), QStringLiteral(R"({"path":"proj_a2.txt","content":"proj A2 content"})") });
+    r3.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_p2") });
     r3.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r3);
 
     QList<domain::llm::ChatEvent> r4;
     r4.append(domain::llm::EventStarted{});
-    r4.append(domain::llm::EventTextDelta{QStringLiteral("完成写入 A2")});
+    r4.append(domain::llm::EventTextDelta{ QStringLiteral("完成写入 A2") });
     r4.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r4);
 
@@ -1473,15 +1483,15 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeProjectAndGlobalApprov
         // 以 PermissionScope::Project 授权
         QTimer::singleShot(10, [&runtime, call]() {
             runtime.grantPermission(QStringLiteral("sess_proj_1"), call.id, true, domain::agent::PermissionScope::Project);
+            });
         });
-    });
 
     bool completed1 = false;
     QEventLoop loop1;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed1 = true;
         loop1.quit();
-    });
+        });
 
     runtime.startRun(ctx1, QStringLiteral("项目 A 第 1 次运行"));
     QTimer::singleShot(3000, &loop1, &QEventLoop::quit);
@@ -1502,7 +1512,7 @@ void WorkIntegrationTests::testAgentRuntimePermissionScopeProjectAndGlobalApprov
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed2 = true;
         loop2.quit();
-    });
+        });
 
     runtime.startRun(ctx2, QStringLiteral("项目 A 第 2 次运行（新会话）"));
     QTimer::singleShot(3000, &loop2, &QEventLoop::quit);
@@ -1523,7 +1533,7 @@ public:
         return def;
     }
     application::ports::ToolExecutionTraits traits() const override {
-        return {true, true, true, QString()};
+        return { true, true, true, QString() };
     }
     QList<domain::agent::ToolPermission> permissions() const override {
         return {};
@@ -1535,7 +1545,7 @@ public:
         return std::make_unique<application::ports::ImmediateToolOperation>(
             call.id,
             [call]() -> domain::agent::ToolResult {
-                return {call.id, QString(50000, QLatin1Char('A')), false};
+                return { call.id, QString(50000, QLatin1Char('A')), false };
             }
         );
     }
@@ -1546,15 +1556,15 @@ void WorkIntegrationTests::testAgentRuntimeToolOutputTruncation() {
 
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_huge"), QStringLiteral("get_huge_log")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_huge"), QStringLiteral("{}")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_huge")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_huge"), QStringLiteral("get_huge_log") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_huge"), QStringLiteral("{}") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_huge") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("完成")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("完成") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -1571,16 +1581,16 @@ void WorkIntegrationTests::testAgentRuntimeToolOutputTruncation() {
     context.policy.maxToolOutputChars = 500; // 限制为 500 字符
 
     domain::agent::ToolResult receivedResult;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         receivedResult = res;
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     runtime.startRun(context, QStringLiteral("获取大日志"));
     QTimer::singleShot(2000, &loop, &QEventLoop::quit);
@@ -1605,7 +1615,7 @@ public:
         return def;
     }
     application::ports::ToolExecutionTraits traits() const override {
-        return {true, true, true, QString()};
+        return { true, true, true, QString() };
     }
     QList<domain::agent::ToolPermission> permissions() const override {
         return {};
@@ -1620,7 +1630,7 @@ public:
             call.id,
             [call, name, delay]() -> domain::agent::ToolResult {
                 std::this_thread::sleep_for(std::chrono::milliseconds(delay));
-                return {call.id, QStringLiteral("result_from_%1").arg(name), false};
+                return { call.id, QStringLiteral("result_from_%1").arg(name), false };
             }
         );
     }
@@ -1636,21 +1646,21 @@ void WorkIntegrationTests::testAgentRuntimeParallelResultOrderPreservation() {
     // 模型下发顺序：call_1 (慢 80ms), call_2 (快 10ms), call_3 (中 40ms)
     QList<domain::llm::ChatEvent> r1;
     r1.append(domain::llm::EventStarted{});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_1"), QStringLiteral("tool_slow")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_1"), QStringLiteral("{}")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_1")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_2"), QStringLiteral("tool_fast")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_2"), QStringLiteral("{}")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_2")});
-    r1.append(domain::llm::EventToolCallStarted{QStringLiteral("call_3"), QStringLiteral("tool_mid")});
-    r1.append(domain::llm::EventToolCallDelta{QStringLiteral("call_3"), QStringLiteral("{}")});
-    r1.append(domain::llm::EventToolCallFinished{QStringLiteral("call_3")});
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_1"), QStringLiteral("tool_slow") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_1"), QStringLiteral("{}") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_1") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_2"), QStringLiteral("tool_fast") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_2"), QStringLiteral("{}") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_2") });
+    r1.append(domain::llm::EventToolCallStarted{ QStringLiteral("call_3"), QStringLiteral("tool_mid") });
+    r1.append(domain::llm::EventToolCallDelta{ QStringLiteral("call_3"), QStringLiteral("{}") });
+    r1.append(domain::llm::EventToolCallFinished{ QStringLiteral("call_3") });
     r1.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r1);
 
     QList<domain::llm::ChatEvent> r2;
     r2.append(domain::llm::EventStarted{});
-    r2.append(domain::llm::EventTextDelta{QStringLiteral("全部完成")});
+    r2.append(domain::llm::EventTextDelta{ QStringLiteral("全部完成") });
     r2.append(domain::llm::EventFinished{});
     mockGateway.enqueueResponse(r2);
 
@@ -1674,16 +1684,16 @@ void WorkIntegrationTests::testAgentRuntimeParallelResultOrderPreservation() {
     context.policy.allowParallelToolExecution = true;
 
     QList<QString> arrivalOrder;
-    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const domain::agent::ToolResult& res) {
+    connect(&runtime, &agent::runtime::AgentRuntime::toolResultReady, [&](const QString&, const QUuid&, const domain::agent::ToolResult& res) {
         arrivalOrder.append(res.toolCallId);
-    });
+        });
 
     bool completed = false;
     QEventLoop loop;
     connect(&runtime, &agent::runtime::AgentRuntime::runCompleted, [&]() {
         completed = true;
         loop.quit();
-    });
+        });
 
     runtime.startRun(context, QStringLiteral("乱序并发测试"));
     QTimer::singleShot(3000, &loop, &QEventLoop::quit);

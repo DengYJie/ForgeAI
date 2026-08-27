@@ -45,7 +45,12 @@ namespace application::usecase::agent {
         );
 
         void cancelCurrent();
-        void grantPermission(const QString& sessionId, const QString& toolCallId, bool granted);
+        void grantPermission(
+            const QString& sessionId,
+            const QString& toolCallId,
+            bool granted,
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+        );
         bool isRunning() const;
         ports::IAgentRuntime* runtime() const;
 

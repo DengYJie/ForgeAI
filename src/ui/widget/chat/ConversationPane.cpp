@@ -1,4 +1,4 @@
-﻿#include "ChatAnchorBar.h"
+#include "ChatAnchorBar.h"
 #include "ChatHeader.h"
 #include "ChatInputBox.h"
 #include "ConversationPane.h"
@@ -71,23 +71,23 @@ namespace ui::widget::chat {
 
         conversationLayout->addWidget(messageSurface, 1);
 
-        auto* inputContainer = new QWidget(m_conversationColumn);
-        auto* inputLayout = new QVBoxLayout(inputContainer);
-        inputLayout->setContentsMargins(0, 0, 0, 0);
-        inputLayout->setSpacing(4);
+        m_inputContainer = new QWidget(m_conversationColumn);
+        m_inputLayout = new QVBoxLayout(m_inputContainer);
+        m_inputLayout->setContentsMargins(0, 0, 0, 0);
+        m_inputLayout->setSpacing(4);
 
-        m_inputBox = new ChatInputBox(inputContainer);
+        m_inputBox = new ChatInputBox(m_inputContainer);
         m_inputBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        inputLayout->addWidget(m_inputBox);
+        m_inputLayout->addWidget(m_inputBox);
 
-        m_statusLabel = new fluent::textfields::Label(inputContainer);
+        m_statusLabel = new fluent::textfields::Label(m_inputContainer);
         m_statusLabel->setFluentTypography(Typography::FontRole::Caption);
         m_statusLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
         m_statusLabel->setAlignment(Qt::AlignHCenter);
         m_statusLabel->hide();
-        inputLayout->addWidget(m_statusLabel);
+        m_inputLayout->addWidget(m_statusLabel);
 
-        conversationLayout->addWidget(inputContainer, 0);
+        conversationLayout->addWidget(m_inputContainer, 0);
 
         m_contentRowLayout->addWidget(m_conversationColumn, 1, Qt::AlignHCenter);
 
@@ -146,6 +146,11 @@ namespace ui::widget::chat {
 
     void ConversationPane::setStatusLabelVisible(bool visible) {
         m_statusLabel->setVisible(visible);
+    }
+
+    void ConversationPane::insertWidgetBeforeInput(QWidget* widget) {
+        if (!widget || !m_inputLayout) return;
+        m_inputLayout->insertWidget(0, widget);
     }
 
 } // namespace ui::widget::chat

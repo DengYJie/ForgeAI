@@ -1,9 +1,9 @@
-#pragma once
-#include <QString>
-#include <optional>
+﻿#pragma once
 #include "CanonicalModel.h"
-#include "ProviderModel.h"
 #include "ModelProvider.h"
+#include "ProviderModel.h"
+#include <optional>
+#include <QString>
 
 namespace domain::model {
 
@@ -55,16 +55,16 @@ namespace domain::model {
             if (canonical.has_value()) {
                 return canonical->capabilities;
             }
-            return ModelCapabilities{};
+            return ModelCapability::Chat;
         }
 
-        const ModelPricing &pricing() const { return binding.pricing; }
-        const QString &reasoningField() const { return binding.reasoningField; }
+        const ModelPricing& pricing() const { return binding.pricing; }
+        const QString& reasoningField() const { return binding.reasoningField; }
         bool isEnabled() const { return provider.isEnabled && binding.isEnabled; }
         bool isCustom() const { return binding.isCustom; }
         DataOrigin origin() const { return binding.origin; }
 
-        bool operator==(const ResolvedModel &other) const = default;
+        bool operator==(const ResolvedModel& other) const = default;
     };
 
 } // namespace domain::model

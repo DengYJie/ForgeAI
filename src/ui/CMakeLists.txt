@@ -136,6 +136,8 @@ target_sources(ForgeAICore PRIVATE
     screen/work/WorkViewModel.cpp
     screen/work/WorkPage.h
     screen/work/WorkPage.cpp
+    screen/work/PermissionFloatingCard.h
+    screen/work/PermissionFloatingCard.cpp
     widget/basic/LeftAlignedButton.h
     widget/basic/LeftAlignedButton.cpp
     screen/work/ProjectHeader.h

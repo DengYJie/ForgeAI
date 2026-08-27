@@ -28,6 +28,7 @@
 #include "ui/widget/basic/LeftAlignedButton.h"
 #include "ProjectHeader.h"
 #include "CreateProjectDialog.h"
+#include "PermissionFloatingCard.h"
 
 namespace {
 class ModelChoiceButton final : public fluent::basicinput::Button {
@@ -268,11 +269,20 @@ using widget::basic::LeftAlignedButton;
             if (index == 0) m_pane->header()->setSidebarExpanded(false);
         });
         connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::modelButtonClicked, this, &WorkPage::showModelPicker);
+
+        m_permissionCard = new PermissionFloatingCard(m_workAreaWidget);
+        m_permissionCard->hide();
+        m_pane->insertWidgetBeforeInput(m_permissionCard);
+
         if (m_viewModel) {
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::sendRequested, this, [this](const QString& text) { m_viewModel->startTask(text); });
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::stopRequested, m_viewModel, &WorkViewModel::cancelTask);
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::webSearchToggled, m_viewModel, &WorkViewModel::setWebSearchEnabled);
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::deepThinkToggled, m_viewModel, &WorkViewModel::setDeepThinkingEnabled);
+            connect(m_permissionCard, &PermissionFloatingCard::permissionDecided, this,
+                    [this](const QString& toolCallId, bool allow, domain::agent::PermissionScope scope) {
+                m_viewModel->grantPermission(toolCallId, allow, scope);
+            });
         }
 
         fluent::collections::SplitViewPaneOptions workPaneOptions;
@@ -369,7 +379,24 @@ using widget::basic::LeftAlignedButton;
             return option.providerId == state.currentModelProviderId && option.modelId == state.currentModelId;
         });
         const bool hasReasoningEffort = (current != state.availableModels.cend()) && !current->reasoningEfforts.isEmpty();
-        m_pane->inputBox()->setToolAvailability(true, true, hasReasoningEffort);
+        const bool supportsWeb = (current != state.availableModels.cend()) && current->supportsWebSearch;
+        const bool supportsDeepThinking = (current != state.availableModels.cend()) && current->supportsDeepThinking;
+        m_pane->inputBox()->setToolAvailability(supportsWeb, supportsDeepThinking, hasReasoningEffort);
+
+        if (m_permissionCard) {
+            if (state.agentUiState.isWaitingPermission && !state.agentUiState.pendingPermissions.isEmpty()) {
+                const auto& first = state.agentUiState.pendingPermissions.first();
+                m_permissionCard->setPermission(
+                    first.call,
+                    first.permission,
+                    1,
+                    state.agentUiState.pendingPermissions.size()
+                );
+                m_permissionCard->show();
+            } else {
+                m_permissionCard->hide();
+            }
+        }
         updateModelChoices(state);
     }
 
