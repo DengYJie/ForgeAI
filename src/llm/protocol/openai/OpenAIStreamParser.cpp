@@ -11,7 +11,8 @@ namespace llm::protocol::openai {
 
     void OpenAIStreamParser::reset() {
         m_buffer.clear();
-        m_toolCallIndexToId.clear();
+        m_toolCalls.clear();
+        m_hasFinished = false;
         m_isFinished = false;
     }
 
@@ -64,8 +65,11 @@ namespace llm::protocol::openai {
 
         QByteArray data = line.mid(6).trimmed();
         if (data == "[DONE]") {
-            // OpenAI 约定的正常结束标记
-            events.append(domain::llm::EventFinished{"stop"});
+            // OpenAI 约定的正常结束标记 (严格防重)
+            if (!m_hasFinished) {
+                m_hasFinished = true;
+                events.append(domain::llm::EventFinished{"stop"});
+            }
             return events;
         }
 
@@ -111,32 +115,42 @@ namespace llm::protocol::openai {
                 if (!tcVal.isObject()) continue;
                 QJsonObject tcObj = tcVal.toObject();
                 const int index = tcObj.value("index").toInt(0);
-                QString id = tcObj.value("id").toString();
-                if (!id.isEmpty()) {
-                    m_toolCallIndexToId[index] = id;
-                } else if (m_toolCallIndexToId.contains(index)) {
-                    id = m_toolCallIndexToId.value(index);
+                auto &state = m_toolCalls[index];
+
+                if (tcObj.contains("id") && !tcObj.value("id").toString().isEmpty()) {
+                    state.id = tcObj.value("id").toString();
                 }
-                
+
                 QJsonObject funcObj = tcObj.value("function").toObject();
-                QString fnName = funcObj.value("name").toString();
+                if (funcObj.contains("name") && !funcObj.value("name").toString().isEmpty()) {
+                    state.name = funcObj.value("name").toString();
+                }
                 QString argsDelta = funcObj.value("arguments").toString();
 
-                if (!fnName.isEmpty() && !id.isEmpty()) {
-                    events.append(domain::llm::EventToolCallStarted{id, fnName});
+                // 严格单次触发 EventToolCallStarted
+                if (!state.started && !state.id.isEmpty() && !state.name.isEmpty()) {
+                    events.append(domain::llm::EventToolCallStarted{state.id, state.name});
+                    state.started = true;
                 }
-                if (!argsDelta.isEmpty() && !id.isEmpty()) {
-                    events.append(domain::llm::EventToolCallDelta{id, argsDelta});
+
+                // 增量下发参数
+                if (!argsDelta.isEmpty() && !state.id.isEmpty()) {
+                    events.append(domain::llm::EventToolCallDelta{state.id, argsDelta});
                 }
             }
         }
 
         if (choice.contains("finish_reason") && !choice.value("finish_reason").isNull()) {
             const QString reason = choice.value("finish_reason").toString();
-            for (const auto& id : m_toolCallIndexToId) {
-                events.append(domain::llm::EventToolCallFinished{id});
+            for (const auto& state : m_toolCalls) {
+                if (!state.id.isEmpty()) {
+                    events.append(domain::llm::EventToolCallFinished{state.id});
+                }
             }
-            events.append(domain::llm::EventFinished{reason});
+            if (!m_hasFinished) {
+                m_hasFinished = true;
+                events.append(domain::llm::EventFinished{reason});
+            }
         }
 
         return events;

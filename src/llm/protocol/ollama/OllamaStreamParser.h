@@ -23,6 +23,7 @@ namespace llm::protocol::ollama {
         QList<domain::llm::ChatEvent> parseLine(const QByteArray &line);
 
         QByteArray m_buffer;
+        bool m_hasFinished = false;
         bool m_isFinished = false;
     };
 

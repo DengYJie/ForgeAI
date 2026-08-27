@@ -6,6 +6,13 @@
 
 namespace llm::protocol::openai_responses {
 
+    struct ResponseToolCallState {
+        QString itemId;
+        QString callId;
+        QString name;
+        int outputIndex = -1;
+    };
+
     /**
      * @brief OpenAI Responses API SSE 流解析器
      * @details 解析 /v1/responses 产生的事件流 (response.created, response.output_text.delta, response.completed 等)
@@ -24,8 +31,10 @@ namespace llm::protocol::openai_responses {
 
         QByteArray m_buffer;
         QString m_currentEventType;
+        QHash<int, ResponseToolCallState> m_indexToTool;
         QHash<QString, QString> m_itemIdToCallId;
         QString m_currentCallId;
+        bool m_hasFinished = false;
         bool m_isFinished = false;
     };
 

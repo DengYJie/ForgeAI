@@ -10,6 +10,7 @@ namespace domain::agent {
         QString id; ///< 调用的唯一标识符 (如 "call_abc123")
         QString name; ///< 调用的工具名 (如 "get_weather")
         QString arguments; ///< 参数 JSON 字符串 (如 "{\"location\":\"Beijing\"}")
+        QJsonObject protocolMetadata; ///< 协议特定的不可丢失的延续元数据 (如 Gemini thoughtSignature)
 
         bool operator==(const ToolCall &other) const = default;
     };

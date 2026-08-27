@@ -12,6 +12,7 @@ namespace llm::protocol::ollama {
 
     void OllamaStreamParser::reset() {
         m_buffer.clear();
+        m_hasFinished = false;
         m_isFinished = false;
     }
 
@@ -62,6 +63,14 @@ namespace llm::protocol::ollama {
             data = data.mid(6).trimmed();
         }
 
+        if (data == "[DONE]") {
+            if (!m_hasFinished) {
+                m_hasFinished = true;
+                events.append(domain::llm::EventFinished{"stop"});
+            }
+            return events;
+        }
+
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
@@ -74,7 +83,7 @@ namespace llm::protocol::ollama {
         if (obj.contains("error") && !obj.value("error").isNull()) {
             domain::llm::ChatError err;
             err.category = domain::llm::ChatErrorCategory::Provider;
-            err.code = QStringLiteral("StreamError");
+            err.code = QStringLiteral("OllamaStreamError");
             err.message = obj.value("error").toString();
             err.userMessage = err.message;
             events.append(domain::llm::EventError{err});
@@ -112,7 +121,7 @@ namespace llm::protocol::ollama {
                     QString argsStr = QString::fromUtf8(argsDoc.toJson(QJsonDocument::Compact));
                     QString callId = tcObj.value("id").toString();
                     if (callId.isEmpty()) {
-                        callId = "ollama_call_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+                        callId = QStringLiteral("ollama_call_") + QUuid::createUuid().toString(QUuid::WithoutBraces);
                     }
                     events.append(domain::llm::EventToolCallStarted{callId, name});
                     events.append(domain::llm::EventToolCallDelta{callId, argsStr});
@@ -135,8 +144,11 @@ namespace llm::protocol::ollama {
                 events.append(domain::llm::EventUsageUpdated{usage});
             }
 
-            QString doneReason = obj.value("done_reason").toString("stop");
-            events.append(domain::llm::EventFinished{doneReason});
+            if (!m_hasFinished) {
+                m_hasFinished = true;
+                QString doneReason = obj.value("done_reason").toString("stop");
+                events.append(domain::llm::EventFinished{doneReason});
+            }
         }
 
         return events;

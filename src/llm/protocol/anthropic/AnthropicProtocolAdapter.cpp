@@ -50,11 +50,14 @@ namespace llm::protocol::anthropic {
         }
         if (options.thinkingEnabled) {
             QJsonObject thinking;
-            thinking.insert("type", "enabled");
-            if (options.thinkingBudgetTokens.has_value()) {
-                thinking.insert("budget_tokens", options.thinkingBudgetTokens.value());
-            }
+            thinking.insert("type", "adaptive");
             bodyObj.insert("thinking", thinking);
+
+            if (!options.reasoningEffort.isEmpty()) {
+                QJsonObject outputConfig;
+                outputConfig.insert("effort", options.reasoningEffort);
+                bodyObj.insert("output_config", outputConfig);
+            }
         }
 
         // 分离 system prompt 与普通消息

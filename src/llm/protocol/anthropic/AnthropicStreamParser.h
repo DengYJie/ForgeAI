@@ -24,7 +24,9 @@ namespace llm::protocol::anthropic {
 
         QByteArray m_buffer;
         QString m_currentEventType;
-        QString m_currentToolCallId;
+        QHash<int, QString> m_toolCallIds; ///< content_block index → tool_use id，支持并行 Tool Call
+        QString m_pendingFinishReason; ///< 暂存 message_delta 的 stop_reason，避免重复 EventFinished
+        bool m_hasFinished = false;
         bool m_isFinished = false;
     };
 

@@ -92,6 +92,12 @@ namespace llm::protocol::gemini {
                     QJsonDocument argsDoc = QJsonDocument::fromJson(tc.arguments.toUtf8());
                     fnCall.insert("args", argsDoc.isObject() ? argsDoc.object() : QJsonObject{});
                     partObj.insert("functionCall", fnCall);
+                    // Gemini 3 要求原样返回 thoughtSignature，否则 400
+                    if (tc.protocolMetadata.contains(QStringLiteral("thoughtSignature"))) {
+                        partObj.insert(QStringLiteral("thoughtSignature"), tc.protocolMetadata.value(QStringLiteral("thoughtSignature")));
+                    } else if (tc.protocolMetadata.contains(QStringLiteral("thought_signature"))) {
+                        partObj.insert(QStringLiteral("thoughtSignature"), tc.protocolMetadata.value(QStringLiteral("thought_signature")));
+                    }
                     partsArray.append(partObj);
                 }
                 contentObj.insert("parts", partsArray);

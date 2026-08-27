@@ -11,6 +11,9 @@ namespace llm::protocol::anthropic {
     void AnthropicStreamParser::reset() {
         m_buffer.clear();
         m_currentEventType.clear();
+        m_toolCallIds.clear();
+        m_pendingFinishReason.clear();
+        m_hasFinished = false;
         m_isFinished = false;
     }
 
@@ -89,15 +92,18 @@ namespace llm::protocol::anthropic {
                 }
             }
         } else if (type == "content_block_start") {
-            if (obj.contains("content_block") && obj.value("content_block").isObject()) {
+            if (obj.contains("index") && obj.contains("content_block") && obj.value("content_block").isObject()) {
+                int index = obj.value("index").toInt(-1);
                 QJsonObject cb = obj.value("content_block").toObject();
                 if (cb.value("type").toString() == "tool_use") {
-                    m_currentToolCallId = cb.value("id").toString();
+                    QString toolId = cb.value("id").toString();
+                    m_toolCallIds[index] = toolId;
                     QString name = cb.value("name").toString();
-                    events.append(domain::llm::EventToolCallStarted{m_currentToolCallId, name});
+                    events.append(domain::llm::EventToolCallStarted{toolId, name});
                 }
             }
         } else if (type == "content_block_delta") {
+            int index = obj.value("index").toInt(-1);
             if (obj.contains("delta") && obj.value("delta").isObject()) {
                 QJsonObject delta = obj.value("delta").toObject();
                 QString deltaType = delta.value("type").toString();
@@ -106,13 +112,16 @@ namespace llm::protocol::anthropic {
                 } else if (deltaType == "thinking_delta" && delta.contains("thinking")) {
                     events.append(domain::llm::EventThinkingDelta{delta.value("thinking").toString()});
                 } else if (deltaType == "input_json_delta" && delta.contains("partial_json")) {
-                    events.append(domain::llm::EventToolCallDelta{m_currentToolCallId, delta.value("partial_json").toString()});
+                    QString toolId = m_toolCallIds.value(index);
+                    if (!toolId.isEmpty()) {
+                        events.append(domain::llm::EventToolCallDelta{toolId, delta.value("partial_json").toString()});
+                    }
                 }
             }
         } else if (type == "content_block_stop") {
-            if (!m_currentToolCallId.isEmpty()) {
-                events.append(domain::llm::EventToolCallFinished{m_currentToolCallId});
-                m_currentToolCallId.clear();
+            int index = obj.value("index").toInt(-1);
+            if (m_toolCallIds.contains(index)) {
+                events.append(domain::llm::EventToolCallFinished{m_toolCallIds.take(index)});
             }
         } else if (type == "message_delta") {
             if (obj.contains("usage") && obj.value("usage").isObject()) {
@@ -124,11 +133,17 @@ namespace llm::protocol::anthropic {
             if (obj.contains("delta") && obj.value("delta").isObject()) {
                 QJsonObject delta = obj.value("delta").toObject();
                 if (delta.contains("stop_reason") && !delta.value("stop_reason").isNull()) {
-                    events.append(domain::llm::EventFinished{delta.value("stop_reason").toString()});
+                    m_pendingFinishReason = delta.value("stop_reason").toString();
                 }
             }
         } else if (type == "message_stop") {
-            events.append(domain::llm::EventFinished{"stop"});
+            // 只在 message_stop 时发送一次 EventFinished，避免与 message_delta 重复
+            if (!m_hasFinished) {
+                m_hasFinished = true;
+                QString reason = m_pendingFinishReason.isEmpty() ? QStringLiteral("stop") : m_pendingFinishReason;
+                events.append(domain::llm::EventFinished{reason});
+                m_pendingFinishReason.clear();
+            }
         } else if (type == "error") {
             domain::llm::ChatError err;
             err.category = domain::llm::ChatErrorCategory::Provider;

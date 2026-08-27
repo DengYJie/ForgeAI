@@ -70,7 +70,11 @@ namespace llm::protocol::ollama {
         }
         bodyObj.insert("messages", msgsArray);
         if (options.thinkingEnabled) {
-            bodyObj.insert("think", true);
+            if (!options.reasoningEffort.isEmpty()) {
+                bodyObj.insert("think", options.reasoningEffort);
+            } else {
+                bodyObj.insert("think", true);
+            }
         }
 
         if (options.toolsEnabled && request.tools.has_value() && !request.tools->isEmpty()) {

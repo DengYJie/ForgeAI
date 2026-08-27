@@ -12,6 +12,7 @@ namespace llm::protocol::gemini {
 
     void GeminiStreamParser::reset() {
         m_buffer.clear();
+        m_hasFinished = false;
         m_isFinished = false;
     }
 
@@ -106,9 +107,16 @@ namespace llm::protocol::gemini {
                     QString argsStr = QString::fromUtf8(argsDoc.toJson(QJsonDocument::Compact));
                     QString callId = fnCall.value("id").toString();
                     if (callId.isEmpty()) {
-                        callId = "gemini_call_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+                        callId = QStringLiteral("gemini_call_") + QUuid::createUuid().toString(QUuid::WithoutBraces);
                     }
-                    events.append(domain::llm::EventToolCallStarted{callId, name});
+                    // 捕获 thoughtSignature — Gemini 3 强制要求在后续轮次中原样返回
+                    QJsonObject metadata;
+                    if (part.contains("thoughtSignature") && !part.value("thoughtSignature").isNull()) {
+                        metadata.insert(QStringLiteral("thoughtSignature"), part.value("thoughtSignature"));
+                    } else if (part.contains("thought_signature") && !part.value("thought_signature").isNull()) {
+                        metadata.insert(QStringLiteral("thoughtSignature"), part.value("thought_signature"));
+                    }
+                    events.append(domain::llm::EventToolCallStarted{callId, name, metadata});
                     events.append(domain::llm::EventToolCallDelta{callId, argsStr});
                     events.append(domain::llm::EventToolCallFinished{callId});
                 }
@@ -117,7 +125,8 @@ namespace llm::protocol::gemini {
 
         if (candidate.contains("finishReason") && !candidate.value("finishReason").isNull()) {
             QString finishReason = candidate.value("finishReason").toString();
-            if (!finishReason.isEmpty()) {
+            if (!finishReason.isEmpty() && !m_hasFinished) {
+                m_hasFinished = true;
                 events.append(domain::llm::EventFinished{finishReason});
             }
         }

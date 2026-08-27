@@ -39,6 +39,7 @@ namespace domain::llm {
     struct EventToolCallStarted {
         QString id;
         QString functionName;
+        QJsonObject protocolMetadata; ///< 协议特定的不可丢失的延续元数据 (如 Gemini thoughtSignature)
         bool operator==(const EventToolCallStarted &other) const = default;
     };
 

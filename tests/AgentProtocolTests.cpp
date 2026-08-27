@@ -18,6 +18,7 @@
 #include "llm/protocol/openai_responses/OpenAIResponsesAdapter.h"
 #include "llm/protocol/openai_responses/OpenAIResponsesStreamParser.h"
 #include "llm/protocol/ollama/OllamaProtocolAdapter.h"
+#include "llm/protocol/ollama/OllamaStreamParser.h"
 #include "data/importer/ModelsDevImporter.h"
 
 #include "llm/mcp/McpClient.h"
@@ -100,9 +101,14 @@ private slots:
     void testResolverReasoningEffortPriority();
 
     // 协议适配器无硬编码与参数验证测试
-    void testAnthropicNoHardcodedBudget();
+    void testAnthropicAdaptiveThinking();
     void testGeminiNoHardcodedBudget();
     void testOpenAIResponsesNoDefaultMedium();
+    void testOpenAIChatParallelToolStreamInterleaved();
+    void testAnthropicParallelToolBlocksStream();
+    void testGeminiThoughtSignatureRoundTrip();
+    void testOpenAIResponsesReasoningSummaryAndIndex();
+    void testOllamaEffortAndUuidToolCalls();
 
     // ModelsDevImporter 元数据解析测试
     void testModelsDevCanonicalKeyMapping();
@@ -389,7 +395,7 @@ void AgentProtocolTests::testResolverReasoningEffortPriority() {
     QCOMPARE(options.reasoningEffort, QStringLiteral("high")); // 必须优先采用请求级
 }
 
-void AgentProtocolTests::testAnthropicNoHardcodedBudget() {
+void AgentProtocolTests::testAnthropicAdaptiveThinking() {
     auto model = createTestModel(QStringLiteral("claude-3-7-sonnet"), domain::model::ProtocolType::AnthropicMessages);
     domain::llm::ChatRequest req;
     req.model = QStringLiteral("claude-3-7-sonnet");
@@ -397,13 +403,14 @@ void AgentProtocolTests::testAnthropicNoHardcodedBudget() {
 
     domain::llm::ResolvedChatOptions options;
     options.thinkingEnabled = true;
-    options.thinkingBudgetTokens = 12345; // 自定义预算，非原硬编码 1024/8192/16384
+    options.reasoningEffort = QStringLiteral("high");
 
     const auto http = llm::protocol::anthropic::AnthropicProtocolAdapter{}.buildChatRequest(model, req, options);
     const auto doc = QJsonDocument::fromJson(http.body).object();
     const auto thinking = doc.value(QStringLiteral("thinking")).toObject();
-    QCOMPARE(thinking.value(QStringLiteral("type")).toString(), QStringLiteral("enabled"));
-    QCOMPARE(thinking.value(QStringLiteral("budget_tokens")).toInt(), 12345);
+    QCOMPARE(thinking.value(QStringLiteral("type")).toString(), QStringLiteral("adaptive"));
+    const auto outputConfig = doc.value(QStringLiteral("output_config")).toObject();
+    QCOMPARE(outputConfig.value(QStringLiteral("effort")).toString(), QStringLiteral("high"));
 }
 
 void AgentProtocolTests::testGeminiNoHardcodedBudget() {
@@ -434,6 +441,232 @@ void AgentProtocolTests::testOpenAIResponsesNoDefaultMedium() {
     const auto http = llm::protocol::openai_responses::OpenAIResponsesAdapter{}.buildChatRequest(model, req, options);
     const auto doc = QJsonDocument::fromJson(http.body).object();
     QVERIFY(!doc.contains(QStringLiteral("reasoning"))); // 不应有默认 medium reasoning 注入
+}
+
+void AgentProtocolTests::testOpenAIChatParallelToolStreamInterleaved() {
+    llm::protocol::openai::OpenAIStreamParser parser;
+
+    // Chunk 1: index 0 started + partial arg, index 1 started
+    QByteArray chunk1 = "data: {\"choices\":[{\"delta\":{\"tool_calls\":["
+                        "{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"tool_a\",\"arguments\":\"{\\\"k\\\":\"}},"
+                        "{\"index\":1,\"id\":\"call_b\",\"function\":{\"name\":\"tool_b\",\"arguments\":\"{\\\"x\\\":\"}}"
+                        "]}}]}\n\n";
+    auto events1 = parser.feed(chunk1);
+    // index 0: Started + Delta; index 1: Started + Delta
+    QCOMPARE(events1.size(), 4);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallStarted>(events1[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallStarted>(events1[0]).id, QStringLiteral("call_a"));
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallDelta>(events1[1]));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events1[1]).id, QStringLiteral("call_a"));
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallStarted>(events1[2]));
+    QCOMPARE(std::get<domain::llm::EventToolCallStarted>(events1[2]).id, QStringLiteral("call_b"));
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallDelta>(events1[3]));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events1[3]).id, QStringLiteral("call_b"));
+
+    // Chunk 2: interleaved argument chunks (no id or name, only arguments)
+    QByteArray chunk2 = "data: {\"choices\":[{\"delta\":{\"tool_calls\":["
+                        "{\"index\":0,\"function\":{\"arguments\":\"1}\"}},"
+                        "{\"index\":1,\"function\":{\"arguments\":\"2}\"}}"
+                        "]}}]}\n\n";
+    auto events2 = parser.feed(chunk2);
+    QCOMPARE(events2.size(), 2);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallDelta>(events2[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events2[0]).id, QStringLiteral("call_a"));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events2[0]).argumentsDelta, QStringLiteral("1}"));
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallDelta>(events2[1]));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events2[1]).id, QStringLiteral("call_b"));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(events2[1]).argumentsDelta, QStringLiteral("2}"));
+
+    // Chunk 3: finish_reason = tool_calls
+    QByteArray chunk3 = "data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n";
+    auto events3 = parser.feed(chunk3);
+    // 2 EventToolCallFinished (for call_a and call_b) + 1 EventFinished
+    QCOMPARE(events3.size(), 3);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(events3[0]));
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(events3[1]));
+    QVERIFY(std::holds_alternative<domain::llm::EventFinished>(events3[2]));
+    QCOMPARE(std::get<domain::llm::EventFinished>(events3[2]).finishReason, QStringLiteral("tool_calls"));
+
+    // Chunk 4: [DONE] - strictly deduplicated, no duplicate EventFinished!
+    QByteArray chunk4 = "data: [DONE]\n\n";
+    auto events4 = parser.feed(chunk4);
+    QCOMPARE(events4.size(), 0);
+}
+
+void AgentProtocolTests::testAnthropicParallelToolBlocksStream() {
+    llm::protocol::anthropic::AnthropicStreamParser parser;
+
+    // Start block 0 & 1
+    QByteArray b0Start = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_0\",\"name\":\"read_file\"}}\n\n";
+    QByteArray b1Start = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"write_file\"}}\n\n";
+    auto ev0 = parser.feed(b0Start);
+    auto ev1 = parser.feed(b1Start);
+    QCOMPARE(ev0.size(), 1);
+    QCOMPARE(std::get<domain::llm::EventToolCallStarted>(ev0[0]).id, QStringLiteral("tool_0"));
+    QCOMPARE(ev1.size(), 1);
+    QCOMPARE(std::get<domain::llm::EventToolCallStarted>(ev1[0]).id, QStringLiteral("tool_1"));
+
+    // Deltas interleaved
+    QByteArray b0Delta = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"a\\\":1}\"}}\n\n";
+    QByteArray b1Delta = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"b\\\":2}\"}}\n\n";
+    auto d0 = parser.feed(b0Delta);
+    auto d1 = parser.feed(b1Delta);
+    QCOMPARE(d0.size(), 1);
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(d0[0]).id, QStringLiteral("tool_0"));
+    QCOMPARE(d1.size(), 1);
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(d1[0]).id, QStringLiteral("tool_1"));
+
+    // Stop blocks
+    QByteArray b0Stop = "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+    QByteArray b1Stop = "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n";
+    auto s0 = parser.feed(b0Stop);
+    auto s1 = parser.feed(b1Stop);
+    QCOMPARE(s0.size(), 1);
+    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(s0[0]).id, QStringLiteral("tool_0"));
+    QCOMPARE(s1.size(), 1);
+    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(s1[0]).id, QStringLiteral("tool_1"));
+
+    // message_delta with stop_reason then message_stop (strictly single EventFinished)
+    QByteArray mDelta = "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n";
+    QByteArray mStop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+    auto evDelta = parser.feed(mDelta);
+    QCOMPARE(evDelta.size(), 0);
+    auto evStop = parser.feed(mStop);
+    QCOMPARE(evStop.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventFinished>(evStop[0]));
+    QCOMPARE(std::get<domain::llm::EventFinished>(evStop[0]).finishReason, QStringLiteral("tool_use"));
+}
+
+void AgentProtocolTests::testGeminiThoughtSignatureRoundTrip() {
+    // 1. SSE Stream delivers thoughtSignature in functionCall part
+    llm::protocol::gemini::GeminiStreamParser parser;
+    QByteArray chunk = "data: {\"candidates\":[{\"content\":{\"parts\":[{"
+                       "\"functionCall\":{\"id\":\"call_g99\",\"name\":\"edit_code\",\"args\":{\"path\":\"main.cpp\"}},"
+                       "\"thoughtSignature\":\"sig_encrypted_token_12345\""
+                       "}]}}]}\n\n";
+    auto events = parser.feed(chunk);
+    QCOMPARE(events.size(), 3);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallStarted>(events[0]));
+    const auto &startEv = std::get<domain::llm::EventToolCallStarted>(events[0]);
+    QCOMPARE(startEv.id, QStringLiteral("call_g99"));
+    QCOMPARE(startEv.functionName, QStringLiteral("edit_code"));
+    QCOMPARE(startEv.protocolMetadata.value(QStringLiteral("thoughtSignature")).toString(), QStringLiteral("sig_encrypted_token_12345"));
+
+    // 2. Next turn request includes thoughtSignature and functionResponse id
+    auto model = createTestModel(QStringLiteral("gemini-2.5-pro"), domain::model::ProtocolType::GeminiGenerateContent);
+    domain::llm::ChatRequest nextReq;
+    nextReq.model = QStringLiteral("gemini-2.5-pro");
+
+    domain::llm::ChatMessage assistantMsg;
+    assistantMsg.role = domain::MessageRole::Assistant;
+    domain::agent::ToolCall tc{
+        QStringLiteral("call_g99"),
+        QStringLiteral("edit_code"),
+        QStringLiteral(R"({"path":"main.cpp"})"),
+        QJsonObject{{QStringLiteral("thoughtSignature"), QStringLiteral("sig_encrypted_token_12345")}}
+    };
+    assistantMsg.toolCalls = QList<domain::agent::ToolCall>{tc};
+    nextReq.messages.append(assistantMsg);
+
+    domain::llm::ChatMessage toolMsg;
+    toolMsg.role = domain::MessageRole::Tool;
+    toolMsg.name = QStringLiteral("edit_code");
+    toolMsg.toolCallId = QStringLiteral("call_g99");
+    toolMsg.content = QStringLiteral("success");
+    nextReq.messages.append(toolMsg);
+
+    const auto options = llm::runtime::ChatRequestResolver::resolve(model, nextReq);
+    const auto http = llm::protocol::gemini::GeminiProtocolAdapter{}.buildChatRequest(model, nextReq, options);
+    const auto doc = QJsonDocument::fromJson(http.body).object();
+    const auto contents = doc.value(QStringLiteral("contents")).toArray();
+    QCOMPARE(contents.size(), 2);
+
+    // Verify model turn preserved thoughtSignature
+    const auto modelTurn = contents.at(0).toObject();
+    QCOMPARE(modelTurn.value(QStringLiteral("role")).toString(), QStringLiteral("model"));
+    const auto modelParts = modelTurn.value(QStringLiteral("parts")).toArray();
+    QCOMPARE(modelParts.at(0).toObject().value(QStringLiteral("thoughtSignature")).toString(), QStringLiteral("sig_encrypted_token_12345"));
+    QCOMPARE(modelParts.at(0).toObject().value(QStringLiteral("functionCall")).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("call_g99"));
+
+    // Verify tool turn has matching id
+    const auto funcTurn = contents.at(1).toObject();
+    QCOMPARE(funcTurn.value(QStringLiteral("role")).toString(), QStringLiteral("function"));
+    const auto funcParts = funcTurn.value(QStringLiteral("parts")).toArray();
+    QCOMPARE(funcParts.at(0).toObject().value(QStringLiteral("functionResponse")).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("call_g99"));
+}
+
+void AgentProtocolTests::testOpenAIResponsesReasoningSummaryAndIndex() {
+    llm::protocol::openai_responses::OpenAIResponsesStreamParser parser;
+
+    // 1. Output item added (indexed by output_index: 0)
+    QByteArray itemAdded = "event: response.output_item.added\ndata: {\"output_index\":0,\"item\":{\"id\":\"item_001\",\"type\":\"function_call\",\"call_id\":\"call_resp_001\",\"name\":\"run_command\"}}\n\n";
+    auto ev1 = parser.feed(itemAdded);
+    QCOMPARE(ev1.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallStarted>(ev1[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallStarted>(ev1[0]).id, QStringLiteral("call_resp_001"));
+
+    // 2. Reasoning summary delta
+    QByteArray summaryDelta = "event: response.reasoning_summary_text.delta\ndata: {\"delta\":\"planning tool execution\"}\n\n";
+    auto ev2 = parser.feed(summaryDelta);
+    QCOMPARE(ev2.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventThinkingDelta>(ev2[0]));
+    QCOMPARE(std::get<domain::llm::EventThinkingDelta>(ev2[0]).thought, QStringLiteral("planning tool execution"));
+
+    // 3. Arguments delta via output_index only
+    QByteArray argsDelta = "event: response.function_call_arguments.delta\ndata: {\"output_index\":0,\"delta\":\"{\\\"cmd\\\": \\\"ls\\\"}\"}\n\n";
+    auto ev3 = parser.feed(argsDelta);
+    QCOMPARE(ev3.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallDelta>(ev3[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(ev3[0]).id, QStringLiteral("call_resp_001"));
+    QCOMPARE(std::get<domain::llm::EventToolCallDelta>(ev3[0]).argumentsDelta, QStringLiteral("{\"cmd\": \"ls\"}"));
+
+    // 4. Arguments done via output_index
+    QByteArray argsDone = "event: response.function_call_arguments.done\ndata: {\"output_index\":0}\n\n";
+    auto ev4 = parser.feed(argsDone);
+    QCOMPARE(ev4.size(), 1);
+    QVERIFY(std::holds_alternative<domain::llm::EventToolCallFinished>(ev4[0]));
+    QCOMPARE(std::get<domain::llm::EventToolCallFinished>(ev4[0]).id, QStringLiteral("call_resp_001"));
+
+    // 5. Completed + [DONE] -> single EventFinished
+    QByteArray completed = "event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n";
+    QByteArray done = "data: [DONE]\n\n";
+    auto ev5 = parser.feed(completed);
+    QCOMPARE(ev5.size(), 2);
+    QVERIFY(std::holds_alternative<domain::llm::EventUsageUpdated>(ev5[0]));
+    QVERIFY(std::holds_alternative<domain::llm::EventFinished>(ev5[1]));
+
+    auto ev6 = parser.feed(done);
+    QCOMPARE(ev6.size(), 0);
+}
+
+void AgentProtocolTests::testOllamaEffortAndUuidToolCalls() {
+    // 1. Verify think effort passed as string
+    auto model = createTestModel(QStringLiteral("qwen3"), domain::model::ProtocolType::OllamaChat);
+    domain::llm::ChatRequest req;
+    req.model = QStringLiteral("qwen3");
+    req.useDeepThinking = true;
+
+    domain::llm::ResolvedChatOptions options;
+    options.thinkingEnabled = true;
+    options.reasoningEffort = QStringLiteral("max");
+
+    const auto http = llm::protocol::ollama::OllamaProtocolAdapter{}.buildChatRequest(model, req, options);
+    const auto doc = QJsonDocument::fromJson(http.body).object();
+    QCOMPARE(doc.value(QStringLiteral("think")).toString(), QStringLiteral("max"));
+
+    // 2. Verify parser generates unique IDs for tool calls with no id
+    llm::protocol::ollama::OllamaStreamParser parser;
+    QByteArray chunk = "{\"message\":{\"role\":\"assistant\",\"tool_calls\":["
+                       "{\"function\":{\"name\":\"read_file\",\"arguments\":{}}},"
+                       "{\"function\":{\"name\":\"read_file\",\"arguments\":{}}}"
+                       "]}}\n";
+    auto events = parser.feed(chunk);
+    QCOMPARE(events.size(), 6);
+    const auto &start1 = std::get<domain::llm::EventToolCallStarted>(events[0]);
+    const auto &start2 = std::get<domain::llm::EventToolCallStarted>(events[3]);
+    QVERIFY(start1.id.startsWith(QStringLiteral("ollama_call_")));
+    QVERIFY(start2.id.startsWith(QStringLiteral("ollama_call_")));
+    QVERIFY(start1.id != start2.id);
 }
 
 void AgentProtocolTests::testModelsDevCanonicalKeyMapping() {
