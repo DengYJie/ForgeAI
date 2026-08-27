@@ -76,7 +76,7 @@ void ProjectSessionTreeDelegate::paint(QPainter* painter, const QStyleOptionView
                                       glyph, 14, Qt::AlignVCenter);
     }
     
-    const bool showActions = (!project && !showMore && hovered) && !processing;
+    const bool showActions = (!project && !showMore && (hovered || selected)) && !processing;
     const int processingWidth = processing ? 32 : 0;
     const int actionWidth = (project && hovered) ? 60 : (showActions ? kActionSize * 2 + kActionMargin * 2 : processingWidth);
     
@@ -104,21 +104,31 @@ void ProjectSessionTreeDelegate::paint(QPainter* painter, const QStyleOptionView
         painter->drawArc(arcRect, -startAngle, -spanAngle);
     } else if (project && hovered) {
         const QRect moreRect = projectMoreButtonRect(option.rect);
-        const QRect editRect = projectEditButtonRect(option.rect);
-        if (moreRect.contains(m_hoveredPos)) {
+        const QRect addRect = projectEditButtonRect(option.rect);
+        const bool moreHovered = moreRect.contains(m_hoveredPos);
+        const bool addHovered = addRect.contains(m_hoveredPos);
+
+        if (moreHovered) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(colors.subtleSecondary);
+            painter->setBrush(selected ? colors.subtleTertiary : colors.subtleSecondary);
             painter->drawRoundedRect(moreRect, 4, 4);
-        } else if (editRect.contains(m_hoveredPos)) {
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(colors.subtleSecondary);
-            painter->drawRoundedRect(editRect, 4, 4);
+            painter->setPen(colors.textPrimary);
+        } else {
+            painter->setPen(colors.textSecondary);
         }
-        painter->setPen(colors.textSecondary);
         Typography::Icons::paintGlyph(*painter, moreRect, Typography::Icons::More, 13, Qt::AlignCenter);
-        Typography::Icons::paintGlyph(*painter, editRect, Typography::Icons::Edit, 13, Qt::AlignCenter);
-    } else {
-        widget::chat::ConversationRowActions::paint(painter, option, m_hoveredPos, showActions, showActions, pinned);
+
+        if (addHovered) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(selected ? colors.subtleTertiary : colors.subtleSecondary);
+            painter->drawRoundedRect(addRect, 4, 4);
+            painter->setPen(colors.textPrimary);
+        } else {
+            painter->setPen(colors.textSecondary);
+        }
+        Typography::Icons::paintGlyph(*painter, addRect, Typography::Icons::Add, 13, Qt::AlignCenter);
+    } else if (!project && !showMore) {
+        widget::chat::ConversationRowActions::paint(painter, option, this, m_hoveredPos, hovered, selected, pinned);
     }
     painter->restore();
 }

@@ -4,6 +4,10 @@
 #include <QPainter>
 #include <QStyleOptionViewItem>
 
+namespace fluent {
+    class FluentElement;
+}
+
 namespace ui::widget::chat {
 
 struct ConversationRowActions {
@@ -23,6 +27,7 @@ struct ConversationRowActions {
     static HitTarget hitTest(const QRect& itemRect, const QPoint& pos);
 
     static void paint(QPainter* painter, const QStyleOptionViewItem& option, 
+                      const fluent::FluentElement* themeSource,
                       const QPoint& hoveredPos, bool isHovered, bool isSelected,
                       bool isPinned);
 };

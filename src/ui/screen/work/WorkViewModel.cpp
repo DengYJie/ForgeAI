@@ -389,6 +389,10 @@ void WorkViewModel::setProjectRoot(const QString& rootPath) {
 
 void WorkViewModel::selectProject(const QUuid& projectId) {
     if (projectId.isNull()) return;
+    if (m_currentProjectId == projectId && m_state.currentProjectId == projectId) {
+        // 当前项目已处于选中状态，点击根节点（折叠/展开）不重复切换或清空当前会话
+        return;
+    }
     const auto it = std::find_if(m_state.projects.cbegin(), m_state.projects.cend(), [projectId](const auto& project) { return project.id == projectId; });
     if (it == m_state.projects.cend()) return;
 
@@ -398,7 +402,20 @@ void WorkViewModel::selectProject(const QUuid& projectId) {
     updateState([projectId](WorkState& state) {
         state.currentProjectId = projectId;
     });
-    newSession();
+
+    // 切换项目时：优先加载该项目最近的已有会话；若项目尚无历史会话，才创建新对话
+    QString latestSessionId;
+    for (const auto& s : m_state.sessions) {
+        if (s.projectId.has_value() && s.projectId.value() == projectId && !s.isArchived) {
+            latestSessionId = s.id;
+            break;
+        }
+    }
+    if (!latestSessionId.isEmpty()) {
+        loadSession(latestSessionId);
+    } else {
+        newSession();
+    }
 }
 
 void WorkViewModel::addProject(const QString& rootPath, const QString& displayName) {

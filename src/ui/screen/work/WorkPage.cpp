@@ -128,6 +128,30 @@ inline QIcon makeFluentIcon(const QString& glyph, int pixelSize = 16, const flue
 
 namespace ui::screen::work {
 
+struct WorkPage::TreeSnapshot {
+    QList<domain::project::Project> projects;
+    QList<ui::screen::chat::ChatSessionItemData> sessions;
+    QSet<QUuid> pinnedProjects;
+    QSet<QUuid> expandedProjects;
+    bool operator==(const TreeSnapshot& o) const {
+        if (projects.size() != o.projects.size() || sessions.size() != o.sessions.size() ||
+            pinnedProjects != o.pinnedProjects || expandedProjects != o.expandedProjects) {
+            return false;
+        }
+        for (int i = 0; i < projects.size(); ++i) {
+            if (projects[i].id != o.projects[i].id || projects[i].name != o.projects[i].name) return false;
+        }
+        for (int i = 0; i < sessions.size(); ++i) {
+            if (sessions[i].id != o.sessions[i].id || sessions[i].title != o.sessions[i].title ||
+                sessions[i].isPinned != o.sessions[i].isPinned || sessions[i].isArchived != o.sessions[i].isArchived ||
+                sessions[i].projectId != o.sessions[i].projectId) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
 using widget::basic::LeftAlignedButton;
     WorkPage::WorkPage(
         WorkViewModel *viewModel,
@@ -139,6 +163,8 @@ using widget::basic::LeftAlignedButton;
             m_viewModel->observe(this, &WorkPage::render);
         }
     }
+
+    WorkPage::~WorkPage() = default;
 
     void WorkPage::setupUi() {
         m_rootLayout = new QVBoxLayout(this);
@@ -214,7 +240,6 @@ using widget::basic::LeftAlignedButton;
                     m_sessionTree->setExpanded(index, willExpand);
                     if (willExpand) m_collapsedProjects.remove(projectId);
                     else m_collapsedProjects.insert(projectId);
-                    m_viewModel->selectProject(projectId);
                 }
             });
             connect(static_cast<ProjectSessionTreeDelegate*>(m_sessionTreeDelegate),
@@ -298,66 +323,105 @@ using widget::basic::LeftAlignedButton;
             : (state.currentTask.isEmpty() ? tr("新对话") : state.currentTask));
         const bool canCreateConversation = !state.currentProjectId.isNull();
         m_newConversationButton->setEnabled(canCreateConversation);
-        m_sessionTreeModel->clear();
+        // 仅当项目/会话结构变化时才重新构建树，避免消息流式传输和状态更新时的全量重建与闪烁
+        TreeSnapshot currentSnapshot{state.projects, state.sessions, state.pinnedProjects, m_expandedProjects};
+        const bool treeStructurallyDirty = !m_lastTreeSnapshot || !(*m_lastTreeSnapshot == currentSnapshot);
 
-        auto sortedProjects = state.projects;
-        std::stable_sort(sortedProjects.begin(), sortedProjects.end(), [&](const auto& a, const auto& b) {
-            bool aPinned = state.pinnedProjects.contains(a.id);
-            bool bPinned = state.pinnedProjects.contains(b.id);
-            if (aPinned != bPinned) return aPinned > bPinned;
-            return false;
-        });
+        if (treeStructurallyDirty) {
+            m_lastTreeSnapshot = std::make_unique<TreeSnapshot>(currentSnapshot);
 
-        for (const auto& projectData : sortedProjects) {
-            auto* project = new QStandardItem(projectData.name);
-            project->setEditable(false);
-            project->setFlags(project->flags() & ~Qt::ItemIsSelectable);
-            project->setData(projectData.id, Qt::UserRole + 2);
-            project->setData(ProjectSessionTreeDelegate::ProjectItem, Qt::UserRole + 3);
-            if (state.pinnedProjects.contains(projectData.id)) {
-                project->setData(true, Qt::UserRole + 4);
-            }
-            
-            const bool isExpanded = m_expandedProjects.contains(projectData.id);
-            QList<ui::screen::chat::ChatSessionItemData> projectSessions;
-            for (const auto& session : state.sessions) {
-                if (!session.isArchived && session.projectId == projectData.id) {
-                    projectSessions.append(session);
+            // 缓存现有项目折叠状态
+            for (int i = 0; i < m_sessionTreeModel->rowCount(); ++i) {
+                auto* item = m_sessionTreeModel->item(i, 0);
+                if (!item) continue;
+                const QUuid projId = item->data(Qt::UserRole + 2).toUuid();
+                if (projId.isNull()) continue;
+                if (m_sessionTree->isExpanded(item->index())) {
+                    m_collapsedProjects.remove(projId);
+                } else {
+                    m_collapsedProjects.insert(projId);
                 }
             }
-            std::stable_sort(projectSessions.begin(), projectSessions.end(), [](const auto& a, const auto& b) {
-                if (a.isPinned != b.isPinned) return a.isPinned;
-                return a.timestamp > b.timestamp;
+
+            m_sessionTreeModel->clear();
+
+            auto sortedProjects = state.projects;
+            std::stable_sort(sortedProjects.begin(), sortedProjects.end(), [&](const auto& a, const auto& b) {
+                bool aPinned = state.pinnedProjects.contains(a.id);
+                bool bPinned = state.pinnedProjects.contains(b.id);
+                if (aPinned != bPinned) return aPinned > bPinned;
+                return false;
             });
-            
-            const int totalSessions = projectSessions.size();
-            int count = 0;
-            for (const auto& session : projectSessions) {
-                if (!isExpanded && count >= 5 && totalSessions > 5) {
-                    auto* showMore = new QStandardItem(tr("展开显示"));
-                    showMore->setData(projectData.id, Qt::UserRole + 2);
-                    showMore->setData(ProjectSessionTreeDelegate::ShowMoreItem, Qt::UserRole + 3);
-                    showMore->setEditable(false);
-                    showMore->setFlags(showMore->flags() & ~Qt::ItemIsSelectable);
-                    project->appendRow(showMore);
-                    break;
+
+            for (const auto& projectData : sortedProjects) {
+                auto* project = new QStandardItem(projectData.name);
+                project->setEditable(false);
+                project->setFlags(project->flags() & ~Qt::ItemIsSelectable);
+                project->setData(projectData.id, Qt::UserRole + 2);
+                project->setData(ProjectSessionTreeDelegate::ProjectItem, Qt::UserRole + 3);
+                if (state.pinnedProjects.contains(projectData.id)) {
+                    project->setData(true, Qt::UserRole + 4);
                 }
                 
-                auto* leaf = new QStandardItem(session.title);
-                leaf->setData(session.id, Qt::UserRole + 1);
-                leaf->setData(ProjectSessionTreeDelegate::ConversationItem, Qt::UserRole + 3);
-                leaf->setData(session.isPinned, Qt::UserRole + 4);
-                const bool isProcessing = (state.isProcessing && session.id == state.currentSessionId);
-                leaf->setData(isProcessing, Qt::UserRole + 5);
-                leaf->setEditable(false);
-                project->appendRow(leaf);
-                count++;
+                const bool isExpanded = m_expandedProjects.contains(projectData.id);
+                QList<ui::screen::chat::ChatSessionItemData> projectSessions;
+                for (const auto& session : state.sessions) {
+                    if (!session.isArchived && session.projectId == projectData.id) {
+                        projectSessions.append(session);
+                    }
+                }
+                std::stable_sort(projectSessions.begin(), projectSessions.end(), [](const auto& a, const auto& b) {
+                    if (a.isPinned != b.isPinned) return a.isPinned;
+                    return a.timestamp > b.timestamp;
+                });
+                
+                const int totalSessions = projectSessions.size();
+                int count = 0;
+                for (const auto& session : projectSessions) {
+                    if (!isExpanded && count >= 5 && totalSessions > 5) {
+                        auto* showMore = new QStandardItem(tr("展开显示"));
+                        showMore->setData(projectData.id, Qt::UserRole + 2);
+                        showMore->setData(ProjectSessionTreeDelegate::ShowMoreItem, Qt::UserRole + 3);
+                        showMore->setEditable(false);
+                        showMore->setFlags(showMore->flags() & ~Qt::ItemIsSelectable);
+                        project->appendRow(showMore);
+                        break;
+                    }
+                    
+                    auto* leaf = new QStandardItem(session.title);
+                    leaf->setData(session.id, Qt::UserRole + 1);
+                    leaf->setData(ProjectSessionTreeDelegate::ConversationItem, Qt::UserRole + 3);
+                    leaf->setData(session.isPinned, Qt::UserRole + 4);
+                    const bool isProcessing = (state.isProcessing && session.id == state.currentSessionId);
+                    leaf->setData(isProcessing, Qt::UserRole + 5);
+                    leaf->setEditable(false);
+                    project->appendRow(leaf);
+                    count++;
+                }
+                m_sessionTreeModel->appendRow(project);
+                if (!m_collapsedProjects.contains(projectData.id)) {
+                    m_sessionTree->expand(project->index());
+                }
             }
-            m_sessionTreeModel->appendRow(project);
-            if (!m_collapsedProjects.contains(projectData.id)) {
-                m_sessionTree->expand(project->index());
+        } else {
+            // 结构未变：原地同步 isProcessing 状态
+            for (int i = 0; i < m_sessionTreeModel->rowCount(); ++i) {
+                auto* projItem = m_sessionTreeModel->item(i, 0);
+                if (!projItem) continue;
+                for (int j = 0; j < projItem->rowCount(); ++j) {
+                    auto* childItem = projItem->child(j, 0);
+                    if (!childItem) continue;
+                    const QString sId = childItem->data(Qt::UserRole + 1).toString();
+                    if (!sId.isEmpty()) {
+                        const bool isProcessing = (state.isProcessing && sId == state.currentSessionId);
+                        if (childItem->data(Qt::UserRole + 5).toBool() != isProcessing) {
+                            childItem->setData(isProcessing, Qt::UserRole + 5);
+                        }
+                    }
+                }
             }
         }
+
         if (!state.currentSessionId.isEmpty()) {
             const auto matches = m_sessionTreeModel->match(
                 m_sessionTreeModel->index(0, 0), Qt::UserRole + 1, state.currentSessionId, 1,

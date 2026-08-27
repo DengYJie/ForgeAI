@@ -36,7 +36,7 @@ namespace ui::screen::work {
             QWidget *parent = nullptr
         );
 
-        ~WorkPage() override = default;
+        ~WorkPage() override;
 
     private:
         void setupUi();
@@ -63,6 +63,10 @@ namespace ui::screen::work {
         QStandardItemModel *m_sessionTreeModel = nullptr;
         QSet<QUuid> m_expandedProjects;
         QSet<QUuid> m_collapsedProjects;
+
+        struct TreeSnapshot;
+        std::unique_ptr<TreeSnapshot> m_lastTreeSnapshot;
+
         fluent::basicinput::Button *m_newConversationButton = nullptr;
         ProjectHeader *m_treeHeader = nullptr;
         QStyledItemDelegate *m_sessionTreeDelegate = nullptr;

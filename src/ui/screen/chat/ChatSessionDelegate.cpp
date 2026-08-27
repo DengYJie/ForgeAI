@@ -63,7 +63,7 @@ namespace ui::screen::chat {
 
         // 3. 绘制右侧操作按钮（精致小图标）
         if (!isEmptyDraft) {
-            widget::chat::ConversationRowActions::paint(painter, option, m_hoveredPos, isHovered, isSelected, isPinned);
+            widget::chat::ConversationRowActions::paint(painter, option, this, m_hoveredPos, isHovered, isSelected, isPinned);
         }
 
         painter->restore();

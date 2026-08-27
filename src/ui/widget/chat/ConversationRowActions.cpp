@@ -1,7 +1,9 @@
 #include "ConversationRowActions.h"
 #include <FluentQt/Design.h>
+#include <FluentQt/Foundation.h>
 
 namespace ui::widget::chat {
+using namespace fluent;
 
 QRect ConversationRowActions::archiveButtonRect(const QRect& itemRect) {
     const int right = itemRect.right() - kButtonMargin;
@@ -28,47 +30,49 @@ ConversationRowActions::HitTarget ConversationRowActions::hitTest(const QRect& i
 }
 
 void ConversationRowActions::paint(QPainter* painter, const QStyleOptionViewItem& option, 
+                                   const fluent::FluentElement* themeSource,
                                    const QPoint& hoveredPos, bool isHovered, bool isSelected,
                                    bool isPinned) {
-    // Both Chat and Work use the rule: Actions are visible if the item is selected OR hovered.
-    // Wait, the user mentioned: "Chat 与 Work 的按钮可用性不一致：Chat 已选中行也显示置顶/归档按钮；Work 仅悬浮显示。"
-    // The user suggests extracting to unify this. Let's make it visible if isHovered || isSelected.
-    if (!isHovered && !isSelected) {
-        // If not hovered and not selected, only show Pin if it is actually pinned, and don't show archive.
+    const auto& colors = themeSource ? themeSource->themeColorsRef() : ThemeRegistry::instance().colors(option.palette.color(QPalette::Window).lightness() < 128);
+    const bool showButtons = isHovered || isSelected;
+
+    if (!showButtons) {
         if (isPinned) {
             const QRect pinRect = pinButtonRect(option.rect);
-            painter->setFont(QFont(Typography::FontFamily::FluentIcons, 10));
-            painter->setPen(option.palette.color(QPalette::Highlight));
-            painter->drawText(pinRect, Qt::AlignCenter, Typography::Icons::PinFill);
+            painter->setPen(colors.textAccentPrimary);
+            Typography::Icons::paintGlyph(*painter, pinRect, Typography::Icons::PinFill, 12, Qt::AlignCenter);
         }
         return;
     }
 
     const QRect archiveRect = archiveButtonRect(option.rect);
     const QRect pinRect = pinButtonRect(option.rect);
-    const QColor secondaryText = option.palette.color(QPalette::Text);
-    QColor hoverFill = option.palette.color(QPalette::AlternateBase);
-    hoverFill.setAlpha(96);
 
-    painter->setFont(QFont(Typography::FontFamily::FluentIcons, 10));
+    const HitTarget hit = isHovered ? hitTest(option.rect, hoveredPos) : HitTarget::None;
 
-    // Hover background for buttons
-    const HitTarget hit = hitTest(option.rect, hoveredPos);
-    if (hit != HitTarget::None) {
+    // 1. Draw Archive Button
+    if (hit == HitTarget::Archive) {
         painter->setRenderHint(QPainter::Antialiasing);
         painter->setPen(Qt::NoPen);
-        painter->setBrush(hoverFill);
-        const QRect hitRect = (hit == HitTarget::Archive) ? archiveRect : pinRect;
-        painter->drawRoundedRect(hitRect, 3, 3);
+        painter->setBrush(isSelected ? colors.subtleTertiary : colors.subtleSecondary);
+        painter->drawRoundedRect(archiveRect, 4, 4);
+        painter->setPen(colors.textPrimary);
+    } else {
+        painter->setPen(colors.textSecondary);
     }
+    Typography::Icons::paintGlyph(*painter, archiveRect, QString(QChar(0xE7B8)), 11, Qt::AlignCenter);
 
-    // Draw Archive
-    painter->setPen(secondaryText);
-    painter->drawText(archiveRect, Qt::AlignCenter, QString(QChar(0xE7B8)));
-
-    // Draw Pin
-    painter->setPen(isPinned ? option.palette.color(QPalette::Highlight) : secondaryText);
-    painter->drawText(pinRect, Qt::AlignCenter, isPinned ? Typography::Icons::PinFill : Typography::Icons::Pin);
+    // 2. Draw Pin Button
+    if (hit == HitTarget::Pin) {
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(isSelected ? colors.subtleTertiary : colors.subtleSecondary);
+        painter->drawRoundedRect(pinRect, 4, 4);
+        painter->setPen(isPinned ? colors.textAccentPrimary : colors.textPrimary);
+    } else {
+        painter->setPen(isPinned ? colors.textAccentPrimary : colors.textSecondary);
+    }
+    Typography::Icons::paintGlyph(*painter, pinRect, isPinned ? Typography::Icons::PinFill : Typography::Icons::Pin, 12, Qt::AlignCenter);
 }
 
 } // namespace ui::widget::chat
