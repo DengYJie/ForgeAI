@@ -95,6 +95,7 @@ ui_*.h
 .cache/
 .clangd/
 .codegraph/
+.omo/
 
 # ====================================================================
 # Operating System Files

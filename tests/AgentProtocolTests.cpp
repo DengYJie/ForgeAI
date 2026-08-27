@@ -741,7 +741,15 @@ void AgentProtocolTests::testModelsDevResolveProtocol() {
     QCOMPARE(data::importer::ModelsDevImporter::resolveProtocol(QStringLiteral("meta"), metaObj),
              domain::model::ProtocolType::OpenAIChatCompletions);
 
-    // 4. 未知/不支持的 npm package 坚决返回 Unknown（不盲目默认 OpenAI）
+    // 4. Google Vertex AI 与未知/不支持的 npm package 坚决返回 Unknown（不盲目套用公开 API 协议）
+    QJsonObject vertexAnthropicObj{{QStringLiteral("npm"), QStringLiteral("@ai-sdk/google-vertex/anthropic")}};
+    QCOMPARE(data::importer::ModelsDevImporter::resolveProtocol(QStringLiteral("google-vertex-anthropic"), vertexAnthropicObj),
+             domain::model::ProtocolType::Unknown);
+
+    QJsonObject vertexGeminiObj{{QStringLiteral("npm"), QStringLiteral("@ai-sdk/google-vertex")}};
+    QCOMPARE(data::importer::ModelsDevImporter::resolveProtocol(QStringLiteral("google-vertex"), vertexGeminiObj),
+             domain::model::ProtocolType::Unknown);
+
     QJsonObject unknownNpmObj{{QStringLiteral("npm"), QStringLiteral("@ai-sdk/cohere-native")}};
     QCOMPARE(data::importer::ModelsDevImporter::resolveProtocol(QStringLiteral("cohere"), unknownNpmObj),
              domain::model::ProtocolType::Unknown);

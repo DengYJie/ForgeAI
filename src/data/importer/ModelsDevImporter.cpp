@@ -21,11 +21,14 @@ namespace data::importer {
         }
 
         // 2. models.dev npm 适配器家族映射（作为 AdapterFamilyHint）
+        // 注意：Google Vertex AI (@ai-sdk/google-vertex/*) 虽在 Body 格式上接近，
+        // 但其 Endpoint URL 结构（projects/{p}/locations/{l}/publishers/...）与 GCP IAM OAuth2 Bearer 认证
+        // 与公开 API 存在根本差异，当前适配器未支持 GCP 鉴权体系前，不可混淆映射。
         const QString npm = providerObj.value(QStringLiteral("npm")).toString();
-        if (npm == u"@ai-sdk/anthropic" || npm == u"@ai-sdk/google-vertex/anthropic") {
+        if (npm == u"@ai-sdk/anthropic") {
             return domain::model::ProtocolType::AnthropicMessages;
         }
-        if (npm == u"@ai-sdk/google" || npm == u"@ai-sdk/google-vertex") {
+        if (npm == u"@ai-sdk/google") {
             return domain::model::ProtocolType::GeminiGenerateContent;
         }
         if (npm == u"@ai-sdk/ollama") {
