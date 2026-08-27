@@ -11,7 +11,7 @@ namespace domain::agent {
      * @brief Agent 运行策略与安全约束
      */
     struct AgentPolicy {
-        int maxToolRounds = 8;                  ///< 最大允许的连续工具调用轮数
+        int maxToolRounds = 50;                 ///< 最大允许的连续工具调用轮数
         int timeoutMs = 120000;                 ///< 单轮模型调用超时时间 (ms)
         int toolTimeoutMs = 0;                  ///< 单个工具执行超时时间 (ms，0 表示继承 timeoutMs 或默认 30000ms)
         int maxToolOutputChars = 32768;         ///< 单个工具最大输出字符截断保护阈值 (chars)
