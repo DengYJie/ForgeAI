@@ -1,11 +1,20 @@
 #pragma once
 
-#include "ui/markdown/MarkdownDocument.h"
+#include "ui/markdown/MarkdownSnapshot.h"
 
 #include <QObject>
-#include <QString>
+#include <QTimer>
 
 namespace ui::widget {
+
+struct MarkdownDocumentControllerMetrics {
+    quint64 parseCount = 0;
+    quint64 scheduledUpdateCount = 0;
+    quint64 coalescedChunkCount = 0;
+    quint64 renderEpoch = 0;
+    qint64 lastParseUs = 0;
+    ui::markdown::BlockChangeSet lastChanges;
+};
 
 class MarkdownDocumentController : public QObject
 {
@@ -20,48 +29,36 @@ public:
     void beginStream();
     void appendMarkdown(const QString& chunk);
     void finishStream();
-    bool isStreaming() const;
+    bool isStreaming() const noexcept { return m_streaming; }
 
     void setAllowHtml(bool allow);
-    bool allowHtml() const;
+    bool allowHtml() const noexcept { return m_allowHtml; }
 
-    void toggleTaskAtLine(int sourceLine, bool currentlyChecked);
+    void toggleTask(ui::markdown::SourceRange markerRange, bool currentlyChecked);
 
-    const ui::markdown::MarkdownDocument& stableDocument() const;
-    const ui::markdown::MarkdownDocument& tailDocument() const;
-
-    quint64 fullParseCount() const noexcept { return m_fullParseCount; }
-    quint64 stableParseCount() const noexcept { return m_stableParseCount; }
-    quint64 tailParseCount() const noexcept { return m_tailParseCount; }
-    quint64 tailGeneration() const noexcept { return m_tailGeneration; }
+    const ui::markdown::DocumentSnapshot& document() const noexcept { return m_document; }
+    MarkdownDocumentControllerMetrics metrics() const { return m_metrics; }
 
 signals:
-    void documentRebuilt();
-    void stableDocumentAppended();
-    void tailDocumentChanged();
+    void documentChanged();
     void streamingChanged(bool streaming);
-    // streamingFinished is intentionally NOT emitted here.
-    // MarkdownView emits streamingFinished() after it receives the final
-    // layoutReady() triggered by documentRebuilt(), ensuring consumers
-    // always see the completed layout when the signal fires.
-    void tailGenerationChanged(quint64 generation);
     void taskToggled(int sourceLine, bool checked);
 
 private:
-    qsizetype stableStreamingBoundary() const;
+    void scheduleUpdate();
+    void rebuild(bool canonical);
     ui::markdown::MarkdownParseOptions parseOptions() const;
 
-    QString m_markdown;
-    QString m_streamTail;
+    ui::markdown::MarkdownSourceBuffer m_source;
+    ui::markdown::MarkdownSnapshotParser m_parser;
+    ui::markdown::BlockReconciler m_reconciler;
+    ui::markdown::DocumentSnapshot m_document;
+    QTimer m_updateTimer;
     bool m_streaming = false;
     bool m_allowHtml = true;
-    ui::markdown::MarkdownParser m_parser;
-    ui::markdown::MarkdownDocument m_document;
-    ui::markdown::MarkdownDocument m_activeTailDocument;
-    quint64 m_fullParseCount = 0;
-    quint64 m_stableParseCount = 0;
-    quint64 m_tailParseCount = 0;
-    quint64 m_tailGeneration = 0;
+    quint64 m_renderEpoch = 0;
+    int m_pendingChunks = 0;
+    MarkdownDocumentControllerMetrics m_metrics;
 };
 
 } // namespace ui::widget

@@ -77,7 +77,10 @@ void ThinkingBlockWidget::setupUi()
     {
         if (m_thoughtText == thought) return;
 
-        if (m_markdownView && m_markdownView->isStreaming() && thought.startsWith(m_thoughtText)) {
+        if (m_markdownView && thought.startsWith(m_thoughtText)) {
+            if (!m_markdownView->isStreaming()) {
+                m_markdownView->beginStream();
+            }
             QString chunk = thought.mid(m_thoughtText.length());
             m_thoughtText = thought;
             m_markdownView->appendMarkdown(chunk);

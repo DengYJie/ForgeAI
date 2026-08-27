@@ -9,7 +9,20 @@
 namespace ui::markdown {
 
 enum class HitKind { None, Text, Link, CodeCopy, TaskCheckbox, Image };
-struct HitTestResult { HitKind kind = HitKind::None; int blockIndex = -1; int textOffset = -1; QString value; };
+struct HitTestResult {
+    HitKind kind = HitKind::None;
+    int blockIndex = -1;
+    int textOffset = -1;
+    QString value;
+    BlockId blockId = 0;
+    ElementId elementId = 0;
+
+    HitTestResult() = default;
+    HitTestResult(HitKind hitKind, int index, int offset, QString hitValue,
+                  BlockId semanticBlockId = 0, ElementId localElementId = 0)
+        : kind(hitKind), blockIndex(index), textOffset(offset), value(std::move(hitValue)),
+          blockId(semanticBlockId), elementId(localElementId) {}
+};
 struct TextSelection { int anchor = -1; int position = -1; bool isValid() const { return anchor >= 0 && position >= 0 && anchor != position; } };
 
 class MarkdownRenderer final {

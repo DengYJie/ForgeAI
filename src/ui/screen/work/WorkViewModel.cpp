@@ -42,19 +42,7 @@ QStringList canonicalReasoningEfforts(const QString& canonicalId) {
     return cache.value(canonicalId);
 }
 
-domain::conversation::Message& ensureStreamingMessage(WorkState& state) {
-    if (!state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant
-        && state.messages.last().status == domain::MessageStatus::Sending) {
-        return state.messages.last();
-    }
-    domain::conversation::Message message;
-    message.id = QUuid::createUuid();
-    message.role = domain::MessageRole::Assistant;
-    message.status = domain::MessageStatus::Sending;
-    message.createdAt = QDateTime::currentDateTime();
-    state.messages.append(std::move(message));
-    return state.messages.last();
-}
+
 }
 
 WorkViewModel::WorkViewModel(const application::usecase::work::WorkUseCases& useCases,
@@ -127,26 +115,39 @@ void WorkViewModel::setupUseCaseConnections() {
                 state.statusMessage = QStringLiteral("项目 Agent 正在处理…");
             });
         });
+        connect(agent, &application::usecase::agent::RunAgentUseCase::assistantMessageStarted, this,
+                [this](const QString& sessionId, const domain::conversation::Message& message) {
+            if (sessionId != m_agentSessionId) return;
+            updateState([message](WorkState& state) {
+                state.messages.append(message);
+            });
+        });
         connect(agent, &application::usecase::agent::RunAgentUseCase::tokenReceived, this,
-                [this](const QString& sessionId, const QString& token) {
+                [this](const QString& sessionId, const QUuid& messageId, const QString& token) {
             if (sessionId != m_agentSessionId || token.isEmpty()) return;
-            updateState([this, token](WorkState& state) {
-                auto& message = ensureStreamingMessage(state);
-                for (auto& block : message.blocks) {
+            updateState([messageId, token](WorkState& state) {
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == messageId;
+                });
+                if (it == state.messages.end()) return;
+                for (auto& block : it->blocks) {
                     if (block.isText()) { std::get<domain::conversation::TextBlock>(block.payload).text += token; return; }
                 }
-                message.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
+                it->blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
             });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::thoughtReceived, this,
-                [this](const QString& sessionId, const QString& thought) {
+                [this](const QString& sessionId, const QUuid& messageId, const QString& thought) {
             if (sessionId != m_agentSessionId || thought.isEmpty()) return;
-            updateState([this, thought](WorkState& state) {
-                auto& message = ensureStreamingMessage(state);
-                for (auto& block : message.blocks) {
+            updateState([messageId, thought](WorkState& state) {
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == messageId;
+                });
+                if (it == state.messages.end()) return;
+                for (auto& block : it->blocks) {
                     if (block.isThought()) { std::get<domain::conversation::ThoughtBlock>(block.payload).thought += thought; return; }
                 }
-                message.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
+                it->blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
             });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::stateChanged, this,
@@ -176,12 +177,16 @@ void WorkViewModel::setupUseCaseConnections() {
             });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::toolCallFinished, this,
-                [this](const QString& sessionId, const domain::agent::ToolCall& call) {
+                [this](const QString& sessionId, const QUuid& messageId, const domain::agent::ToolCall& call) {
             if (sessionId != m_agentSessionId) return;
-            updateState([this, call](WorkState& state) {
-                auto& message = ensureStreamingMessage(state);
-                domain::conversation::ToolCallBlock calls; calls.calls.append(call);
-                message.blocks.append({domain::BlockType::ToolCall, calls});
+            updateState([messageId, call](WorkState& state) {
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == messageId;
+                });
+                if (it != state.messages.end()) {
+                    domain::conversation::ToolCallBlock calls; calls.calls.append(call);
+                    it->blocks.append({domain::BlockType::ToolCall, calls});
+                }
 
                 state.agentUiState.activeToolName = call.name;
                 state.toolEvents.append(WorkState::ToolEvent{
@@ -193,17 +198,21 @@ void WorkViewModel::setupUseCaseConnections() {
             });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::toolResultReady, this,
-                [this](const QString& sessionId, const domain::agent::ToolResult& result) {
+                [this](const QString& sessionId, const QUuid& messageId, const domain::agent::ToolResult& result) {
             if (sessionId != m_agentSessionId) return;
-            updateState([this, result](WorkState& state) {
-                auto& message = ensureStreamingMessage(state);
-                domain::conversation::ToolResultBlock results; results.results.append(result);
-                message.blocks.append({domain::BlockType::ToolResult, results});
+            updateState([messageId, result](WorkState& state) {
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == messageId;
+                });
+                if (it != state.messages.end()) {
+                    domain::conversation::ToolResultBlock results; results.results.append(result);
+                    it->blocks.append({domain::BlockType::ToolResult, results});
+                }
 
-                for (auto it = state.toolEvents.rbegin(); it != state.toolEvents.rend(); ++it) {
-                    if (it->result.isEmpty()) {
-                        it->result = result.content;
-                        it->isError = result.isError;
+                for (auto rit = state.toolEvents.rbegin(); rit != state.toolEvents.rend(); ++rit) {
+                    if (rit->result.isEmpty()) {
+                        rit->result = result.content;
+                        rit->isError = result.isError;
                         break;
                     }
                 }
@@ -212,10 +221,15 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::replyGenerated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
-            updateState([this, message](WorkState& state) {
-                if (!state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant
-                    && state.messages.last().status == domain::MessageStatus::Sending) state.messages.last() = message;
-                else state.messages.append(message);
+            updateState([message](WorkState& state) {
+                auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
+                    return msg.id == message.id;
+                });
+                if (it != state.messages.end()) {
+                    *it = message;
+                } else {
+                    state.messages.append(message);
+                }
             });
         });
         connect(agent, &application::usecase::agent::RunAgentUseCase::runCompleted, this,

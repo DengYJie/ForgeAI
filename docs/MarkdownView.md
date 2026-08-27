@@ -7,16 +7,18 @@
 
 ```text
 Markdown source
-  -> cmark-gfm + GFM extensions
-  -> MarkdownDocument (C++ AST adapter)
-  -> MarkdownLayoutEngine (QTextLayout geometry)
-  -> MarkdownRenderer (QPainter)
+  -> MarkdownSourceBuffer + ParseProjection
+  -> cmark-gfm full parse + ParsedDocumentSnapshot
+  -> BlockReconciler + DocumentSnapshot
+  -> bounded BlockLocalLayout cache + document placement
+  -> LayoutSnapshot / MarkdownRenderer (QPainter)
   -> MarkdownView (scrolling and interaction)
 ```
 
-`MarkdownDocument` 是 cmark-gfm 的唯一使用者；布局、渲染和控件不包含
-cmark C API。布局代码不依赖 QWidget，渲染器只接收几何和主题，控件只负责
-输入、滚动、事件分派和资源请求。
+`MarkdownDocument` 是 cmark-gfm 的唯一使用者。Source 使用 QString UTF-16
+半开区间；parser bridge 把 cmark 的 UTF-8 source position 映射回真实 Source。
+AST 每次全文生成，但 Reconciler 为未变化的顶级语义块保留 BlockId，布局缓存
+只重建发生变化的块。Renderer 只读取不可变布局结果，不读取 streaming 状态。
 
 ## 当前能力
 
@@ -26,7 +28,8 @@ cmark C API。布局代码不依赖 QWidget，渲染器只接收几何和主题�
 - 浅色/深色主题、运行时主题/字体/边距切换。
 - 链接、文本选择、复制、代码复制反馈、上下文菜单和可选任务列表交互。
 - 本地、qrc、HTTP(S) 图片缓存；图片完成后仅重绘。
-- 稳定段 + 活动尾部的流式 Markdown；稳定段不在每个 chunk 重新布局。
+- 流式 chunk 以 33ms 合并；全文语义解析后仅变化块重新布局。
+- List/BlockQuote 作为语义缓存单元，并展开为按 Y 排序的绘制片段进行可视域裁剪。
 - 以二分定位可见 block 的虚拟化绘制。
 
 ## 性能边界
@@ -54,4 +57,5 @@ Windows 测试目标会部署 Qt runtime 以及 `qoffscreend.dll`，因此可以
 - `syntax/MarkdownSyntaxHighlighter`：当前内建回退高亮；可替换为
   KSyntaxHighlighting adapter，输出仍为 `QTextLayout::FormatRange`。
 - `resource/MarkdownImageResourceManager`：可扩展磁盘缓存、最大尺寸、取消和错误状态。
-- `MarkdownLayoutEngine`：可继续增加复杂表格列宽、图片自然尺寸和增量 block relayout。
+- `MarkdownLayoutEngine`：可继续增加复杂表格列宽和更细粒度的资源成本统计。
+- `ParseProjection`：当前是 identity mapping，后续 StreamingNormalizer 在此层加入 synthetic tail。

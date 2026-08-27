@@ -136,7 +136,7 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
             painter.save(); painter.setClipRect(block.scrollInfo.viewportRect.isValid() ? block.scrollInfo.viewportRect : QRectF(block.rect.left() + 8, block.rect.top() + 30, block.rect.width() - 16, block.rect.height() - 34));
             for (int lineIndex = 0; lineIndex < block.codeLines.size(); ++lineIndex) {
                 const auto& line = block.codeLines.at(lineIndex);
-                paintInline(painter, *line, QPointF(block.contentX - scroll.x, lineY - scroll.y), theme, block.documentTextOffset + block.codeLineOffsets.value(lineIndex), selection);
+                paintInline(painter, *line, QPointF(block.contentX - scroll.x, lineY - scroll.y), theme, block.displayTextOffset + block.codeLineOffsets.value(lineIndex), selection);
                 lineY += line->height;
             }
             painter.restore();
@@ -156,7 +156,8 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
                 if (block.table->headerRows.value(row)) painter.fillRect(QRectF(block.rect.left(), y, block.rect.width(), h), theme.tableHeader);
                 qreal x = block.rect.left();
                 for (int col = 0; col < block.table->columnWidths.size(); ++col) {
-                    paintInline(painter, *block.table->cells[row][col], QPointF(x + 8, y + 8), theme, block.documentTextOffset, selection, hoveredLinkUrl);
+                    const int cellOffset = block.table->cellDisplayTextOffsets.value(row).value(col, block.displayTextOffset);
+                    paintInline(painter, *block.table->cells[row][col], QPointF(x + 8, y + 8), theme, cellOffset, selection, hoveredLinkUrl);
                     x += block.table->columnWidths[col];
                 }
                 if (row + 1 < block.table->cells.size()) {
@@ -208,7 +209,7 @@ int MarkdownRenderer::paint(QPainter& painter, const DocumentLayout& document, c
             }
             [[fallthrough]];
         default:
-            if (block.inlineLayout) paintInline(painter, *block.inlineLayout, QPointF(block.contentX, block.rect.top()), theme, block.documentTextOffset, selection, hoveredLinkUrl);
+            if (block.inlineLayout) paintInline(painter, *block.inlineLayout, QPointF(block.contentX, block.rect.top()), theme, block.displayTextOffset, selection, hoveredLinkUrl);
             break;
         }
     }
@@ -248,14 +249,14 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
     for (int i = index; i < document.blockCount() && document.blockAt(i).rect.top() <= position.y(); ++i) {
         const BlockLayout& block = document.blockAt(i);
         if (!block.rect.contains(position)) continue;
-        if (block.kind == BlockKind::CodeBlock && block.copyButtonRect.contains(position)) return {HitKind::CodeCopy, i, -1, block.code};
-        if (block.taskItem && block.taskCheckRect.contains(position)) return {HitKind::TaskCheckbox, i, -1, block.taskChecked ? QStringLiteral("1") : QStringLiteral("0")};
-        if (block.kind == BlockKind::Image) return {HitKind::Image, i, -1, block.imageUrl};
+        if (block.kind == BlockKind::CodeBlock && block.copyButtonRect.contains(position)) return {HitKind::CodeCopy, i, -1, block.code, block.blockId, block.elementId};
+        if (block.taskItem && block.taskCheckRect.contains(position)) return {HitKind::TaskCheckbox, i, -1, block.taskChecked ? QStringLiteral("1") : QStringLiteral("0"), block.blockId, block.elementId};
+        if (block.kind == BlockKind::Image) return {HitKind::Image, i, -1, block.imageUrl, block.blockId, block.elementId};
         if (block.inlineLayout) {
             const int cursor = block.inlineLayout->cursorAt(position.x() - block.contentX, position.y() - block.rect.top());
             if (cursor >= 0) {
-                for (const LinkRange& link : block.inlineLayout->links) if (cursor >= link.start && cursor <= link.start + link.length) return {HitKind::Link, i, block.documentTextOffset + cursor, link.url};
-                return {HitKind::Text, i, block.documentTextOffset + cursor, {}};
+                for (const LinkRange& link : block.inlineLayout->links) if (cursor >= link.start && cursor <= link.start + link.length) return {HitKind::Link, i, block.displayTextOffset + cursor, link.url, block.blockId, block.elementId};
+                return {HitKind::Text, i, block.displayTextOffset + cursor, {}, block.blockId, block.elementId};
             }
         }
         if (block.kind == BlockKind::Table && block.table) {
@@ -271,12 +272,13 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
                         if (cell) {
                             const int cursor = cell->cursorAt(position.x() - (colX + 8), position.y() - (rowY + 8));
                             if (cursor >= 0) {
+                                const int cellOffset = block.table->cellDisplayTextOffsets.value(row).value(col, block.displayTextOffset);
                                 for (const LinkRange& link : cell->links) {
                                     if (cursor >= link.start && cursor <= link.start + link.length) {
-                                        return {HitKind::Link, i, block.documentTextOffset + cursor, link.url};
+                                        return {HitKind::Link, i, cellOffset + cursor, link.url, block.blockId, block.elementId};
                                     }
                                 }
-                                return {HitKind::Text, i, block.documentTextOffset + cursor, {}};
+                                return {HitKind::Text, i, cellOffset + cursor, {}, block.blockId, block.elementId};
                             }
                         }
                     }
@@ -292,12 +294,12 @@ HitTestResult MarkdownRenderer::hitTest(const DocumentLayout& document, const QP
                 const auto& line = block.codeLines.at(lineIndex);
                 if (position.y() >= lineY && (position.y() < lineY + line->height || lineIndex == block.codeLines.size() - 1)) {
                     const int cursor = line->cursorAt(position.x() - (block.contentX - scroll.x), position.y() - lineY);
-                    if (cursor >= 0) return {HitKind::Text, i, block.documentTextOffset + block.codeLineOffsets.value(lineIndex) + cursor, {}};
+                    if (cursor >= 0) return {HitKind::Text, i, block.displayTextOffset + block.codeLineOffsets.value(lineIndex) + cursor, {}, block.blockId, block.elementId};
                 }
                 lineY += line->height;
             }
         }
-        return {HitKind::None, i, -1, {}};
+        return {HitKind::None, i, -1, {}, block.blockId, block.elementId};
     }
     return {};
 }

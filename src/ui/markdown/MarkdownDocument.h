@@ -14,6 +14,9 @@ enum class MarkdownNodeType {
 };
 
 struct SourceRange {
+    // UTF-16 offsets into the original QString, using [begin, end).
+    qsizetype begin = 0;
+    qsizetype end = 0;
     int startLine = 0;
     int startColumn = 0;
     int endLine = 0;
@@ -27,6 +30,7 @@ struct MarkdownAttributes {
     bool taskListItem = false;
     bool taskChecked = false;
     bool tableHeader = false;
+    SourceRange taskMarkerRange;
     QString url;
     QString title;
     QString fenceInfo;
@@ -44,6 +48,8 @@ public:
     explicit MarkdownNode(MarkdownNodeType nodeType) : type(nodeType) {}
     MarkdownNode(const MarkdownNode&) = delete;
     MarkdownNode& operator=(const MarkdownNode&) = delete;
+
+    std::unique_ptr<MarkdownNode> clone() const;
 };
 
 class MarkdownDocument final {
@@ -59,6 +65,7 @@ public:
     const QString& source() const noexcept;
     bool isEmpty() const noexcept;
     void append(MarkdownDocument&& fragment);
+    static MarkdownDocument fromBlock(const MarkdownNode& block);
 
 private:
     friend class MarkdownParser;

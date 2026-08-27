@@ -24,10 +24,10 @@ namespace application::usecase::agent {
 
         if (m_runtime) {
             connect(m_runtime, &ports::IAgentRuntime::userMessageCreated, this, &RunAgentUseCase::userMessageCreated);
+            connect(m_runtime, &ports::IAgentRuntime::assistantMessageStarted, this, &RunAgentUseCase::assistantMessageStarted);
             connect(m_runtime, &ports::IAgentRuntime::stateChanged, this, &RunAgentUseCase::stateChanged);
             connect(m_runtime, &ports::IAgentRuntime::tokenReceived, this, &RunAgentUseCase::tokenReceived);
             connect(m_runtime, &ports::IAgentRuntime::thoughtReceived, this, &RunAgentUseCase::thoughtReceived);
-            connect(m_runtime, &ports::IAgentRuntime::toolCallStarted, this, &RunAgentUseCase::toolCallStarted);
             connect(m_runtime, &ports::IAgentRuntime::toolCallFinished, this, &RunAgentUseCase::toolCallFinished);
             connect(m_runtime, &ports::IAgentRuntime::toolResultReady, this, &RunAgentUseCase::toolResultReady);
             connect(m_runtime, &ports::IAgentRuntime::permissionRequested, this, &RunAgentUseCase::permissionRequested);

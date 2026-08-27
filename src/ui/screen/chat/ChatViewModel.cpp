@@ -103,7 +103,6 @@ namespace ui::screen::chat {
                 const bool isFirstMessage = s.messages.isEmpty();
                 s.messages.append(msg);
                 s.isGenerating = true;
-                s.streamingMessageId = {};
 
                 if (isFirstMessage && !s.sessionTitleManuallyEdited) {
                     const QString newTitle = autoTitle(s.messages);
@@ -114,41 +113,47 @@ namespace ui::screen::chat {
             });
         });
 
+        connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::assistantMessageStarted,
+                this, [this](const QString &sessionId, const domain::conversation::Message &msg) {
+            updateState([this, sessionId, msg](ChatState &s) {
+                if (s.currentSessionId != sessionId) return;
+                s.streamingMessageId = msg.id;
+                s.messages.append(msg);
+                recalculateAnchors(s);
+            });
+        });
+
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::tokenReceived,
-                this, [this](const QString& sessionId, const QString& token) {
-            updateState([sessionId, token](ChatState& s) {
+                this, [this](const QString& sessionId, const QUuid& messageId, const QString& token) {
+            updateState([sessionId, messageId, token](ChatState& s) {
                 if (s.currentSessionId != sessionId || token.isEmpty()) return;
-                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
-                if (it == s.messages.end()) {
-                    domain::conversation::Message streaming;
-                    streaming.id = QUuid::createUuid(); streaming.role = domain::MessageRole::Assistant;
-                    streaming.status = domain::MessageStatus::Sending; streaming.createdAt = QDateTime::currentDateTime();
-                    streaming.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
-                    s.streamingMessageId = streaming.id; s.messages.append(std::move(streaming));
-                    return;
-                }
+                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) {
+                    return message.id == messageId;
+                });
+                if (it == s.messages.end()) return;
                 for (auto& block : it->blocks) {
-                    if (block.isText()) { std::get<domain::conversation::TextBlock>(block.payload).text += token; return; }
+                    if (block.isText()) {
+                        std::get<domain::conversation::TextBlock>(block.payload).text += token;
+                        return;
+                    }
                 }
                 it->blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{token}});
             });
         });
 
         connect(m_useCases.sendMessage, &application::usecase::chat::SendMessageUseCase::thoughtReceived,
-                this, [this](const QString& sessionId, const QString& thought) {
-            updateState([sessionId, thought](ChatState& s) {
+                this, [this](const QString& sessionId, const QUuid& messageId, const QString& thought) {
+            updateState([sessionId, messageId, thought](ChatState& s) {
                 if (s.currentSessionId != sessionId || thought.isEmpty()) return;
-                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
-                if (it == s.messages.end()) {
-                    domain::conversation::Message streaming;
-                    streaming.id = QUuid::createUuid(); streaming.role = domain::MessageRole::Assistant;
-                    streaming.status = domain::MessageStatus::Sending; streaming.createdAt = QDateTime::currentDateTime();
-                    streaming.blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
-                    s.streamingMessageId = streaming.id; s.messages.append(std::move(streaming));
-                    return;
-                }
+                auto it = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) {
+                    return message.id == messageId;
+                });
+                if (it == s.messages.end()) return;
                 for (auto& block : it->blocks) {
-                    if (block.isThought()) { std::get<domain::conversation::ThoughtBlock>(block.payload).thought += thought; return; }
+                    if (block.isThought()) {
+                        std::get<domain::conversation::ThoughtBlock>(block.payload).thought += thought;
+                        return;
+                    }
                 }
                 it->blocks.append({domain::BlockType::Thought, domain::conversation::ThoughtBlock{thought, 0}});
             });
@@ -162,9 +167,14 @@ namespace ui::screen::chat {
             });
             updateState([sessionId, msg](ChatState &s) {
                 if (s.currentSessionId != sessionId) return;
-                const auto streaming = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) { return message.id == s.streamingMessageId; });
-                if (streaming != s.messages.end()) *streaming = msg;
-                else s.messages.append(msg);
+                const auto streaming = std::find_if(s.messages.begin(), s.messages.end(), [&](const auto& message) {
+                    return message.id == msg.id || message.id == s.streamingMessageId;
+                });
+                if (streaming != s.messages.end()) {
+                    *streaming = msg;
+                } else {
+                    s.messages.append(msg);
+                }
                 s.streamingMessageId = {};
                 recalculateAnchors(s);
             });
@@ -203,6 +213,9 @@ namespace ui::screen::chat {
     }
 
     void ChatViewModel::loadSession(const QString &sessionId) {
+        if (m_state.currentSessionId == sessionId && !m_state.messages.isEmpty() && m_state.isGenerating) {
+            return;
+        }
         updateState([this, sessionId](ChatState &s) {
             QString title = QStringLiteral("新对话");
             bool manuallyEdited = false;

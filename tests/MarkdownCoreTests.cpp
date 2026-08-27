@@ -71,7 +71,7 @@ QString generateLongMarkdownDocument() {
         ">\n"
         "> > 嵌套第二层引用：解耦了 Preferred Size 测算与 Actual Viewport Layout 实际排版。\n"
         "> >\n"
-        "> > > 嵌套第三层引用：支持极速流式增量追加，仅重新排版 tailDocument，绝不破坏 stableDocument 缓存。\n\n"
+        "> > > 嵌套第三层引用：支持全文语义解析与按顶级块复用的增量布局缓存。\n\n"
         "> 带内部复杂格式的引用块：\n"
         "> - 引用内的列表项 1：`inline code` 高亮显示\n"
         "> - 引用内的列表项 2：**加粗的架构结论**，确保行间距均匀\n"
@@ -218,8 +218,12 @@ private slots:
     void highlightsCommonCodeLanguages();
     void codeBlocksProvideTextHitTesting();
     void streamingFinishesWithCompleteDocumentLayout();
-    void streamingKeepsStableBlocksOutOfTailRelayout();
+    void streamingReusesUnchangedBlockLayouts();
     void streamingLongDocumentPerformanceAndStability();
+    void snapshotUsesUtf16SourceOffsets();
+    void reconcilerPreservesIdsAcrossAppendAndPromotion();
+    void referenceDefinitionsInvalidateInlineSemantics();
+    void blockLayoutCacheRemainsBoundedDuringTailUpdates();
     void markdownViewThemeAndSelectionApi();
     void markdownViewFollowsFluentDarkTheme();
     void taskListsHaveStableHitTargetsAndOptionalInteraction();
@@ -239,9 +243,9 @@ private slots:
     
     // P0/P1 Regression Tests
     void streamingIncrementalTextIsAlwaysCurrent();
-    void streamingTailTaskCheckRectIsInsideBlockRect();
-    void streamingTailCodeScrollInfoIsConsistentWithBlockRect();
-    void streamingStableImageHeightDoesNotRegressOnNextToken();
+    void streamingTaskCheckRectIsInsideBlockRect();
+    void streamingCodeScrollInfoIsConsistentWithBlockRect();
+    void streamingImageHeightDoesNotRegressOnNextToken();
     void streamingFinishGeometryMatchesFinalLayout();
     void streamingFinishedEmittedAfterFinalLayout();
     void fencedCodeNotClosedByDifferentMarker();
@@ -407,25 +411,30 @@ void MarkdownCoreTests::streamingFinishesWithCompleteDocumentLayout()
     QCOMPARE(streamed.sizeHint().height(), complete.sizeHint().height());
 }
 
-void MarkdownCoreTests::streamingKeepsStableBlocksOutOfTailRelayout()
+void MarkdownCoreTests::streamingReusesUnchangedBlockLayouts()
 {
     ui::widget::MarkdownView view;
     view.resize(480, 260);
     view.beginStream();
     view.appendStreamingText(QStringLiteral("Stable block.\n\n"));
-    const ui::widget::MarkdownViewMetrics afterStable = view.metrics();
-    QVERIFY(afterStable.stableLayoutCount > 0);
+    QTRY_VERIFY_WITH_TIMEOUT(view.metrics().parseCount >= 2, 250);
+    const ui::widget::MarkdownViewMetrics afterFirstFrame = view.metrics();
+    QVERIFY(afterFirstFrame.parseCount >= 2);
+    QVERIFY(afterFirstFrame.blockCacheMisses > 0);
 
     for (int i = 0; i < 120; ++i)
         view.appendStreamingText(QStringLiteral("tail%1 ").arg(i));
-    const ui::widget::MarkdownViewMetrics duringTail = view.metrics();
-    QCOMPARE(duringTail.stableLayoutCount, afterStable.stableLayoutCount);
-    QCOMPARE(duringTail.stableParseCount, afterStable.stableParseCount);
-    QVERIFY(duringTail.tailLayoutCount >= afterStable.tailLayoutCount + 120);
-    QVERIFY(duringTail.tailParseCount >= afterStable.tailParseCount + 120);
+    const auto beforeFlush = view.metrics();
+    QCOMPARE(beforeFlush.parseCount, afterFirstFrame.parseCount);
+    QTRY_COMPARE_WITH_TIMEOUT(view.metrics().parseCount, afterFirstFrame.parseCount + 1, 250);
+    const auto afterFlush = view.metrics();
+    QCOMPARE(afterFlush.parseCount, afterFirstFrame.parseCount + 1);
+    QVERIFY(afterFlush.coalescedChunkCount >= 119);
+    QVERIFY(afterFlush.blockCacheHits > afterFirstFrame.blockCacheHits);
 
     view.appendStreamingText(QStringLiteral("\n\nnext stable block.\n\n"));
-    QVERIFY(view.metrics().stableLayoutCount > afterStable.stableLayoutCount);
+    QTRY_VERIFY_WITH_TIMEOUT(view.metrics().blockCacheHits > afterFlush.blockCacheHits, 250);
+    QVERIFY(view.metrics().blockCacheHits > afterFlush.blockCacheHits);
     view.finishStreaming();
 }
 
@@ -470,17 +479,16 @@ void MarkdownCoreTests::streamingLongDocumentPerformanceAndStability()
     // 3. Verify metrics & invariants
     const auto m = streamed.metrics();
     QCOMPARE(streamed.markdown(), longDoc);
-    QVERIFY(m.tailLayoutCount >= static_cast<quint64>(chunks.size()));
-    // Stable layout should only trigger when complete blocks form, strictly bounded << chunks.size()
-    QVERIFY(m.stableLayoutCount < static_cast<quint64>(chunks.size() / 2));
+    QVERIFY(m.parseCount < static_cast<quint64>(chunks.size() / 4));
+    QVERIFY(m.coalescedChunkCount >= static_cast<quint64>(chunks.size() - 2));
 
     const double avgTailMs = (totalTailUs / 1000.0) / chunks.size();
     qInfo() << "Long document streaming benchmark: total chunks =" << chunks.size()
             << ", total streaming time =" << totalMs << "ms"
             << ", avg per-token latency =" << avgTailMs << "ms"
             << ", max token latency =" << (maxTailUs / 1000.0) << "ms"
-            << ", stableLayoutCount =" << m.stableLayoutCount
-            << ", tailLayoutCount =" << m.tailLayoutCount;
+            << ", parseCount =" << m.parseCount
+            << ", blockCacheHits =" << m.blockCacheHits;
 
     QVERIFY2(avgTailMs < 5.0, qPrintable(QStringLiteral("Average per-token latency too slow: %1 ms").arg(avgTailMs)));
 
@@ -497,6 +505,85 @@ void MarkdownCoreTests::streamingLongDocumentPerformanceAndStability()
     batch.selectAll();
     QVERIFY(!streamed.selectedText().isEmpty());
     QCOMPARE(streamed.selectedText().length(), batch.selectedText().length());
+}
+
+void MarkdownCoreTests::snapshotUsesUtf16SourceOffsets()
+{
+    const QString source = QStringLiteral("😀 **中**\r\n\nnext");
+    const auto projection = ParseProjection::identity({source, 1}, 1);
+    const auto parsed = MarkdownSnapshotParser{}.parse(projection);
+    QCOMPARE(parsed.blocks.size(), 2);
+    QCOMPARE(parsed.blocks[0].sourceRange.begin, qsizetype(0));
+    QCOMPARE(parsed.blocks[0].sourceRange.end, qsizetype(8));
+    QCOMPARE(parsed.blocks[1].sourceRange.begin, source.indexOf(QStringLiteral("next")));
+    QCOMPARE(QStringView{source}.mid(parsed.blocks[1].sourceRange.begin,
+                                     parsed.blocks[1].sourceRange.end - parsed.blocks[1].sourceRange.begin),
+             QStringView{u"next"});
+}
+
+void MarkdownCoreTests::reconcilerPreservesIdsAcrossAppendAndPromotion()
+{
+    MarkdownSnapshotParser parser;
+    BlockReconciler reconciler;
+    auto firstParsed = parser.parse(ParseProjection::identity({QStringLiteral("A\n\nB"), 1}, 1));
+    BlockChangeSet firstChanges;
+    auto first = reconciler.reconcile(firstParsed, nullptr, &firstChanges);
+    QCOMPARE(first.blocks.size(), 2);
+
+    auto secondParsed = parser.parse(ParseProjection::identity({QStringLiteral("A\n\nB!"), 2}, 2));
+    BlockChangeSet secondChanges;
+    auto second = reconciler.reconcile(secondParsed, &first, &secondChanges);
+    QCOMPARE(second.blocks[0].id, first.blocks[0].id);
+    QCOMPARE(second.blocks[1].id, first.blocks[1].id);
+    QCOMPARE(secondChanges.unchangedCount, 1);
+    QCOMPARE(secondChanges.updatedCount, 1);
+
+    auto promotedParsed = parser.parse(ParseProjection::identity({QStringLiteral("# A"), 3}, 3));
+    BlockChangeSet promotedChanges;
+    auto promoted = reconciler.reconcile(promotedParsed, &second, &promotedChanges);
+    QCOMPARE(promoted.blocks.first().id, second.blocks.first().id);
+    QCOMPARE(promotedChanges.updatedCount, 1);
+}
+
+void MarkdownCoreTests::referenceDefinitionsInvalidateInlineSemantics()
+{
+    MarkdownSnapshotParser parser;
+    BlockReconciler reconciler;
+    const auto firstParsed = parser.parse(ParseProjection::identity(
+        {QStringLiteral("[link][target]\n\n[target]: /one"), 1}, 1));
+    const auto first = reconciler.reconcile(firstParsed, nullptr);
+
+    const auto secondParsed = parser.parse(ParseProjection::identity(
+        {QStringLiteral("[link][target]\n\n[target]: /two"), 2}, 2));
+    QVERIFY(secondParsed.semanticEnvironmentRevision != firstParsed.semanticEnvironmentRevision);
+    BlockChangeSet changes;
+    const auto second = reconciler.reconcile(secondParsed, &first, &changes);
+    QCOMPARE(second.blocks.size(), first.blocks.size());
+    QCOMPARE(second.blocks.first().id, first.blocks.first().id);
+    QCOMPARE(changes.updatedCount, second.blocks.size());
+}
+
+void MarkdownCoreTests::blockLayoutCacheRemainsBoundedDuringTailUpdates()
+{
+    MarkdownSnapshotParser parser;
+    BlockReconciler reconciler;
+    MarkdownLayoutEngine engine;
+    DocumentSnapshot previous;
+    QString tail;
+    for (int revision = 1; revision <= 100; ++revision) {
+        tail += u'x';
+        const auto parsed = parser.parse(ParseProjection::identity(
+            {QStringLiteral("fixed prefix\n\n") + tail, static_cast<SourceRevision>(revision)},
+            static_cast<ProjectionRevision>(revision)));
+        const auto current = reconciler.reconcile(parsed, revision == 1 ? nullptr : &previous);
+        engine.layout(current, 480, MarkdownTheme::light());
+        previous = current;
+    }
+
+    const auto metrics = engine.metrics();
+    QCOMPARE(metrics.blockCacheEntries, qsizetype(2));
+    QVERIFY(metrics.blockCacheEstimatedBytes <= metrics.blockCacheLimitBytes);
+    QVERIFY(metrics.blockCacheHits >= 99);
 }
 
 void MarkdownCoreTests::markdownViewThemeAndSelectionApi()
@@ -560,7 +647,7 @@ void MarkdownCoreTests::virtualizesLargeDocumentPainting()
     QString markdown;
     markdown.reserve(220000);
     for (int i = 0; i < 10000; ++i)
-        markdown += QStringLiteral("Paragraph %1: long enough content for ordinary document layout.\n\n").arg(i);
+        markdown += QStringLiteral("- List item %1: long enough content for ordinary document layout.\n").arg(i);
     const DocumentLayout layout = MarkdownLayoutEngine{}.layout(MarkdownParser{}.parse(markdown), 560, MarkdownTheme::light());
     QCOMPARE(layout.blocks.size(), 10000);
     QImage image(560, 320, QImage::Format_ARGB32_Premultiplied);
@@ -910,8 +997,8 @@ struct FrameDetail {
     int cardGeometryChanges = 0;
     int maxPassesPerCard = 0;
     int markdownFullParsesDelta = 0;
-    int markdownStableLayoutsDelta = 0;
-    int markdownTailLayoutsDelta = 0;
+    int markdownLayoutsDelta = 0;
+    int markdownBlockMissesDelta = 0;
 };
 
 struct ResizeBenchmarkMetrics {
@@ -1005,14 +1092,14 @@ public:
         m_currentFrameTimestampMs = nowUs / 1000;
 
         m_mdFullParsesBefore = 0;
-        m_mdStableLayoutsBefore = 0;
-        m_mdTailLayoutsBefore = 0;
+        m_mdLayoutsBefore = 0;
+        m_mdBlockMissesBefore = 0;
         const auto markdownViews = m_listView->findChildren<ui::widget::MarkdownView*>();
         for (auto* v : markdownViews) {
             const auto m = v->metrics();
-            m_mdFullParsesBefore += m.fullParseCount;
-            m_mdStableLayoutsBefore += m.stableLayoutCount;
-            m_mdTailLayoutsBefore += m.tailLayoutCount;
+            m_mdFullParsesBefore += static_cast<int>(m.parseCount);
+            m_mdLayoutsBefore += static_cast<int>(m.layoutCount);
+            m_mdBlockMissesBefore += static_cast<int>(m.blockCacheMisses);
         }
 
         m_inResizePass = true;
@@ -1023,14 +1110,14 @@ public:
         m_inResizePass = false;
 
         int mdFullParsesAfter = 0;
-        int mdStableLayoutsAfter = 0;
-        int mdTailLayoutsAfter = 0;
+        int mdLayoutsAfter = 0;
+        int mdBlockMissesAfter = 0;
         const auto markdownViews = m_listView->findChildren<ui::widget::MarkdownView*>();
         for (auto* v : markdownViews) {
             const auto m = v->metrics();
-            mdFullParsesAfter += m.fullParseCount;
-            mdStableLayoutsAfter += m.stableLayoutCount;
-            mdTailLayoutsAfter += m.tailLayoutCount;
+            mdFullParsesAfter += static_cast<int>(m.parseCount);
+            mdLayoutsAfter += static_cast<int>(m.layoutCount);
+            mdBlockMissesAfter += static_cast<int>(m.blockCacheMisses);
         }
 
         int maxPasses = 0;
@@ -1052,8 +1139,8 @@ public:
         frame.cardGeometryChanges = frameGeometryChanges;
         frame.maxPassesPerCard = maxPasses;
         frame.markdownFullParsesDelta = mdFullParsesAfter - m_mdFullParsesBefore;
-        frame.markdownStableLayoutsDelta = mdStableLayoutsAfter - m_mdStableLayoutsBefore;
-        frame.markdownTailLayoutsDelta = mdTailLayoutsAfter - m_mdTailLayoutsBefore;
+        frame.markdownLayoutsDelta = mdLayoutsAfter - m_mdLayoutsBefore;
+        frame.markdownBlockMissesDelta = mdBlockMissesAfter - m_mdBlockMissesBefore;
 
         m_metrics.recordFrame(frame);
         m_idleTimer->start();
@@ -1064,14 +1151,14 @@ public:
         if (m_metrics.resizeEvents == 0) return;
 
         int totalFullParses = 0;
-        int totalStableLayouts = 0;
-        int totalTailLayouts = 0;
+        int totalLayouts = 0;
+        int totalBlockMisses = 0;
         const auto markdownViews = m_listView->findChildren<ui::widget::MarkdownView*>();
         for (auto* view : markdownViews) {
             const auto m = view->metrics();
-            totalFullParses += m.fullParseCount;
-            totalStableLayouts += m.stableLayoutCount;
-            totalTailLayouts += m.tailLayoutCount;
+            totalFullParses += static_cast<int>(m.parseCount);
+            totalLayouts += static_cast<int>(m.layoutCount);
+            totalBlockMisses += static_cast<int>(m.blockCacheMisses);
         }
 
         const qint64 durationMs = m_sessionStartTimer.elapsed();
@@ -1091,7 +1178,8 @@ public:
             "  Total Card setGeometry Calls   : %11 (avg %12 / resize, max single-card churn: %13/frame)\n"
             "  Card / Viewport Paint Events   : %14\n"
             "  Total Markdown Full Parses     : %15\n"
-            "  Total Markdown Layouts         : %16 (Stable) / %17 (Tail)\n\n"
+            "  Total Markdown Layouts         : %16\n"
+            "  Block-local Layout Cache Misses: %17\n\n"
             "[3. Coalescing Potential (16ms Frame Merge)]\n"
             "  Events within <16ms of previous: %18 / %19 (%20% can be coalesced)\n\n"
             "-> [Detailed Diagnostic Log Saved To]:\n"
@@ -1112,8 +1200,8 @@ public:
          .arg(m_metrics.maxGeometryPassesPerCardInSingleFrame)
          .arg(m_metrics.paintEvents)
          .arg(totalFullParses)
-         .arg(totalStableLayouts)
-         .arg(totalTailLayouts)
+         .arg(totalLayouts)
+         .arg(totalBlockMisses)
          .arg(m_metrics.coalesceableEvents)
          .arg(m_metrics.resizeEvents > 1 ? (m_metrics.resizeEvents - 1) : 0)
          .arg(m_metrics.coalescePotentialPercent(), 0, 'f', 1)
@@ -1137,8 +1225,8 @@ public:
                 << QStringLiteral(" | Max setGeometry/Card/Frame: ") << m_metrics.maxGeometryPassesPerCardInSingleFrame
                 << QStringLiteral(" | Total Paints: ") << m_metrics.paintEvents << QStringLiteral("\n");
             out << QStringLiteral("Markdown Parses: ") << totalFullParses
-                << QStringLiteral(" | Stable Layouts: ") << totalStableLayouts
-                << QStringLiteral(" | Tail Layouts: ") << totalTailLayouts << QStringLiteral("\n");
+                << QStringLiteral(" | Layouts: ") << totalLayouts
+                << QStringLiteral(" | Block Cache Misses: ") << totalBlockMisses << QStringLiteral("\n");
             out << QStringLiteral("Coalescing Potential: ") << m_metrics.coalesceableEvents << QStringLiteral("/")
                 << (m_metrics.resizeEvents > 1 ? m_metrics.resizeEvents - 1 : 0)
                 << QStringLiteral(" (") << QString::number(m_metrics.coalescePotentialPercent(), 'f', 1) << QStringLiteral("%)\n\n");
@@ -1170,7 +1258,7 @@ public:
                     .arg(fd.windowSize.height(), 4)
                     .arg(fd.activeCards, 4)
                     .arg(fd.cardGeometryChanges, 4)
-                    .arg(fd.markdownStableLayoutsDelta + fd.markdownTailLayoutsDelta, 3);
+                    .arg(fd.markdownLayoutsDelta, 3);
             }
             if (m_metrics.frameDetails.size() > 100) {
                 out << QStringLiteral("... (%1 more frames recorded in session)\n").arg(m_metrics.frameDetails.size() - 100);
@@ -1226,8 +1314,8 @@ private:
     qint64 m_currentIntervalUs = 0;
     qint64 m_currentFrameTimestampMs = 0;
     int m_mdFullParsesBefore = 0;
-    int m_mdStableLayoutsBefore = 0;
-    int m_mdTailLayoutsBefore = 0;
+    int m_mdLayoutsBefore = 0;
+    int m_mdBlockMissesBefore = 0;
     bool m_inResizePass = false;
     QHash<QObject*, int> m_frameCardGeometryCounts;
     QTimer* m_idleTimer = nullptr;
@@ -1377,19 +1465,23 @@ void MarkdownCoreTests::streamingIncrementalTextIsAlwaysCurrent()
     
     controller.beginStream();
     controller.appendMarkdown(QStringLiteral("Prefix"));
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout() && !layout.currentLayout()->blocks.isEmpty(), 250);
     auto doc1 = layout.currentLayout();
     QVERIFY(doc1 && !doc1->blocks.isEmpty());
     QCOMPARE(doc1->blocks.front().inlineLayout->text, QStringLiteral("Prefix"));
     
     // Append more text, making it a new inline in the same paragraph
     controller.appendMarkdown(QStringLiteral("Suffix"));
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout()
+        && !layout.currentLayout()->blocks.isEmpty()
+        && layout.currentLayout()->blocks.front().inlineLayout->text == QStringLiteral("PrefixSuffix"), 250);
     auto doc2 = layout.currentLayout();
     QVERIFY(doc2 && !doc2->blocks.isEmpty());
     QCOMPARE(doc2->blocks.front().inlineLayout->text, QStringLiteral("PrefixSuffix"));
     controller.finishStream();
 }
 
-void MarkdownCoreTests::streamingTailTaskCheckRectIsInsideBlockRect()
+void MarkdownCoreTests::streamingTaskCheckRectIsInsideBlockRect()
 {
     // streaming Tail merge block missing translate
     ui::widget::MarkdownDocumentController controller;
@@ -1400,7 +1492,7 @@ void MarkdownCoreTests::streamingTailTaskCheckRectIsInsideBlockRect()
     controller.beginStream();
     controller.appendMarkdown(QStringLiteral("# Title\n\n")); // Stable part
     controller.appendMarkdown(QStringLiteral("- [ ] Task 1")); // Tail part
-    
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout() && layout.currentLayout()->blocks.size() >= 2, 250);
     auto doc = layout.currentLayout();
     QVERIFY(doc && doc->blocks.size() >= 2);
     const auto& taskBlock = doc->blocks.back();
@@ -1413,7 +1505,7 @@ void MarkdownCoreTests::streamingTailTaskCheckRectIsInsideBlockRect()
     controller.finishStream();
 }
 
-void MarkdownCoreTests::streamingTailCodeScrollInfoIsConsistentWithBlockRect()
+void MarkdownCoreTests::streamingCodeScrollInfoIsConsistentWithBlockRect()
 {
     // streaming Tail code block missing scrollInfo translate
     ui::widget::MarkdownDocumentController controller;
@@ -1424,7 +1516,7 @@ void MarkdownCoreTests::streamingTailCodeScrollInfoIsConsistentWithBlockRect()
     controller.beginStream();
     controller.appendMarkdown(QStringLiteral("# Title\n\n")); // Stable part
     controller.appendMarkdown(QStringLiteral("```\nCode\n```")); // Tail part
-    
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout() && layout.currentLayout()->blocks.size() >= 2, 250);
     auto doc = layout.currentLayout();
     QVERIFY(doc && doc->blocks.size() >= 2);
     const auto& codeBlock = doc->blocks.back();
@@ -1436,18 +1528,21 @@ void MarkdownCoreTests::streamingTailCodeScrollInfoIsConsistentWithBlockRect()
     controller.finishStream();
 }
 
-void MarkdownCoreTests::streamingStableImageHeightDoesNotRegressOnNextToken()
+void MarkdownCoreTests::streamingImageHeightDoesNotRegressOnNextToken()
 {
     // Stable image height regression when appending next tokens
     ui::widget::MarkdownDocumentController controller;
     ui::widget::MarkdownDocumentLayout layout(&controller);
     layout.setWidth(600);
     layout.setTheme(MarkdownTheme::light());
+    QHash<QString, QImage> images;
+    layout.setImages(&images);
     
     controller.beginStream();
     controller.appendMarkdown(QStringLiteral("![img](test.png)\n\n")); // Will become stable
-    
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout() && !layout.currentLayout()->blocks.isEmpty(), 250);
     // Simulate image loaded
+    images.insert(QStringLiteral("test.png"), QImage(200, 100, QImage::Format_ARGB32_Premultiplied));
     layout.updateImageSize(QStringLiteral("test.png"), QSize(200, 100));
     auto doc1 = layout.currentLayout();
     QVERIFY(doc1 && !doc1->blocks.isEmpty());
@@ -1455,6 +1550,7 @@ void MarkdownCoreTests::streamingStableImageHeightDoesNotRegressOnNextToken()
     
     // Append more text (triggers tail rebuild and relayout)
     controller.appendMarkdown(QStringLiteral("More text"));
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout() && layout.currentLayout()->blocks.size() >= 2, 250);
     auto doc2 = layout.currentLayout();
     QVERIFY(doc2 && !doc2->blocks.isEmpty());
     const qreal h2 = doc2->blocks.front().rect.height();
@@ -1474,6 +1570,7 @@ void MarkdownCoreTests::streamingFinishGeometryMatchesFinalLayout()
     
     controller.beginStream();
     controller.appendMarkdown(QStringLiteral("# Header\n\n- List 1\n- List 2\n\n---\n\nParagraph."));
+    QTRY_VERIFY_WITH_TIMEOUT(layout.currentLayout() && layout.currentLayout()->blocks.size() >= 5, 250);
     auto streamingDoc = layout.currentLayout();
     controller.finishStream();
     auto finalDoc = layout.currentLayout();
@@ -1505,19 +1602,17 @@ void MarkdownCoreTests::streamingFinishedEmittedAfterFinalLayout()
 
 void MarkdownCoreTests::fencedCodeNotClosedByDifferentMarker()
 {
-    // A fenced code block starting with ` should not be closed by ~
     ui::widget::MarkdownDocumentController controller;
     controller.beginStream();
-    // ```python
     controller.appendMarkdown(QStringLiteral("```python\n"));
-    QCOMPARE(controller.stableParseCount(), 0); // No stable boundary yet
-    // ~~~
     controller.appendMarkdown(QStringLiteral("~~~\n"));
-    QCOMPARE(controller.stableParseCount(), 0); // Still in fence, no boundary
-    // ```
     controller.appendMarkdown(QStringLiteral("```\n\nText"));
-    QVERIFY(controller.stableParseCount() > 0); // Now it's closed and a boundary can form
+    QCOMPARE(controller.metrics().parseCount, quint64(1));
+    QVERIFY(controller.metrics().coalescedChunkCount == 0);
     controller.finishStream();
+    QCOMPARE(controller.metrics().parseCount, quint64(2));
+    QCOMPARE(controller.document().blocks.size(), 2);
+    QCOMPARE(controller.document().blocks.first().kind, MarkdownNodeType::CodeBlock);
 }
 
 void MarkdownCoreTests::visualTest()
@@ -1733,8 +1828,26 @@ void MarkdownCoreTests::visualTest()
     }
 }
 
+static void testMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg)
+{
+    const QString formatted = QStringLiteral("[%1] %2\n").arg(QDateTime::currentDateTime().toString(QStringLiteral("hh:mm:ss.zzz")), msg);
+    fprintf(stderr, "%s", formatted.toLocal8Bit().constData());
+    fflush(stderr);
+
+    static QFile logFile(QStringLiteral("markdown_stream_test.log"));
+    if (!logFile.isOpen()) {
+        logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    }
+    if (logFile.isOpen()) {
+        QTextStream out(&logFile);
+        out << formatted;
+        out.flush();
+    }
+}
+
 int main(int argc, char** argv)
 {
+    qInstallMessageHandler(testMessageHandler);
     QApplication application(argc, argv);
     MarkdownCoreTests tests;
     return QTest::qExec(&tests, argc, argv);

@@ -60,14 +60,14 @@ namespace application::ports {
          */
         virtual domain::agent::AgentRunState currentState() const = 0;
 
-    Q_SIGNALS:
+    signals:
         void userMessageCreated(const QString& sessionId, const domain::conversation::Message& message);
+        void assistantMessageStarted(const QString& sessionId, const domain::conversation::Message& message);
         void stateChanged(const domain::agent::AgentRunState& state);
-        void tokenReceived(const QString& sessionId, const QString& token);
-        void thoughtReceived(const QString& sessionId, const QString& thought);
-        void toolCallStarted(const QString& sessionId, const domain::agent::ToolCall& call);
-        void toolCallFinished(const QString& sessionId, const domain::agent::ToolCall& call);
-        void toolResultReady(const QString& sessionId, const domain::agent::ToolResult& result);
+        void tokenReceived(const QString& sessionId, const QUuid& messageId, const QString& token);
+        void thoughtReceived(const QString& sessionId, const QUuid& messageId, const QString& thought);
+        void toolCallFinished(const QString& sessionId, const QUuid& messageId, const domain::agent::ToolCall& call);
+        void toolResultReady(const QString& sessionId, const QUuid& messageId, const domain::agent::ToolResult& result);
         void permissionRequested(const QString& sessionId, const domain::agent::ToolCall& call, const domain::agent::ToolPermission& permission);
         void replyGenerated(const QString& sessionId, const domain::conversation::Message& message);
         void runCompleted(const QString& sessionId);

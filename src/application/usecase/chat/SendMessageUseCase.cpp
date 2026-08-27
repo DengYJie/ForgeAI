@@ -117,6 +117,16 @@ namespace application::usecase::chat {
         m_currentSessionId = sessionId;
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
+
+        // 5. 由 UseCase 确立流式 Assistant 消息实体的唯一生命周期 ID
+        m_currentAssistantMessageId = QUuid::createUuid();
+        domain::conversation::Message assistantPlaceholder;
+        assistantPlaceholder.id = m_currentAssistantMessageId;
+        assistantPlaceholder.role = domain::MessageRole::Assistant;
+        assistantPlaceholder.status = domain::MessageStatus::Sending;
+        assistantPlaceholder.createdAt = QDateTime::currentDateTime();
+        emit assistantMessageStarted(sessionId, assistantPlaceholder);
+
         startRequest(provider, requestForHistory(history));
     }
 
@@ -162,7 +172,7 @@ namespace application::usecase::chat {
 
     domain::conversation::Message SendMessageUseCase::makeAssistantMessage() const {
         domain::conversation::Message message;
-        message.id = QUuid::createUuid();
+        message.id = m_currentAssistantMessageId.isNull() ? QUuid::createUuid() : m_currentAssistantMessageId;
         message.role = domain::MessageRole::Assistant;
         message.status = domain::MessageStatus::Sent;
         message.createdAt = QDateTime::currentDateTime();
@@ -190,10 +200,12 @@ namespace application::usecase::chat {
         const QString sessionId = m_currentSessionId;
         if (m_currentOp) { m_currentOp->deleteLater(); m_currentOp = nullptr; }
         m_currentSessionId.clear();
+        m_currentAssistantMessageId = {};
         emit generationFinished(sessionId);
     }
 
     void SendMessageUseCase::cancelCurrent() {
+        const bool hadActiveOp = (m_currentOp != nullptr);
         if (m_currentOp) {
             m_currentOp->cancel();
             m_currentOp->deleteLater();
@@ -201,10 +213,11 @@ namespace application::usecase::chat {
         }
         m_replyBuffer.clear();
         m_thoughtBuffer.clear();
-        if (!m_currentSessionId.isEmpty()) {
+        m_currentAssistantMessageId = {};
+        if (hadActiveOp && !m_currentSessionId.isEmpty()) {
             emit generationFinished(m_currentSessionId);
-            m_currentSessionId.clear();
         }
+        m_currentSessionId.clear();
     }
 
     bool SendMessageUseCase::isGenerating() const {
@@ -218,14 +231,17 @@ namespace application::usecase::chat {
             using T = std::decay_t<decltype(arg)>;
             
             if constexpr (std::is_same_v<T, domain::llm::EventStarted>) {
-                // LLM operation started
+                qWarning() << "[STREAM_TRACE][UseCase] EventStarted";
             } else if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                 m_replyBuffer += arg.text;
-                emit tokenReceived(m_currentSessionId, arg.text);
+                qWarning() << "[STREAM_TRACE][UseCase] tokenReceived len=" << arg.text.length() << "total=" << m_replyBuffer.length();
+                emit tokenReceived(m_currentSessionId, m_currentAssistantMessageId, arg.text);
             } else if constexpr (std::is_same_v<T, domain::llm::EventThinkingDelta>) {
                 m_thoughtBuffer += arg.thought;
-                emit thoughtReceived(m_currentSessionId, arg.thought);
+                qWarning() << "[STREAM_TRACE][UseCase] thoughtReceived len=" << arg.thought.length() << "total=" << m_thoughtBuffer.length();
+                emit thoughtReceived(m_currentSessionId, m_currentAssistantMessageId, arg.thought);
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
+                qWarning() << "[STREAM_TRACE][UseCase] EventFinished replyLen=" << m_replyBuffer.length() << "thoughtLen=" << m_thoughtBuffer.length();
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_currentSessionId, assistantMsg);
@@ -240,7 +256,7 @@ namespace application::usecase::chat {
                 
                 if (!m_replyBuffer.isEmpty() || !m_thoughtBuffer.isEmpty()) {
                     domain::conversation::Message partialMsg;
-                    partialMsg.id = QUuid::createUuid();
+                    partialMsg.id = m_currentAssistantMessageId.isNull() ? QUuid::createUuid() : m_currentAssistantMessageId;
                     partialMsg.role = domain::MessageRole::Assistant;
                     partialMsg.status = isCancelled ? domain::MessageStatus::Interrupted : domain::MessageStatus::Failed;
                     partialMsg.errorMessage = arg.error.userMessage.isEmpty() ? arg.error.message : arg.error.userMessage;

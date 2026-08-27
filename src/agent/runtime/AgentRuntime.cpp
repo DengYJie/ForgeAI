@@ -186,6 +186,14 @@ namespace agent::runtime {
         m_pendingToolResults.clear();
         m_pendingPermissions.clear();
 
+        m_currentAssistantMessageId = QUuid::createUuid();
+        domain::conversation::Message assistantPlaceholder;
+        assistantPlaceholder.id = m_currentAssistantMessageId;
+        assistantPlaceholder.role = domain::MessageRole::Assistant;
+        assistantPlaceholder.status = domain::MessageStatus::Sending;
+        assistantPlaceholder.createdAt = QDateTime::currentDateTime();
+        emit assistantMessageStarted(m_context.sessionId, assistantPlaceholder);
+
         const auto history = m_conversationService
             ? m_conversationService->loadMessages(m_context.sessionId)
             : m_transientHistories.value(m_context.sessionId);
@@ -288,7 +296,7 @@ namespace agent::runtime {
 
     domain::conversation::Message AgentRuntime::makeAssistantMessage() const {
         domain::conversation::Message message;
-        message.id = QUuid::createUuid();
+        message.id = m_currentAssistantMessageId.isNull() ? QUuid::createUuid() : m_currentAssistantMessageId;
         message.role = domain::MessageRole::Assistant;
         message.status = domain::MessageStatus::Sent;
         message.createdAt = QDateTime::currentDateTime();
@@ -344,7 +352,7 @@ namespace agent::runtime {
                 op->operationId(), QStringLiteral("操作已取消"), true
             };
             m_pendingToolResults.append(cancelResult);
-            emit toolResultReady(m_context.sessionId, cancelResult);
+            emit toolResultReady(m_context.sessionId, m_currentAssistantMessageId, cancelResult);
             op->cancel(); // stop timeout watchdog; background thread result will be discarded via QPointer
         } // op destroyed here — background threads see weakSelf==null and exit cleanly
         m_pendingBatches.clear();
@@ -472,7 +480,7 @@ namespace agent::runtime {
             };
             m_pendingToolResults.append(result);
             m_state.results = m_pendingToolResults;
-            emit toolResultReady(m_context.sessionId, result);
+            emit toolResultReady(m_context.sessionId, m_currentAssistantMessageId, result);
             emit stateChanged(m_state);
             saveCheckpoint();
 
@@ -513,7 +521,7 @@ namespace agent::runtime {
                 };
                 m_pendingToolResults.append(result);
                 m_state.results = m_pendingToolResults;
-                emit toolResultReady(m_context.sessionId, result);
+                emit toolResultReady(m_context.sessionId, m_currentAssistantMessageId, result);
                 saveCheckpoint();
                 continue;
             }
@@ -557,7 +565,7 @@ namespace agent::runtime {
                 };
                 m_pendingToolResults.append(result);
                 m_state.results = m_pendingToolResults;
-                emit toolResultReady(m_context.sessionId, result);
+                emit toolResultReady(m_context.sessionId, m_currentAssistantMessageId, result);
                 saveCheckpoint();
             } else if (decision == domain::agent::PermissionDecision::AskUser) {
                 m_pendingPermissions[call.id] = {call, requiredPerm};
@@ -662,7 +670,7 @@ namespace agent::runtime {
 
         m_pendingToolResults.append(safeResult);
         m_state.results = m_pendingToolResults;
-        emit toolResultReady(m_context.sessionId, safeResult);
+        emit toolResultReady(m_context.sessionId, m_currentAssistantMessageId, safeResult);
         emit stateChanged(m_state);
         saveCheckpoint();
 
@@ -748,15 +756,14 @@ namespace agent::runtime {
                 // Started
             } else if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                 m_replyBuffer += arg.text;
-                emit tokenReceived(m_context.sessionId, arg.text);
+                emit tokenReceived(m_context.sessionId, m_currentAssistantMessageId, arg.text);
             } else if constexpr (std::is_same_v<T, domain::llm::EventThinkingDelta>) {
                 m_thoughtBuffer += arg.thought;
-                emit thoughtReceived(m_context.sessionId, arg.thought);
+                emit thoughtReceived(m_context.sessionId, m_currentAssistantMessageId, arg.thought);
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallStarted>) {
                 domain::agent::ToolCall call{arg.id, arg.functionName, {}};
                 m_activeToolCalls[arg.id] = call;
                 m_state.pendingCalls = m_activeToolCalls.values();
-                emit toolCallStarted(m_context.sessionId, call);
                 emit stateChanged(m_state);
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallDelta>) {
                 if (m_activeToolCalls.contains(arg.id)) {
@@ -767,7 +774,7 @@ namespace agent::runtime {
                 if (m_activeToolCalls.contains(arg.id)) {
                     const auto call = m_activeToolCalls[arg.id];
                     m_state.pendingCalls = m_activeToolCalls.values();
-                    emit toolCallFinished(m_context.sessionId, call);
+                    emit toolCallFinished(m_context.sessionId, m_currentAssistantMessageId, call);
                     emit stateChanged(m_state);
                 }
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {

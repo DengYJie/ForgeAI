@@ -1,221 +1,115 @@
 #include "MarkdownDocumentController.h"
 
-#include <QRegularExpression>
-#include <QStringView>
-#include <optional>
+#include <QElapsedTimer>
 
 namespace ui::widget {
 
 MarkdownDocumentController::MarkdownDocumentController(QObject* parent)
     : QObject(parent)
-{}
+{
+    m_updateTimer.setSingleShot(true);
+    m_updateTimer.setInterval(33);
+    connect(&m_updateTimer, &QTimer::timeout, this, [this] { rebuild(false); });
+}
 
 void MarkdownDocumentController::setMarkdown(const QString& markdown)
 {
-    if (m_markdown == markdown) return;
-    m_markdown = markdown;
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    ++m_fullParseCount;
-    m_document = m_parser.parse(m_markdown, parseOptions());
-    emit documentRebuilt();
+    m_updateTimer.stop();
+    m_pendingChunks = 0;
+    if (!m_source.setText(markdown)) return;
+    ++m_renderEpoch;
+    rebuild(true);
 }
 
 QString MarkdownDocumentController::markdown() const
 {
-    return m_markdown;
+    return m_source.text();
 }
 
 void MarkdownDocumentController::beginStream()
 {
+    m_updateTimer.stop();
+    m_pendingChunks = 0;
     m_streaming = true;
-    m_markdown.clear();
-    m_streamTail.clear();
-    m_document = ui::markdown::MarkdownDocument{};
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_fullParseCount = 0;
-    m_stableParseCount = 0;
-    m_tailParseCount = 0;
+    m_source.clear();
+    ++m_renderEpoch;
+    m_metrics = {};
+    m_metrics.renderEpoch = m_renderEpoch;
     emit streamingChanged(true);
-    emit documentRebuilt();
+    rebuild(false);
 }
 
 void MarkdownDocumentController::appendMarkdown(const QString& chunk)
 {
-    if (chunk.isEmpty()) return;
-    m_markdown += chunk;
-    m_streamTail += chunk;
-    const qsizetype boundary = stableStreamingBoundary();
-    if (boundary > 0) {
-        ++m_stableParseCount;
-        m_document.append(m_parser.parse(m_streamTail.left(boundary), parseOptions()));
-        m_streamTail.remove(0, boundary);
-        emit stableDocumentAppended();
+    if (!m_source.append(chunk)) return;
+    ++m_pendingChunks;
+    if (m_streaming) {
+        scheduleUpdate();
+    } else {
+        ++m_renderEpoch;
+        rebuild(true);
     }
-    ++m_tailParseCount;
-    ++m_tailGeneration;
-    m_activeTailDocument = m_parser.parse(m_streamTail, parseOptions());
-    emit tailGenerationChanged(m_tailGeneration);
-    emit tailDocumentChanged();
 }
 
 void MarkdownDocumentController::finishStream()
 {
+    if (!m_streaming) return;
+    m_updateTimer.stop();
     m_streaming = false;
-    m_streamTail.clear();
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    ++m_fullParseCount;
-    m_document = m_parser.parse(m_markdown, parseOptions());
-    // Emit streamingChanged first so Layout knows to switch to non-streaming path,
-    // then documentRebuilt triggers a full re-layout. MarkdownView will emit
-    // streamingFinished() after the final layoutReady() is received.
+    ++m_renderEpoch;
+    m_metrics.renderEpoch = m_renderEpoch;
     emit streamingChanged(false);
-    emit documentRebuilt();
-}
-
-bool MarkdownDocumentController::isStreaming() const
-{
-    return m_streaming;
+    rebuild(true);
 }
 
 void MarkdownDocumentController::setAllowHtml(bool allow)
 {
+    if (m_allowHtml == allow) return;
     m_allowHtml = allow;
+    m_updateTimer.stop();
+    ++m_renderEpoch;
+    rebuild(!m_streaming);
 }
 
-bool MarkdownDocumentController::allowHtml() const
+void MarkdownDocumentController::toggleTask(ui::markdown::SourceRange markerRange, bool currentlyChecked)
 {
-    return m_allowHtml;
-}
-
-void MarkdownDocumentController::toggleTaskAtLine(int sourceLine, bool currentlyChecked)
-{
-    if (sourceLine <= 0) return;
-    int start = 0;
-    for (int line = 1; line < sourceLine; ++line) {
-        start = m_markdown.indexOf(u'\n', start);
-        if (start < 0) return;
-        ++start;
-    }
-    const int end = m_markdown.indexOf(u'\n', start);
-    const int length = (end < 0 ? m_markdown.size() : end) - start;
-    const QString lineText = m_markdown.mid(start, length);
-    const QRegularExpression checkbox(QStringLiteral("\\[([ xX])\\]"));
-    const QRegularExpressionMatch match = checkbox.match(lineText);
-    if (!match.hasMatch()) return;
+    const ui::markdown::SourceOffsetRange range{markerRange.begin, markerRange.end};
+    if (!range.isValid() || range.length() != 1) return;
+    const int sourceLine = m_source.text().left(range.begin).count(u'\n') + 1;
     const bool checked = !currentlyChecked;
-    m_markdown.replace(start + match.capturedStart(1), 1, checked ? QStringLiteral("x") : QStringLiteral(" "));
+    if (!m_source.replaceRange(range, checked ? QStringView{u"x"} : QStringView{u" "})) return;
+    ++m_renderEpoch;
+    rebuild(true);
     emit taskToggled(sourceLine, checked);
-    m_activeTailDocument = ui::markdown::MarkdownDocument{};
-    m_document = m_parser.parse(m_markdown, parseOptions());
-    emit documentRebuilt();
 }
 
-const ui::markdown::MarkdownDocument& MarkdownDocumentController::stableDocument() const
+void MarkdownDocumentController::scheduleUpdate()
 {
-    return m_document;
-}
-
-const ui::markdown::MarkdownDocument& MarkdownDocumentController::tailDocument() const
-{
-    return m_activeTailDocument;
-}
-
-qsizetype MarkdownDocumentController::stableStreamingBoundary() const
-{
-    if (m_streamTail.isEmpty()) return 0;
-
-    struct FenceState { QChar marker; int len = 0; };
-    std::optional<FenceState> fence;
-    bool inList = false;
-    int consecutiveEmptyLines = 0;
-    qsizetype lastBoundary = 0;
-    qsizetype start = 0;
-
-    auto isListMarker = [](const QStringView& line) -> bool {
-        const QStringView t = line.trimmed();
-        if (t.startsWith(u"- ") || t.startsWith(u"* ") || t.startsWith(u"+ ")) return true;
-        int i = 0;
-        while (i < t.size() && t[i].isDigit()) ++i;
-        if (i > 0 && i < t.size() - 1 && (t[i] == u'.' || t[i] == u')') && t[i + 1].isSpace()) return true;
-        return false;
-    };
-
-    auto isTopLevelBlockStart = [&isListMarker](const QStringView& line) -> bool {
-        if (line.isEmpty()) return false;
-        if (line.startsWith(u' ') || line.startsWith(u'\t')) return false;
-        const QStringView t = line.trimmed();
-        if (t.startsWith(u'#') || t.startsWith(u"---") || t.startsWith(u"***") || t.startsWith(u"___")
-            || t.startsWith(u"```") || t.startsWith(u"~~~") || t.startsWith(u">")) {
-            return true;
-        }
-        if (!isListMarker(line)) {
-            return true;
-        }
-        return false;
-    };
-
-    while (start <= m_streamTail.size()) {
-        const qsizetype end = m_streamTail.indexOf(u'\n', start);
-        const qsizetype lineEnd = end < 0 ? m_streamTail.size() : end;
-        const QStringView line{m_streamTail.constData() + start, lineEnd - start};
-        const QStringView trimmed = line.trimmed();
-
-        // CommonMark-correct fence detection:
-        // A closing fence must use the SAME character as the opening fence,
-        // and its length must be >= the opening fence length.
-        if (!trimmed.isEmpty() && (trimmed[0] == u'`' || trimmed[0] == u'~')) {
-            const QChar marker = trimmed[0];
-            int len = 0;
-            while (len < trimmed.size() && trimmed[len] == marker) ++len;
-            // The rest after the fence characters must be blank (or just the language info on open)
-            const bool restIsBlank = trimmed.mid(len).trimmed().isEmpty();
-            if (restIsBlank || !fence) {
-                if (!fence) {
-                    // Opening fence: record marker and minimum-close length
-                    fence = FenceState{marker, len};
-                    inList = false;
-                    consecutiveEmptyLines = 0;
-                } else if (fence->marker == marker && len >= fence->len) {
-                    // Valid closing fence
-                    fence.reset();
-                    inList = false;
-                    consecutiveEmptyLines = 0;
-                }
-                // else: different marker or too short — inside fenced code, ignore
-            }
-        } else if (!fence) {
-            if (trimmed.isEmpty()) {
-                ++consecutiveEmptyLines;
-                const qsizetype boundaryCandidate = end < 0 ? lineEnd : end + 1;
-                if (consecutiveEmptyLines >= 2) {
-                    inList = false;
-                    lastBoundary = boundaryCandidate;
-                } else if (!inList) {
-                    if (end >= 0 && end + 1 < m_streamTail.size()) {
-                        const qsizetype nextEnd = m_streamTail.indexOf(u'\n', end + 1);
-                        const qsizetype nextLineEnd = nextEnd < 0 ? m_streamTail.size() : nextEnd;
-                        const QStringView nextLine{m_streamTail.constData() + end + 1, nextLineEnd - (end + 1)};
-                        if (isTopLevelBlockStart(nextLine)) {
-                            lastBoundary = boundaryCandidate;
-                        }
-                    }
-                }
-            } else {
-                consecutiveEmptyLines = 0;
-                if (isListMarker(line)) {
-                    inList = true;
-                } else if (!line.startsWith(u' ') && !line.startsWith(u'\t')) {
-                    if (isTopLevelBlockStart(line)) {
-                        inList = false;
-                    }
-                }
-            }
-        }
-
-        if (end < 0) break;
-        start = end + 1;
+    if (!m_updateTimer.isActive()) {
+        m_updateTimer.start();
+        ++m_metrics.scheduledUpdateCount;
     }
-    return lastBoundary;
+}
+
+void MarkdownDocumentController::rebuild(bool canonical)
+{
+    m_updateTimer.stop();
+    m_metrics.coalescedChunkCount += qMax(0, m_pendingChunks - 1);
+    m_pendingChunks = 0;
+    const auto source = m_source.snapshot();
+    auto projection = ui::markdown::ParseProjection::identity(source, m_renderEpoch);
+    projection.canonical = canonical;
+    QElapsedTimer timer;
+    timer.start();
+    const auto parsed = m_parser.parse(projection, parseOptions());
+    ui::markdown::BlockChangeSet changes;
+    auto next = m_reconciler.reconcile(parsed, m_document.document ? &m_document : nullptr, &changes);
+    m_document = std::move(next);
+    m_metrics.lastParseUs = timer.nsecsElapsed() / 1000;
+    ++m_metrics.parseCount;
+    m_metrics.renderEpoch = m_renderEpoch;
+    m_metrics.lastChanges = changes;
+    emit documentChanged();
 }
 
 ui::markdown::MarkdownParseOptions MarkdownDocumentController::parseOptions() const

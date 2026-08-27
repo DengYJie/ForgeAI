@@ -50,15 +50,16 @@ namespace application::usecase::chat {
          */
         bool isGenerating() const;
 
-    Q_SIGNALS:
+    signals:
         void userMessageCreated(const QString &sessionId, const domain::conversation::Message &message);
-        void tokenReceived(const QString &sessionId, const QString &token);
-        void thoughtReceived(const QString &sessionId, const QString &thought);
+        void assistantMessageStarted(const QString &sessionId, const domain::conversation::Message &message);
+        void tokenReceived(const QString &sessionId, const QUuid &messageId, const QString &token);
+        void thoughtReceived(const QString &sessionId, const QUuid &messageId, const QString &thought);
         void replyGenerated(const QString &sessionId, const domain::conversation::Message &message);
         void generationFinished(const QString &sessionId);
         void generationFailed(const QString &sessionId, const domain::llm::ChatError &error);
 
-    private Q_SLOTS:
+    private slots:
         void onChatEventReceived(const domain::llm::ChatEvent &event);
 
     private:
@@ -75,6 +76,7 @@ namespace application::usecase::chat {
         ports::IChatOperation *m_currentOp = nullptr;
         QString m_currentSessionId;
         QString m_currentOperationId;
+        QUuid m_currentAssistantMessageId;
         
         QString m_replyBuffer;
         QString m_thoughtBuffer;

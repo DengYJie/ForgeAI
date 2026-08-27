@@ -181,6 +181,7 @@ namespace ui::screen::chat {
         m_pane->statusLabel()->setVisible(!state.statusMessage.isEmpty());
 
         // 3. 消息列表全量同步 (MessageListView 内部执行增量 Diff)
+        qWarning() << "[STREAM_TRACE][ChatPage] render: isGenerating=" << state.isGenerating << "msgCount=" << state.messages.size() << "streamingId=" << state.streamingMessageId;
         m_pane->messageList()->syncMessages(state.messages);
         m_pane->emptyStateLabel()->setVisible(state.messages.isEmpty());
 

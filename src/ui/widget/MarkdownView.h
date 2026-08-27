@@ -10,7 +10,6 @@
 #include <optional>
 
 #include <FluentQt/Foundation.h>
-#include <FluentQt/TextFields.h>
 #include "MarkdownStyle.h"
 #include "MarkdownDocumentController.h"
 #include "MarkdownDocumentLayout.h"
@@ -24,14 +23,20 @@ class QVariantAnimation;
 namespace ui::widget {
 
 struct MarkdownViewMetrics {
-    quint64 fullParseCount = 0;
-    quint64 stableParseCount = 0;
-    quint64 tailParseCount = 0;
-    quint64 stableLayoutCount = 0;
-    quint64 tailLayoutCount = 0;
-    qint64 lastParseMs = 0;
-    qint64 lastStableLayoutMs = 0;
-    qint64 lastTailLayoutMs = 0;
+    quint64 parseCount = 0;
+    quint64 scheduledUpdateCount = 0;
+    quint64 coalescedChunkCount = 0;
+    quint64 unchangedBlockCount = 0;
+    quint64 updatedBlockCount = 0;
+    quint64 layoutCount = 0;
+    quint64 blockCacheHits = 0;
+    quint64 blockCacheMisses = 0;
+    quint64 blockCacheEvictions = 0;
+    qsizetype blockCacheEntries = 0;
+    qsizetype blockCacheEstimatedBytes = 0;
+    qsizetype blockCacheLimitBytes = 0;
+    qint64 lastParseUs = 0;
+    qint64 lastLayoutUs = 0;
     qint64 lastPaintMs = 0;
     int blockCount = 0;
     int visibleBlockCount = 0;
@@ -87,9 +92,11 @@ public:
     void setAutoFitHeight(bool enable);
     bool isAutoFitHeight() const;
 
-    ui::markdown::BlockScrollOffset blockScrollOffset(int blockIndex) const;
-    void setBlockScrollOffset(int blockIndex, const ui::markdown::BlockScrollOffset& offset);
-    bool scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool smooth = true);
+    ui::markdown::BlockScrollOffset blockScrollOffset(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId) const;
+    void setBlockScrollOffset(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId,
+                              const ui::markdown::BlockScrollOffset& offset);
+    bool scrollBlock(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId,
+                     qreal deltaX, qreal deltaY, bool smooth = true);
     void onThemeUpdated() override;
 
     void setAllowNetworkAccess(bool allow);
@@ -140,7 +147,6 @@ signals:
 
 protected:
     bool viewportEvent(QEvent *event) override;
-    void showEvent(QShowEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
@@ -157,6 +163,8 @@ private:
     QString documentPlainText() const;
     void requestImageResources();
     bool handleBlockWheel(QWheelEvent* event);
+    int elementIndex(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId) const;
+    bool scrollBlockAtIndex(int blockIndex, qreal deltaX, qreal deltaY, bool smooth);
     void invalidatePreferredSize();
     void recalculatePreferredSize();
     void updateActualLayoutWidth();

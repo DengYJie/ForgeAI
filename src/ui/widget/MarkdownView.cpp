@@ -8,12 +8,13 @@
 #include <QMimeData>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QPalette>
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QShowEvent>
 #include <QVariantAnimation>
 #include <QWheelEvent>
-#include <FluentQt/Design.h>
+#include <FluentQt/Foundation.h>
 
 namespace ui::widget {
 
@@ -61,7 +62,9 @@ MarkdownView::MarkdownView(QWidget *parent)
         viewport()->setCursor(shape);
     });
     connect(m_eventFilter, &MarkdownViewEventFilter::blockScrollRequested, this, [this](int idx, qreal dx, qreal dy, bool smooth) {
-        scrollBlock(idx, dx, dy, smooth);
+        if (idx < 0 || idx >= m_documentLayout->blockCount()) return;
+        const auto& block = m_documentLayout->blockAt(idx);
+        scrollBlock(block.blockId, block.elementId, dx, dy, smooth);
     });
 
     connect(&m_resources, &ui::markdown::MarkdownImageResourceManager::imageUpdated, this, [this](const QString& source) {
@@ -76,14 +79,13 @@ MarkdownView::MarkdownView(QWidget *parent)
 
     m_eventFilter->setDocumentLayoutGetter([this] { return m_documentLayout.get(); });
     m_eventFilter->setScrollOffsets(&m_blockScrollOffsets);
-    m_eventFilter->setScrollBarValueGetter([this] { return verticalScrollBar()->value(); });
+    m_eventFilter->setScrollBarValueGetter([this] { return m_autoFitHeight ? 0 : verticalScrollBar()->value(); });
 }
 
 MarkdownView::~MarkdownView() = default;
 
 void MarkdownView::setMarkdown(const QString &markdown)
 {
-    if (m_usesThemeStyleSheet) onThemeUpdated();
     m_controller->setMarkdown(markdown);
 }
 
@@ -123,25 +125,34 @@ MarkdownViewMetrics MarkdownView::metrics() const noexcept
 {
     auto m = m_metrics;
     if (m_controller) {
-        m.fullParseCount = m_controller->fullParseCount();
-        m.stableParseCount = m_controller->stableParseCount();
-        m.tailParseCount = m_controller->tailParseCount();
+        const auto cm = m_controller->metrics();
+        m.parseCount = cm.parseCount;
+        m.scheduledUpdateCount = cm.scheduledUpdateCount;
+        m.coalescedChunkCount = cm.coalescedChunkCount;
+        m.unchangedBlockCount = cm.lastChanges.unchangedCount;
+        m.updatedBlockCount = cm.lastChanges.updatedCount;
+        m.lastParseUs = cm.lastParseUs;
     }
     if (m_layoutCache) {
         const auto lm = m_layoutCache->metrics();
-        m.stableLayoutCount = lm.stableLayoutCount;
-        m.tailLayoutCount = lm.tailLayoutCount;
-        m.lastStableLayoutMs = lm.lastStableLayoutMs;
-        m.lastTailLayoutMs = lm.lastTailLayoutMs;
+        m.layoutCount = lm.layoutCount;
+        m.blockCacheHits = lm.blockCacheHits;
+        m.blockCacheMisses = lm.blockCacheMisses;
+        m.blockCacheEvictions = lm.blockCacheEvictions;
+        m.blockCacheEntries = lm.blockCacheEntries;
+        m.blockCacheEstimatedBytes = lm.blockCacheEstimatedBytes;
+        m.blockCacheLimitBytes = lm.blockCacheLimitBytes;
+        m.lastLayoutUs = lm.lastLayoutUs;
     }
     return m;
 }
 
 void MarkdownView::setBaseUrl(const QUrl &url) { m_baseUrl = url; }
 QUrl MarkdownView::baseUrl() const { return m_baseUrl; }
-void MarkdownView::scrollToAnchor(const QString &name)
+void MarkdownView::scrollToAnchor(const QString& targetInput)
 {
-    QString target = name.trimmed();
+    if (!m_documentLayout || targetInput.isEmpty() || m_autoFitHeight) return;
+    QString target = targetInput.trimmed();
     if (target.startsWith(u'#')) target = target.mid(1).trimmed();
     if (target.isEmpty() || m_documentLayout->blockCount() == 0) return;
 
@@ -181,7 +192,6 @@ void MarkdownView::scrollToAnchor(const QString &name)
 void MarkdownView::setMarkdownStyleSheet(const MarkdownStyleSheet &styleSheet)
 {
     m_styleSheet = styleSheet;
-    m_usesThemeStyleSheet = false;
     m_theme.bodyFont.setFamily(styleSheet.style.bodyFontFamily);
     if (styleSheet.style.fontSize > 0) m_theme.bodyFont.setPixelSize(styleSheet.style.fontSize);
     m_theme.codeFont.setFamily(styleSheet.style.monospaceFontFamily);
@@ -198,14 +208,18 @@ MarkdownStyleSheet MarkdownView::markdownStyleSheet() const { return m_styleShee
 
 void MarkdownView::resetMarkdownStyleSheetToTheme()
 {
-    m_usesThemeStyleSheet = true;
-    onThemeUpdated();
+    m_theme = ui::markdown::MarkdownTheme::light(font());
+    if (m_customContentMargins.has_value()) {
+        m_theme.contentMargins = *m_customContentMargins;
+    }
+    m_layoutCache->setTheme(m_theme);
+    invalidatePreferredSize();
+    updateActualLayoutWidth();
 }
 
 void MarkdownView::setTheme(const ui::markdown::MarkdownTheme& theme)
 {
     m_theme = theme;
-    m_usesThemeStyleSheet = false;
     m_layoutCache->setTheme(m_theme);
     invalidatePreferredSize();
     updateActualLayoutWidth();
@@ -287,20 +301,38 @@ void MarkdownView::setAutoFitHeight(bool enable)
 
 bool MarkdownView::isAutoFitHeight() const { return m_autoFitHeight; }
 
-ui::markdown::BlockScrollOffset MarkdownView::blockScrollOffset(int blockIndex) const
+int MarkdownView::elementIndex(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId) const
 {
-    return m_blockScrollOffsets.value(blockIndex);
+    for (int i = 0; i < m_documentLayout->blockCount(); ++i) {
+        const auto& block = m_documentLayout->blockAt(i);
+        if (block.blockId == blockId && block.elementId == elementId) return i;
+    }
+    return -1;
 }
 
-void MarkdownView::setBlockScrollOffset(int blockIndex, const ui::markdown::BlockScrollOffset& offset)
+ui::markdown::BlockScrollOffset MarkdownView::blockScrollOffset(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId) const
 {
+    return m_blockScrollOffsets.value(elementIndex(blockId, elementId));
+}
+
+void MarkdownView::setBlockScrollOffset(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId,
+                                        const ui::markdown::BlockScrollOffset& offset)
+{
+    const int blockIndex = elementIndex(blockId, elementId);
+    if (blockIndex < 0) return;
     if (auto* anim = m_blockScrollAnimations.value(blockIndex)) anim->stop();
     m_blockTargetScrollOffsets.insert(blockIndex, offset);
     m_blockScrollOffsets.insert(blockIndex, offset);
     viewport()->update();
 }
 
-bool MarkdownView::scrollBlock(int blockIndex, qreal deltaX, qreal deltaY, bool smooth)
+bool MarkdownView::scrollBlock(ui::markdown::BlockId blockId, ui::markdown::ElementId elementId,
+                               qreal deltaX, qreal deltaY, bool smooth)
+{
+    return scrollBlockAtIndex(elementIndex(blockId, elementId), deltaX, deltaY, smooth);
+}
+
+bool MarkdownView::scrollBlockAtIndex(int blockIndex, qreal deltaX, qreal deltaY, bool smooth)
 {
     if (blockIndex < 0 || blockIndex >= m_documentLayout->blockCount()) return false;
     const auto& block = m_documentLayout->blockAt(blockIndex);
@@ -404,7 +436,7 @@ QString MarkdownView::selectedHtml() const
 
     QString html;
     for (const auto& block : *m_documentLayout) {
-        int blockStart = block.documentTextOffset;
+        int blockStart = block.displayTextOffset;
         int blockLen = block.inlineLayout ? static_cast<int>(block.inlineLayout->text.size())
                      : (block.kind == ui::markdown::BlockKind::CodeBlock ? static_cast<int>(block.code.size()) : 0);
         int blockEnd = blockStart + blockLen;
@@ -508,7 +540,9 @@ bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags,
         if (matches.isEmpty()) return false;
 
         if (!backward) {
-            const int from = incremental && sel.position >= 0 ? sel.position : 0;
+            const int from = sel.isValid()
+                ? (incremental ? qMin(sel.anchor, sel.position) : qMax(sel.anchor, sel.position))
+                : (sel.position >= 0 ? sel.position : 0);
             for (const auto& m : matches) {
                 if (m.first >= from) {
                     foundStart = m.first;
@@ -522,7 +556,9 @@ bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags,
                 didWrap = true;
             }
         } else {
-            const int from = incremental && sel.isValid() ? qMin(sel.anchor, sel.position) : static_cast<int>(haystack.size());
+            const int from = sel.isValid()
+                ? (incremental ? qMax(sel.anchor, sel.position) : qMin(sel.anchor, sel.position))
+                : (sel.position >= 0 ? sel.position : static_cast<int>(haystack.size()));
             for (int i = matches.size() - 1; i >= 0; --i) {
                 if (matches[i].first < from) {
                     foundStart = matches[i].first;
@@ -539,7 +575,9 @@ bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags,
     } else {
         const Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
         if (!backward) {
-            const int from = incremental && sel.position >= 0 ? sel.position : 0;
+            const int from = sel.isValid()
+                ? (incremental ? qMin(sel.anchor, sel.position) : qMax(sel.anchor, sel.position))
+                : (sel.position >= 0 ? sel.position : 0);
             int pos = static_cast<int>(haystack.indexOf(text, from, cs));
             if (pos < 0 && from > 0) {
                 pos = static_cast<int>(haystack.indexOf(text, 0, cs));
@@ -550,10 +588,12 @@ bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags,
                 foundLength = static_cast<int>(text.size());
             }
         } else {
-            const int from = incremental && sel.isValid() ? qMin(sel.anchor, sel.position) - 1 : static_cast<int>(haystack.size());
+            const int from = sel.isValid()
+                ? (incremental ? qMax(sel.anchor, sel.position) : qMin(sel.anchor, sel.position) - 1)
+                : (sel.position >= 0 ? sel.position - 1 : static_cast<int>(haystack.size()) - 1);
             int pos = from >= 0 ? static_cast<int>(haystack.lastIndexOf(text, from, cs)) : -1;
             if (pos < 0 && from < haystack.size()) {
-                pos = static_cast<int>(haystack.lastIndexOf(text, haystack.size(), cs));
+                pos = static_cast<int>(haystack.lastIndexOf(text, -1, cs));
                 didWrap = (pos >= 0);
             }
             if (pos >= 0) {
@@ -570,11 +610,13 @@ bool MarkdownView::findText(const QString &text, QTextDocument::FindFlags flags,
     emit selectionChanged(true);
 
     for (const auto& b : *m_documentLayout) {
-        if (foundStart >= b.documentTextOffset && foundStart <= b.documentTextOffset + (b.inlineLayout ? b.inlineLayout->text.size() : 0)) {
-            const int viewTop = verticalScrollBar()->value();
-            const int viewBottom = viewTop + viewport()->height();
-            if (b.rect.top() < viewTop || b.rect.bottom() > viewBottom) {
-                verticalScrollBar()->setValue(qBound(0, qRound(b.rect.top() - 20), verticalScrollBar()->maximum()));
+        if (foundStart >= b.displayTextOffset && foundStart <= b.displayTextOffset + (b.inlineLayout ? b.inlineLayout->text.size() : 0)) {
+            if (!m_autoFitHeight) {
+                const int viewTop = verticalScrollBar()->value();
+                const int viewBottom = viewTop + viewport()->height();
+                if (b.rect.top() < viewTop || b.rect.bottom() > viewBottom) {
+                    verticalScrollBar()->setValue(qBound(0, qRound(b.rect.top() - 20), verticalScrollBar()->maximum()));
+                }
             }
             break;
         }
@@ -621,14 +663,13 @@ QSize MarkdownView::minimumSizeHint() const
     return QSize(0, 0);
 }
 
-void MarkdownView::showEvent(QShowEvent* event)
-{
-    QAbstractScrollArea::showEvent(event);
-    onThemeUpdated();
-}
 
 void MarkdownView::wheelEvent(QWheelEvent *event)
 {
+    if (m_autoFitHeight) {
+        event->ignore();
+        return;
+    }
     QAbstractScrollArea::wheelEvent(event);
 }
 
@@ -636,6 +677,7 @@ void MarkdownView::resizeEvent(QResizeEvent* event)
 {
     QAbstractScrollArea::resizeEvent(event);
     updateActualLayoutWidth();
+    updateScrollBars();
 }
 
 void MarkdownView::keyPressEvent(QKeyEvent* event)
@@ -654,15 +696,43 @@ void MarkdownView::focusOutEvent(QFocusEvent* event)
 
 void MarkdownView::onLayoutReady(ui::markdown::DocumentLayoutPtr layout)
 {
+    QHash<ui::markdown::ElementKey, ui::markdown::BlockScrollOffset> offsetsByElement;
+    QHash<ui::markdown::ElementKey, ui::markdown::BlockScrollOffset> targetsByElement;
+    if (m_documentLayout) {
+        for (int i = 0; i < m_documentLayout->blockCount(); ++i) {
+            const auto& oldBlock = m_documentLayout->blockAt(i);
+            const ui::markdown::ElementKey key{oldBlock.blockId, oldBlock.elementId};
+            if (m_blockScrollOffsets.contains(i)) offsetsByElement.insert(key, m_blockScrollOffsets.value(i));
+            if (m_blockTargetScrollOffsets.contains(i)) targetsByElement.insert(key, m_blockTargetScrollOffsets.value(i));
+        }
+    }
+    for (auto* animation : m_blockScrollAnimations) {
+        animation->stop();
+        animation->deleteLater();
+    }
+    m_blockScrollAnimations.clear();
+    m_blockScrollOffsets.clear();
+    m_blockTargetScrollOffsets.clear();
+
     m_documentLayout = layout;
+    for (int i = 0; i < m_documentLayout->blockCount(); ++i) {
+        const auto& newBlock = m_documentLayout->blockAt(i);
+        const ui::markdown::ElementKey key{newBlock.blockId, newBlock.elementId};
+        if (offsetsByElement.contains(key)) m_blockScrollOffsets.insert(i, offsetsByElement.value(key));
+        if (targetsByElement.contains(key)) m_blockTargetScrollOffsets.insert(i, targetsByElement.value(key));
+    }
     m_metrics.blockCount = m_documentLayout->blockCount();
     m_metrics.documentHeight = m_documentLayout->size.height();
     m_preferredContentSize = m_documentLayout->size;
     const auto lm = m_layoutCache->metrics();
-    m_metrics.stableLayoutCount = lm.stableLayoutCount;
-    m_metrics.tailLayoutCount = lm.tailLayoutCount;
-    m_metrics.lastStableLayoutMs = lm.lastStableLayoutMs;
-    m_metrics.lastTailLayoutMs = lm.lastTailLayoutMs;
+    m_metrics.layoutCount = lm.layoutCount;
+    m_metrics.blockCacheHits = lm.blockCacheHits;
+    m_metrics.blockCacheMisses = lm.blockCacheMisses;
+    m_metrics.blockCacheEvictions = lm.blockCacheEvictions;
+    m_metrics.blockCacheEntries = lm.blockCacheEntries;
+    m_metrics.blockCacheEstimatedBytes = lm.blockCacheEstimatedBytes;
+    m_metrics.blockCacheLimitBytes = lm.blockCacheLimitBytes;
+    m_metrics.lastLayoutUs = lm.lastLayoutUs;
     updateScrollBars();
     updateAutoFitHeight();
     requestImageResources();
@@ -686,7 +756,7 @@ void MarkdownView::onTaskToggleRequested(int blockIndex)
 {
     if (blockIndex < 0 || blockIndex >= m_documentLayout->blockCount()) return;
     const auto& block = m_documentLayout->blockAt(blockIndex);
-    m_controller->toggleTaskAtLine(block.taskSourceLine, block.taskChecked);
+    m_controller->toggleTask(block.taskMarkerRange, block.taskChecked);
 }
 
 void MarkdownView::onRepaintRequested()
@@ -722,15 +792,17 @@ void MarkdownView::updateActualLayoutWidth()
 
 void MarkdownView::updateScrollBars()
 {
-    const int height = qCeil(m_documentLayout->size.height());
-    verticalScrollBar()->setPageStep(viewport()->height());
     if (m_autoFitHeight) {
+        setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         verticalScrollBar()->setRange(0, 0);
         verticalScrollBar()->setValue(0);
-    } else {
-        verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
+        return;
     }
-    setVerticalScrollBarPolicy(m_autoFitHeight ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
+
+    const int height = qCeil(m_documentLayout->size.height());
+    verticalScrollBar()->setPageStep(viewport()->height());
+    verticalScrollBar()->setRange(0, qMax(0, height - viewport()->height()));
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 }
 
 void MarkdownView::updateAutoFitHeight()
@@ -754,8 +826,9 @@ void MarkdownView::paintViewport(QPaintEvent* event)
     QPainter painter(viewport());
     if (!m_transparentBackground) painter.fillRect(event->rect(), m_theme.background.isValid() ? m_theme.background : palette().color(QPalette::Base));
     painter.save();
-    painter.translate(0, -verticalScrollBar()->value());
-    const QRectF exposed = QRectF(event->rect()).translated(0, verticalScrollBar()->value());
+    const int scrollY = m_autoFitHeight ? 0 : verticalScrollBar()->value();
+    painter.translate(0, -scrollY);
+    const QRectF exposed = QRectF(event->rect()).translated(0, scrollY);
     m_metrics.visibleBlockCount = m_renderer.paint(painter, *m_documentLayout, m_theme, exposed,
                                                     m_eventFilter->selection(),
                                                     m_eventFilter->hoveredBlock(),
@@ -786,7 +859,7 @@ bool MarkdownView::handleBlockWheel(QWheelEvent* event)
     if (event->modifiers().testFlag(Qt::ShiftModifier) && dx == 0) { dx = dy; dy = 0; }
     else if (block.scrollInfo.hasHorizontalScroll() && !block.scrollInfo.hasVerticalScroll() && dx == 0) { dx = dy; dy = 0; }
 
-    if (scrollBlock(hit.blockIndex, dx, dy, !isPixel)) { event->accept(); return true; }
+    if (scrollBlock(hit.blockId, hit.elementId, dx, dy, !isPixel)) { event->accept(); return true; }
     return false;
 }
 
@@ -802,18 +875,12 @@ bool MarkdownView::viewportEvent(QEvent* event)
 
 QPointF MarkdownView::toDocument(const QPointF& viewportPosition) const
 {
-    return viewportPosition + QPointF(0, verticalScrollBar()->value());
+    return viewportPosition + QPointF(0, m_autoFitHeight ? 0 : verticalScrollBar()->value());
 }
 
 QString MarkdownView::documentPlainText() const
 {
-    QString text;
-    for (const auto& block : *m_documentLayout) {
-        if (block.inlineLayout) text += block.inlineLayout->text;
-        else if (block.kind == ui::markdown::BlockKind::CodeBlock) text += block.code;
-        text += u'\n';
-    }
-    return text;
+    return m_documentLayout ? m_documentLayout->displayText() : QString{};
 }
 
 void MarkdownView::requestImageResources()

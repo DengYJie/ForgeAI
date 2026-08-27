@@ -432,11 +432,22 @@ namespace ui::widget::message {
             m_markdownView->setPreferredWidthLimit(0);
         }
 
+        qWarning() << "[STREAM_TRACE][MessageCard] syncMessage: id=" << m_message.id << "status=" << static_cast<int>(m_message.status)
+                   << "fullMarkdownLen=" << fullMarkdown.length() << "viewMarkdownLen=" << m_markdownView->markdown().length()
+                   << "isStreaming=" << m_markdownView->isStreaming();
+
         if (m_markdownView->markdown() != fullMarkdown) {
-            if (m_message.status == domain::MessageStatus::Sending && fullMarkdown.startsWith(m_markdownView->markdown()) && m_markdownView->isStreaming()) {
-                m_markdownView->appendMarkdown(fullMarkdown.mid(m_markdownView->markdown().length()));
+            if (m_message.status == domain::MessageStatus::Sending && fullMarkdown.startsWith(m_markdownView->markdown())) {
+                if (!m_markdownView->isStreaming()) {
+                    qWarning() << "[STREAM_TRACE][MessageCard] auto-starting beginStream()";
+                    m_markdownView->beginStream();
+                }
+                const QString chunk = fullMarkdown.mid(m_markdownView->markdown().length());
+                qWarning() << "[STREAM_TRACE][MessageCard] appendMarkdown chunkLen=" << chunk.length();
+                m_markdownView->appendMarkdown(chunk);
             }
             else {
+                qWarning() << "[STREAM_TRACE][MessageCard] fallback setMarkdown len=" << fullMarkdown.length();
                 m_markdownView->setMarkdown(fullMarkdown);
             }
         }

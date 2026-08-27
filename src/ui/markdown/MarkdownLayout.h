@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MarkdownDocument.h"
+#include "MarkdownSnapshot.h"
 #include "MarkdownTheme.h"
 #include "ui/markdown/syntax/MarkdownSyntaxHighlighter.h"
 
@@ -63,6 +64,7 @@ struct TableLayoutData {
     QVector<qreal> columnWidths;
     QVector<qreal> rowHeights;
     QVector<QVector<std::shared_ptr<InlineLayout>>> cells;
+    QVector<QVector<int>> cellDisplayTextOffsets;
     QVector<bool> headerRows;
 };
 
@@ -83,6 +85,8 @@ struct BlockScrollInfo {
 };
 
 struct BlockLayout {
+    BlockId blockId = 0;
+    ElementId elementId = 0;
     BlockKind kind = BlockKind::Paragraph;
     QRectF rect;
     qreal contentX = 0;
@@ -91,6 +95,7 @@ struct BlockLayout {
     bool taskItem = false;
     bool taskChecked = false;
     int taskSourceLine = 0;
+    SourceRange taskMarkerRange;
     QRectF taskCheckRect;
     QString code;
     QString language;
@@ -103,11 +108,9 @@ struct BlockLayout {
     QVector<int> codeLineOffsets;
     std::shared_ptr<TableLayoutData> table;
     BlockScrollInfo scrollInfo;
-    int documentTextOffset = 0;
+    int displayTextOffset = 0;
 
-    // Translate ALL absolute geometry fields by (dx, dy).
-    // Use this whenever a block is repositioned (e.g. tail→composite merge,
-    // image-size patch cascade). Avoids scattered translate() call-sites.
+    // Translate every geometry field when placing a cached block-local layout.
     void translate(qreal dx, qreal dy)
     {
         rect.translate(dx, dy);
@@ -124,8 +127,17 @@ struct DocumentLayout;
 using DocumentLayoutPtr = std::shared_ptr<const DocumentLayout>;
 
 struct DocumentLayout {
+    struct SemanticPlacement {
+        BlockId id = 0;
+        QRectF rect;
+        int firstFragment = 0;
+        int fragmentCount = 0;
+    };
+
+    SourceRevision documentRevision = 0;
     QSizeF size;
     QVector<BlockLayout> blocks;
+    QVector<SemanticPlacement> semanticBlocks;
     qreal width = 0;
     quint64 themeVersion = 0;
     // The y-cursor value at which appendNodes() finished writing blocks.
@@ -136,12 +148,16 @@ struct DocumentLayout {
     int firstVisibleBlock(qreal y) const;
     int lastVisibleBlock(qreal y) const;
     int textLength() const;
+    QString displayText() const;
 
     int blockCount() const { return blocks.size(); }
     const BlockLayout& blockAt(int index) const { return blocks.at(index); }
     const BlockLayout* begin() const { return blocks.begin(); }
     const BlockLayout* end() const { return blocks.end(); }
 };
+
+using PaintFragment = BlockLayout;
+using LayoutSnapshot = DocumentLayout;
 
 struct MarkdownLayoutMetrics {
     quint64 totalLayouts = 0;
@@ -151,6 +167,13 @@ struct MarkdownLayoutMetrics {
     quint64 codeBlockCacheMisses = 0;
     quint64 tableCellFastPathHits = 0;
     quint64 tableCellWrappedCount = 0;
+    quint64 blockCacheHits = 0;
+    quint64 blockCacheMisses = 0;
+    quint64 blockCacheEvictions = 0;
+    qsizetype blockCacheEntries = 0;
+    qsizetype blockCacheEstimatedBytes = 0;
+    qsizetype blockCacheLimitBytes = 0;
+    quint64 placementCount = 0;
     qint64 lastLayoutUs = 0;
 };
 
@@ -158,20 +181,14 @@ class MarkdownLayoutEngine final {
 public:
     DocumentLayout layout(const MarkdownDocument& document, qreal width, const MarkdownTheme& theme,
                           const QHash<QString, QImage>& images = {}) const;
-    DocumentLayout layout(const MarkdownDocument& stableDocument, const MarkdownDocument& activeTail,
-                          qreal width, const MarkdownTheme& theme,
+    DocumentLayout layout(const DocumentSnapshot& document, qreal width, const MarkdownTheme& theme,
                           const QHash<QString, QImage>& images = {}) const;
 
     void clearCache();
     MarkdownLayoutMetrics metrics() const noexcept;
     void resetMetrics() noexcept;
 
-    // Must be called before layout()-ing a fresh tail AST.
-    // Prevents the InlineCache from returning stale PreparedInlines
-    // when the allocator reuses AST node addresses across tail re-parses.
-    // Pass generation=0 when laying out stable documents.
-    void setTailGeneration(quint64 generation) { m_tailGeneration = generation; }
-    void clearTailCache();
+    void removeBlocks(const QVector<BlockId>& ids);
 
 private:
     void appendNodes(const std::vector<std::unique_ptr<MarkdownNode>>& nodes, DocumentLayout& result,
@@ -191,8 +208,6 @@ private:
                                              const MarkdownTheme& theme, qreal width, quint64 generation) const;
 
     MarkdownSyntaxHighlighter m_syntaxHighlighter;
-    quint64 m_tailGeneration = 0;
-
     struct CodeCacheKey {
         quint64 themeVersion = 0;
         QString language;
@@ -206,43 +221,62 @@ private:
     }
 
     struct TableCacheKey {
-        const MarkdownNode* node = nullptr;
+        quint64 nodeHash = 0;
         quint64 themeVersion = 0;
-        quint64 generation = 0; // 0 = stable, non-zero = tail generation
         int rowCount = 0;
         int totalCols = 0;
         bool operator==(const TableCacheKey& o) const {
-            return node == o.node && themeVersion == o.themeVersion &&
-                   generation == o.generation &&
+            return nodeHash == o.nodeHash && themeVersion == o.themeVersion &&
                    rowCount == o.rowCount && totalCols == o.totalCols;
         }
     };
     friend inline size_t qHash(const TableCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.node, k.themeVersion, k.generation, k.rowCount, k.totalCols);
+        return qHashMulti(seed, k.nodeHash, k.themeVersion, k.rowCount, k.totalCols);
     }
 
     struct InlineCacheKey {
-        const MarkdownNode* node = nullptr;
+        quint64 nodeHash = 0;
         quint64 themeVersion = 0;
-        quint64 generation = 0; // 0 = stable AST (pointer identity safe), non-zero = tail generation
         int fontPixelSize = 0;
         int fontWeight = 0;
         int childCount = 0;
         int literalLength = 0;
         bool operator==(const InlineCacheKey& o) const {
-            return node == o.node && themeVersion == o.themeVersion &&
-                   generation == o.generation &&
+            return nodeHash == o.nodeHash && themeVersion == o.themeVersion &&
                    fontPixelSize == o.fontPixelSize && fontWeight == o.fontWeight &&
                    childCount == o.childCount && literalLength == o.literalLength;
         }
     };
     friend inline size_t qHash(const InlineCacheKey& k, size_t seed = 0) noexcept {
-        return qHashMulti(seed, k.node, k.themeVersion, k.generation, k.fontPixelSize, k.fontWeight, k.childCount, k.literalLength);
+        return qHashMulti(seed, k.nodeHash, k.themeVersion, k.fontPixelSize, k.fontWeight, k.childCount, k.literalLength);
     }
+
+    struct BlockCacheKey {
+        BlockId blockId = 0;
+        quint64 semanticHash = 0;
+        quint64 dependencyRevision = 0;
+        qint64 width64 = 0;
+        quint64 themeVersion = 0;
+        quint64 resourceFingerprint = 0;
+        bool operator==(const BlockCacheKey&) const = default;
+    };
+    friend inline size_t qHash(const BlockCacheKey& k, size_t seed = 0) noexcept {
+        return qHashMulti(seed, k.blockId, k.semanticHash, k.dependencyRevision,
+                          k.width64, k.themeVersion, k.resourceFingerprint);
+    }
+    struct BlockCacheEntry {
+        DocumentLayout local;
+        qsizetype estimatedCost = 0;
+        quint64 accessTick = 0;
+    };
 
     mutable QHash<CodeCacheKey, CodeBlockContentLayout> m_codeBlockCache;
     mutable QHash<TableCacheKey, std::shared_ptr<TableIntrinsicData>> m_tableCache;
     mutable QHash<InlineCacheKey, PreparedInline> m_inlineCache;
+    mutable QHash<BlockCacheKey, BlockCacheEntry> m_blockCache;
+    mutable qsizetype m_blockCacheCost = 0;
+    mutable quint64 m_accessTick = 0;
+    static constexpr qsizetype MaxBlockCacheCost = 64 * 1024 * 1024;
     mutable MarkdownLayoutMetrics m_metrics;
 };
 

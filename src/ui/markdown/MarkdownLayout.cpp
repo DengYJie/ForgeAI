@@ -8,6 +8,41 @@
 namespace ui::markdown {
 namespace {
 
+quint64 nodeFingerprint(const MarkdownNode& node, quint64 hash = 1469598103934665603ULL)
+{
+    constexpr quint64 prime = 1099511628211ULL;
+    auto mix = [&](quint64 value) {
+        for (int i = 0; i < 8; ++i) {
+            hash ^= static_cast<unsigned char>((value >> (i * 8)) & 0xff);
+            hash *= prime;
+        }
+    };
+    mix(static_cast<quint64>(node.type));
+    mix(qHash(node.literal));
+    mix(qHash(node.attributes.url));
+    mix(qHash(node.attributes.title));
+    mix(qHash(node.attributes.fenceInfo));
+    mix(static_cast<quint64>(node.attributes.headingLevel));
+    mix(static_cast<quint64>(node.attributes.listStart));
+    mix(static_cast<quint64>(node.attributes.orderedList));
+    mix(static_cast<quint64>(node.attributes.taskListItem));
+    mix(static_cast<quint64>(node.attributes.taskChecked));
+    for (const auto& child : node.children) hash = nodeFingerprint(*child, hash);
+    return hash;
+}
+
+quint64 resourceFingerprint(const MarkdownNode& node, const QHash<QString, QImage>& images,
+                           quint64 hash = 1469598103934665603ULL)
+{
+    if (node.type == MarkdownNodeType::Image) {
+        hash = qHashMulti(hash, node.attributes.url);
+        const auto it = images.constFind(node.attributes.url);
+        if (it != images.constEnd()) hash = qHashMulti(hash, it->width(), it->height(), it->cacheKey());
+    }
+    for (const auto& child : node.children) hash = resourceFingerprint(*child, images, hash);
+    return hash;
+}
+
 struct InlineBuilder {
     QString text;
     QVector<QTextLayout::FormatRange> formats;
@@ -140,7 +175,42 @@ int DocumentLayout::textLength() const
         int length = 0;
         if (block.inlineLayout) length = static_cast<int>(block.inlineLayout->text.size());
         else if (block.kind == BlockKind::CodeBlock) length = static_cast<int>(block.code.size());
-        result = qMax(result, block.documentTextOffset + length + 1);
+        else if (block.kind == BlockKind::Table && block.table) {
+            for (int row = 0; row < block.table->cells.size(); ++row) {
+                for (int col = 0; col < block.table->cells.at(row).size(); ++col) {
+                    const int offset = block.table->cellDisplayTextOffsets.value(row).value(col, block.displayTextOffset);
+                    const auto& cell = block.table->cells.at(row).at(col);
+                    result = qMax(result, offset + (cell ? static_cast<int>(cell->text.size()) : 0) + 1);
+                }
+            }
+            continue;
+        }
+        result = qMax(result, block.displayTextOffset + length + 1);
+    }
+    return result;
+}
+
+QString DocumentLayout::displayText() const
+{
+    QString result(textLength(), u'\n');
+    const auto place = [&result](int offset, QStringView text) {
+        if (offset < 0 || offset + text.size() > result.size()) return;
+        result.replace(offset, text.size(), text.toString());
+    };
+    for (const BlockLayout& block : blocks) {
+        if (block.inlineLayout) {
+            place(block.displayTextOffset, block.inlineLayout->text);
+        } else if (block.kind == BlockKind::CodeBlock) {
+            place(block.displayTextOffset, block.code);
+        } else if (block.kind == BlockKind::Table && block.table) {
+            for (int row = 0; row < block.table->cells.size(); ++row) {
+                for (int col = 0; col < block.table->cells.at(row).size(); ++col) {
+                    const auto& cell = block.table->cells.at(row).at(col);
+                    if (cell)
+                        place(block.table->cellDisplayTextOffsets.value(row).value(col, block.displayTextOffset), cell->text);
+                }
+            }
+        }
     }
     return result;
 }
@@ -150,30 +220,30 @@ void MarkdownLayoutEngine::clearCache()
     m_inlineCache.clear();
     m_codeBlockCache.clear();
     m_tableCache.clear();
+    m_blockCache.clear();
+    m_blockCacheCost = 0;
 }
 
-void MarkdownLayoutEngine::clearTailCache()
+void MarkdownLayoutEngine::removeBlocks(const QVector<BlockId>& ids)
 {
-    // Remove only entries that belong to a previous tail generation (generation != 0).
-    // Stable entries (generation == 0) are retained — their AST pointers are stable
-    // throughout the streaming lifetime.
-    for (auto it = m_inlineCache.begin(); it != m_inlineCache.end(); ) {
-        if (it.key().generation != 0)
-            it = m_inlineCache.erase(it);
-        else
+    if (ids.isEmpty()) return;
+    for (auto it = m_blockCache.begin(); it != m_blockCache.end();) {
+        if (ids.contains(it.key().blockId)) {
+            m_blockCacheCost -= it->estimatedCost;
+            it = m_blockCache.erase(it);
+        } else {
             ++it;
-    }
-    for (auto it = m_tableCache.begin(); it != m_tableCache.end(); ) {
-        if (it.key().generation != 0)
-            it = m_tableCache.erase(it);
-        else
-            ++it;
+        }
     }
 }
 
 MarkdownLayoutMetrics MarkdownLayoutEngine::metrics() const noexcept
 {
-    return m_metrics;
+    MarkdownLayoutMetrics result = m_metrics;
+    result.blockCacheEntries = m_blockCache.size();
+    result.blockCacheEstimatedBytes = m_blockCacheCost;
+    result.blockCacheLimitBytes = MaxBlockCacheCost;
+    return result;
 }
 
 void MarkdownLayoutEngine::resetMetrics() noexcept
@@ -215,7 +285,8 @@ const PreparedInline& MarkdownLayoutEngine::prepareCachedInline(const MarkdownNo
                                                                 const MarkdownTheme& theme, quint64 generation) const
 {
     const int pixelSize = font.pixelSize() > 0 ? font.pixelSize() : qRound(font.pointSizeF() * 10);
-    const InlineCacheKey key{&node, theme.version, generation, pixelSize, static_cast<int>(font.weight()),
+    Q_UNUSED(generation);
+    const InlineCacheKey key{nodeFingerprint(node), theme.version, pixelSize, static_cast<int>(font.weight()),
                              static_cast<int>(node.children.size()), static_cast<int>(node.literal.size())};
     auto it = m_inlineCache.find(key);
     if (it == m_inlineCache.end()) {
@@ -274,9 +345,10 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                     block.taskItem = first && node.attributes.taskListItem;
                     block.taskChecked = node.attributes.taskChecked;
                     block.taskSourceLine = node.sourceRange.startLine;
+                    block.taskMarkerRange = node.attributes.taskMarkerRange;
                     block.quoteIndent = quoteDepth * 18; block.contentX = indent + theme.listIndent;
                     block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme, generation), right - block.contentX);
-                    block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
+                    block.displayTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
                     block.rect = QRectF(indent, y, right - indent, block.inlineLayout->height + 4);
                     if (block.taskItem) block.taskCheckRect = QRectF(indent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
                     result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + 3; first = false;
@@ -300,9 +372,10 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                         block.taskItem = first && item.attributes.taskListItem;
                         block.taskChecked = item.attributes.taskChecked;
                         block.taskSourceLine = item.sourceRange.startLine;
+                        block.taskMarkerRange = item.attributes.taskMarkerRange;
                         block.quoteIndent = quoteDepth * 18; block.contentX = markerIndent + theme.listIndent;
                         block.inlineLayout = layoutInline(prepareCachedInline(*child, theme.bodyFont, theme, generation), right - block.contentX);
-                        block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
+                        block.displayTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
                         block.rect = QRectF(markerIndent, y, right - markerIndent, block.inlineLayout->height + 4);
                         if (block.taskItem) block.taskCheckRect = QRectF(markerIndent, qRound(y + (block.rect.height() - 16) / 2), 16, 16);
                         result.blocks.push_back(std::move(block)); y += result.blocks.back().rect.height() + 3; first = false;
@@ -316,7 +389,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         }
         if (node.type == MarkdownNodeType::ThematicBreak) {
             BlockLayout block; block.kind = BlockKind::Rule; block.quoteIndent = quoteDepth * 18;
-            block.documentTextOffset = textOffset++;
+            block.displayTextOffset = textOffset++;
             block.rect = QRectF(indent, y + theme.blockGap * .5, right - indent, 1); result.blocks.push_back(block);
             y += theme.blockGap + 1; continue;
         }
@@ -364,7 +437,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
             if (block.scrollInfo.hasHorizontalScroll()) {
                 block.scrollInfo.hScrollBarRect = QRectF(block.scrollInfo.viewportRect.left() + 4, block.rect.bottom() - 7, block.scrollInfo.viewportRect.width() - 8, 4);
             }
-            block.documentTextOffset = textOffset;
+            block.displayTextOffset = textOffset;
             textOffset += static_cast<int>(codeText.size()) + 1;
             result.blocks.push_back(std::move(block));
             y += result.blocks.back().rect.height() + theme.blockGap;
@@ -373,7 +446,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         if (node.type == MarkdownNodeType::Table) {
             int totalCols = 0;
             for (const auto& r : node.children) totalCols += static_cast<int>(r->children.size());
-            const TableCacheKey tableKey{&node, theme.version, generation, static_cast<int>(node.children.size()), totalCols};
+            const TableCacheKey tableKey{nodeFingerprint(node), theme.version, static_cast<int>(node.children.size()), totalCols};
             auto tableIt = m_tableCache.find(tableKey);
             if (tableIt == m_tableCache.end()) {
                 auto intrinsicData = std::make_shared<TableIntrinsicData>();
@@ -431,6 +504,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
             }
 
             qreal totalHeight = 0;
+            const int tableDisplayStart = textOffset;
             for (int row = 0; row < static_cast<int>(node.children.size()); ++row) {
                 const auto& rowNode = node.children[row];
                 const bool isHeader = (row < intrinsic.headerRows.size()) ? intrinsic.headerRows[row] : false;
@@ -464,7 +538,14 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
                     const qreal colInnerWidth = (cells.size() < data->columnWidths.size()) ? (data->columnWidths[cells.size()] - 16) : 48;
                     cells.push_back(plainInline({}, cellFont, theme, colInnerWidth));
                 }
+                QVector<int> cellOffsets;
+                cellOffsets.reserve(cells.size());
+                for (const auto& cell : cells) {
+                    cellOffsets.push_back(textOffset);
+                    textOffset += (cell ? static_cast<int>(cell->text.size()) : 0) + 1;
+                }
                 data->cells.push_back(std::move(cells));
+                data->cellDisplayTextOffsets.push_back(std::move(cellOffsets));
                 data->rowHeights.push_back(rowHeight + 16);
                 totalHeight += rowHeight + 16;
             }
@@ -473,7 +554,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
             block.kind = BlockKind::Table;
             block.table = data;
             block.quoteIndent = quoteDepth * 18;
-            block.documentTextOffset = textOffset++;
+            block.displayTextOffset = tableDisplayStart;
             block.rect = QRectF(indent, y, right - indent, totalHeight);
             result.blocks.push_back(std::move(block));
             y += totalHeight + theme.blockGap;
@@ -483,7 +564,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
             const MarkdownNode& imageNode = *node.children.front();
             BlockLayout block; block.kind = BlockKind::Image; block.imageUrl = imageNode.attributes.url;
             block.imageAlt = prepareCachedInline(imageNode, theme.bodyFont, theme, generation).text;
-            block.documentTextOffset = textOffset++;
+            block.displayTextOffset = textOffset++;
             QSizeF intrinsic(360, 180);
             if (const auto imgIt = images.constFind(block.imageUrl); imgIt != images.constEnd() && !imgIt->isNull()) {
                 intrinsic = imgIt->size();
@@ -502,7 +583,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         }
         if (node.type == MarkdownNodeType::Image) {
             BlockLayout block; block.kind = BlockKind::Image; block.imageUrl = node.attributes.url; block.imageAlt = node.literal;
-            block.documentTextOffset = textOffset++;
+            block.displayTextOffset = textOffset++;
             QSizeF intrinsic(360, 180);
             if (const auto imgIt = images.constFind(block.imageUrl); imgIt != images.constEnd() && !imgIt->isNull()) {
                 intrinsic = imgIt->size();
@@ -524,7 +605,7 @@ void MarkdownLayoutEngine::appendNodes(const std::vector<std::unique_ptr<Markdow
         block.quoteIndent = quoteDepth * 18; block.contentX = indent;
         const QFont font = node.type == MarkdownNodeType::Heading ? theme.headingFont(node.attributes.headingLevel) : theme.bodyFont;
         block.inlineLayout = layoutInline(prepareCachedInline(node, font, theme, generation), right - indent);
-        block.documentTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
+        block.displayTextOffset = textOffset; textOffset += static_cast<int>(block.inlineLayout->text.size()) + 1;
         const qreal top = node.type == MarkdownNodeType::Heading ? theme.blockGap * .65 : 0;
         block.rect = QRectF(indent, y + top, right - indent, block.inlineLayout->height); result.blocks.push_back(std::move(block)); y += top + result.blocks.back().rect.height() + theme.blockGap;
     }
@@ -559,16 +640,89 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& document, qr
     return result;
 }
 
-DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocument, const MarkdownDocument& activeTail,
-                                            qreal width, const MarkdownTheme& theme,
+DocumentLayout MarkdownLayoutEngine::layout(const DocumentSnapshot& document, qreal width,
+                                            const MarkdownTheme& theme,
                                             const QHash<QString, QImage>& images) const
 {
     QElapsedTimer timer; timer.start();
     DocumentLayout result;
-    result.width = qMax<qreal>(1, width); result.themeVersion = theme.version; int offset = 0;
+    result.documentRevision = document.sourceRevision;
+    result.width = qMax<qreal>(1, width);
+    result.themeVersion = theme.version;
+    int displayOffset = 0;
     qreal y = theme.contentMargins.top();
-    appendNodes(stableDocument.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images, 0);
-    appendNodes(activeTail.root().children, result, y, result.width, theme.contentMargins.left(), 0, 0, theme, offset, images, m_tailGeneration);
+
+    for (const MarkdownBlock& block : document.blocks) {
+        if (!block.node) continue;
+        const BlockCacheKey key{
+            block.id,
+            block.semanticHash,
+            document.semanticEnvironmentRevision,
+            qRound64(result.width * 64.0),
+            theme.version,
+            resourceFingerprint(*block.node, images)
+        };
+
+        auto cacheIt = m_blockCache.find(key);
+        if (cacheIt == m_blockCache.end()) {
+            // A block keeps only its current semantic version per layout context.
+            for (auto it = m_blockCache.begin(); it != m_blockCache.end();) {
+                const bool sameContext = it.key().blockId == key.blockId
+                    && it.key().width64 == key.width64
+                    && it.key().themeVersion == key.themeVersion;
+                if (sameContext) {
+                    m_blockCacheCost -= it->estimatedCost;
+                    it = m_blockCache.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+
+            BlockCacheEntry entry;
+            const MarkdownDocument fragment = MarkdownDocument::fromBlock(*block.node);
+            entry.local = layout(fragment, result.width, theme, images);
+            entry.estimatedCost = sizeof(BlockCacheEntry)
+                + entry.local.blocks.size() * static_cast<qsizetype>(sizeof(BlockLayout));
+            for (const auto& fragmentBlock : entry.local.blocks) {
+                if (fragmentBlock.inlineLayout)
+                    entry.estimatedCost += fragmentBlock.inlineLayout->text.size() * static_cast<qsizetype>(sizeof(QChar));
+                entry.estimatedCost += fragmentBlock.code.size() * static_cast<qsizetype>(sizeof(QChar));
+            }
+            entry.accessTick = ++m_accessTick;
+            m_blockCacheCost += entry.estimatedCost;
+            cacheIt = m_blockCache.insert(key, std::move(entry));
+            ++m_metrics.blockCacheMisses;
+        } else {
+            cacheIt->accessTick = ++m_accessTick;
+            ++m_metrics.blockCacheHits;
+        }
+
+        const DocumentLayout& local = cacheIt->local;
+        const int firstFragment = result.blocks.size();
+        const qreal dy = y - theme.contentMargins.top();
+        QRectF semanticRect;
+        for (int localIndex = 0; localIndex < local.blocks.size(); ++localIndex) {
+            BlockLayout fragment = local.blocks[localIndex];
+            fragment.blockId = block.id;
+            fragment.elementId = qHashMulti(0, block.id, localIndex, static_cast<int>(fragment.kind));
+            fragment.translate(0, dy);
+            fragment.displayTextOffset += displayOffset;
+            if (fragment.table) {
+                auto placedTable = std::make_shared<TableLayoutData>(*fragment.table);
+                for (auto& rowOffsets : placedTable->cellDisplayTextOffsets)
+                    for (int& offset : rowOffsets) offset += displayOffset;
+                fragment.table = std::move(placedTable);
+            }
+            semanticRect = semanticRect.isNull() ? fragment.rect : semanticRect.united(fragment.rect);
+            result.blocks.push_back(std::move(fragment));
+        }
+        result.semanticBlocks.push_back({block.id, semanticRect, firstFragment,
+                                         static_cast<int>(result.blocks.size()) - firstFragment});
+        y += qMax<qreal>(0, local.contentEndY - theme.contentMargins.top());
+        displayOffset += local.textLength();
+        ++m_metrics.placementCount;
+    }
+
     result.contentEndY = y;
     qreal maxContentWidth = 0;
     for (const auto& b : result.blocks) {
@@ -584,6 +738,23 @@ DocumentLayout MarkdownLayoutEngine::layout(const MarkdownDocument& stableDocume
     const qreal emptyWidth = theme.contentMargins.left() + theme.contentMargins.right();
     const qreal usedWidth = maxContentWidth > 0 ? qMin(result.width, maxContentWidth) : qMin(result.width, emptyWidth);
     result.size = QSizeF(usedWidth, totalHeight);
+
+    while (m_blockCacheCost > MaxBlockCacheCost && !m_blockCache.isEmpty()) {
+        auto oldest = m_blockCache.begin();
+        for (auto it = m_blockCache.begin(); it != m_blockCache.end(); ++it) {
+            if (it->accessTick < oldest->accessTick) oldest = it;
+        }
+        m_blockCacheCost -= oldest->estimatedCost;
+        m_blockCache.erase(oldest);
+        ++m_metrics.blockCacheEvictions;
+    }
+    // The final block cache owns the expensive geometry. These preparation caches
+    // are bounded independently so a changing streaming code/table block cannot
+    // retain every historical semantic version.
+    if (m_inlineCache.size() > 4096) m_inlineCache.clear();
+    if (m_tableCache.size() > 512) m_tableCache.clear();
+    if (m_codeBlockCache.size() > 512) m_codeBlockCache.clear();
+
     m_metrics.lastLayoutUs = timer.nsecsElapsed() / 1000;
     ++m_metrics.totalLayouts;
     return result;

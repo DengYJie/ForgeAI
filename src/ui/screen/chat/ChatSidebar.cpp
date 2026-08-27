@@ -113,7 +113,6 @@ namespace ui::screen::chat {
         // 断开 currentChanged 信号防止 ViewModel 重入
         m_listView->selectionModel()->blockSignals(true);
         m_model->setSessions(sessions);
-        m_listView->selectionModel()->blockSignals(false);
 
         // 还原选中
         if (!currentId.isEmpty()) {
@@ -122,6 +121,7 @@ namespace ui::screen::chat {
                 m_listView->setCurrentIndex(m_model->index(row, 0));
             }
         }
+        m_listView->selectionModel()->blockSignals(false);
     }
 
     void ChatSidebar::addSession(const QString &id, const QString &title, bool isPinned) {
@@ -143,8 +143,10 @@ namespace ui::screen::chat {
 
         const int row = m_model->indexOf(id);
         if (row >= 0) {
+            m_listView->selectionModel()->blockSignals(true);
             const QModelIndex modelIdx = m_model->index(row, 0);
             m_listView->setCurrentIndex(modelIdx);
+            m_listView->selectionModel()->blockSignals(false);
         }
     }
 
