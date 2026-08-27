@@ -868,6 +868,10 @@ bool MarkdownView::viewportEvent(QEvent* event)
     if (event->type() == QEvent::Paint) { paintViewport(static_cast<QPaintEvent*>(event)); return true; }
     if (event->type() == QEvent::Wheel) {
         if (handleBlockWheel(static_cast<QWheelEvent*>(event))) return true;
+        if (m_autoFitHeight) {
+            event->ignore();
+            return false;
+        }
     }
     if (m_eventFilter->handleViewportEvent(event)) return true;
     return QAbstractScrollArea::viewportEvent(event);

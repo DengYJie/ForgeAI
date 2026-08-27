@@ -78,9 +78,16 @@ void MessageListView::setupUi()
         updateVisibleCards();
     });
 
-    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
         scheduleVirtualRefresh();
         if (!m_visibleCheckTimer->isActive()) m_visibleCheckTimer->start();
+        if (!m_scrollAnimation || m_scrollAnimation->state() != QAbstractAnimation::Running) {
+            if (value < verticalScrollBar()->maximum() - 20) {
+                m_autoScrollToBottom = false;
+            } else if (value >= verticalScrollBar()->maximum() - 10) {
+                m_autoScrollToBottom = true;
+            }
+        }
     });
 }
 
@@ -397,9 +404,14 @@ void MessageListView::executeFollowBottom()
 
 void MessageListView::wheelEvent(QWheelEvent* event)
 {
-    if (event->angleDelta().y() > 0) { m_autoScrollToBottom = false; m_scrollAnimation->stop(); }
+    if (event->angleDelta().y() > 0) {
+        m_autoScrollToBottom = false;
+        m_scrollAnimation->stop();
+    }
     fluent::scrolling::ScrollView::wheelEvent(event);
-    if (verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 10) m_autoScrollToBottom = true;
+    if (event->angleDelta().y() < 0 && verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 10) {
+        m_autoScrollToBottom = true;
+    }
 }
 
 void MessageListView::performResizeLayout()
