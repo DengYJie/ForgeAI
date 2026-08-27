@@ -34,6 +34,9 @@ public:
 
     void onThemeUpdated() override;
 
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
 signals:
     void contentHeightChanged();
 

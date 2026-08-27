@@ -58,6 +58,8 @@ namespace ui::widget::message {
         m_mainLayout->setSpacing(2);
 
         m_headerWidget = new QWidget(this);
+        m_headerWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_headerWidget->setFixedHeight(32);
         m_headerLayout = new QHBoxLayout(m_headerWidget);
         m_headerLayout->setContentsMargins(0, 0, 0, 0);
         m_headerLayout->setSpacing(8);
@@ -74,9 +76,10 @@ namespace ui::widget::message {
         m_timeLabel->setFluentTypography(Typography::FontRole::Caption);
         m_timeLabel->setTextColorRole(fluent::textfields::Label::TextColorRole::Secondary);
 
-        m_mainLayout->addWidget(m_headerWidget);
+        m_mainLayout->addWidget(m_headerWidget, 0);
 
         m_contentRow = new QWidget(this);
+        m_contentRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         m_contentRowLayout = new QHBoxLayout(m_contentRow);
         m_contentRowLayout->setContentsMargins(0, 0, 0, 0);
         m_contentRowLayout->setSpacing(8);
@@ -100,14 +103,17 @@ namespace ui::widget::message {
             emit contentHeightChanged();
         });
 
-        m_mainLayout->addWidget(m_contentRow);
+        m_mainLayout->addWidget(m_contentRow, 1);
 
         m_actionBar = new QWidget(this);
         m_actionBar->setFixedHeight(24);
+        m_actionBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_actionBar->installEventFilter(this);
         m_actionLayout = new QHBoxLayout(m_actionBar);
         m_actionLayout->setContentsMargins(0, 0, 0, 0);
         m_actionLayout->setSpacing(4);
+
+        m_mainLayout->addWidget(m_actionBar, 0);
 
         m_copyButton = new fluent::basicinput::Button(this);
         m_copyButton->setFluentStyle(fluent::basicinput::Button::Subtle);
@@ -283,6 +289,7 @@ namespace ui::widget::message {
     {
         if (!m_processGroupWidget) {
             m_processGroupWidget = new ProcessGroupWidget(this);
+            m_processGroupWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
             connect(m_processGroupWidget, &ProcessGroupWidget::contentHeightChanged, this, [this]() {
                 m_mainLayout->invalidate();
                 updateGeometry();
@@ -291,10 +298,10 @@ namespace ui::widget::message {
 
             int index = m_mainLayout->indexOf(m_contentRow);
             if (index >= 0) {
-                m_mainLayout->insertWidget(index, m_processGroupWidget);
+                m_mainLayout->insertWidget(index, m_processGroupWidget, 0);
             }
             else {
-                m_mainLayout->addWidget(m_processGroupWidget);
+                m_mainLayout->addWidget(m_processGroupWidget, 0);
             }
         }
         return m_processGroupWidget;
@@ -432,22 +439,15 @@ namespace ui::widget::message {
             m_markdownView->setPreferredWidthLimit(0);
         }
 
-        qWarning() << "[STREAM_TRACE][MessageCard] syncMessage: id=" << m_message.id << "status=" << static_cast<int>(m_message.status)
-                   << "fullMarkdownLen=" << fullMarkdown.length() << "viewMarkdownLen=" << m_markdownView->markdown().length()
-                   << "isStreaming=" << m_markdownView->isStreaming();
-
         if (m_markdownView->markdown() != fullMarkdown) {
             if (m_message.status == domain::MessageStatus::Sending && fullMarkdown.startsWith(m_markdownView->markdown())) {
                 if (!m_markdownView->isStreaming()) {
-                    qWarning() << "[STREAM_TRACE][MessageCard] auto-starting beginStream()";
                     m_markdownView->beginStream();
                 }
                 const QString chunk = fullMarkdown.mid(m_markdownView->markdown().length());
-                qWarning() << "[STREAM_TRACE][MessageCard] appendMarkdown chunkLen=" << chunk.length();
                 m_markdownView->appendMarkdown(chunk);
             }
             else {
-                qWarning() << "[STREAM_TRACE][MessageCard] fallback setMarkdown len=" << fullMarkdown.length();
                 m_markdownView->setMarkdown(fullMarkdown);
             }
         }

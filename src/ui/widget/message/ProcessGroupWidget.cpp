@@ -7,6 +7,8 @@ namespace ui::widget::message {
     ProcessGroupWidget::ProcessGroupWidget(QWidget* parent)
         : QWidget(parent)
     {
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(0);
@@ -97,6 +99,16 @@ namespace ui::widget::message {
         if (m_expander) {
             m_expander->onThemeUpdated();
         }
+    }
+
+    QSize ProcessGroupWidget::sizeHint() const
+    {
+        return m_expander ? m_expander->sizeHint() : QSize(200, 28);
+    }
+
+    QSize ProcessGroupWidget::minimumSizeHint() const
+    {
+        return m_expander ? m_expander->minimumSizeHint() : QSize(0, 28);
     }
 
 } // namespace ui::widget::message

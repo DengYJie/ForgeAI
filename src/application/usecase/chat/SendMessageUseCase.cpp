@@ -231,17 +231,14 @@ namespace application::usecase::chat {
             using T = std::decay_t<decltype(arg)>;
             
             if constexpr (std::is_same_v<T, domain::llm::EventStarted>) {
-                qWarning() << "[STREAM_TRACE][UseCase] EventStarted";
+                // stream started
             } else if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                 m_replyBuffer += arg.text;
-                qWarning() << "[STREAM_TRACE][UseCase] tokenReceived len=" << arg.text.length() << "total=" << m_replyBuffer.length();
                 emit tokenReceived(m_currentSessionId, m_currentAssistantMessageId, arg.text);
             } else if constexpr (std::is_same_v<T, domain::llm::EventThinkingDelta>) {
                 m_thoughtBuffer += arg.thought;
-                qWarning() << "[STREAM_TRACE][UseCase] thoughtReceived len=" << arg.thought.length() << "total=" << m_thoughtBuffer.length();
                 emit thoughtReceived(m_currentSessionId, m_currentAssistantMessageId, arg.thought);
             } else if constexpr (std::is_same_v<T, domain::llm::EventFinished>) {
-                qWarning() << "[STREAM_TRACE][UseCase] EventFinished replyLen=" << m_replyBuffer.length() << "thoughtLen=" << m_thoughtBuffer.length();
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_currentSessionId, assistantMsg);
