@@ -59,16 +59,31 @@ namespace llm::protocol::anthropic {
                 if (!systemPrompt.isEmpty()) systemPrompt += "\n\n";
                 systemPrompt += msg.content;
             } else if (msg.role == domain::MessageRole::Tool) {
-                QJsonObject msgObj;
-                msgObj.insert("role", "user");
-                QJsonArray contentArr;
                 QJsonObject toolResObj;
                 toolResObj.insert("type", "tool_result");
                 toolResObj.insert("tool_use_id", msg.toolCallId);
                 toolResObj.insert("content", msg.content);
-                contentArr.append(toolResObj);
-                msgObj.insert("content", contentArr);
-                msgsArray.append(msgObj);
+
+                // Anthropic 必须严格交替 user/assistant。如果上一条已是 user 消息，则合并追加进 content 数组
+                if (!msgsArray.isEmpty() && msgsArray.last().toObject().value("role").toString() == "user") {
+                    QJsonObject lastMsg = msgsArray.last().toObject();
+                    QJsonArray contentArr;
+                    if (lastMsg.value("content").isArray()) {
+                        contentArr = lastMsg.value("content").toArray();
+                    } else if (lastMsg.value("content").isString() && !lastMsg.value("content").toString().isEmpty()) {
+                        contentArr.append(QJsonObject{{"type", "text"}, {"text", lastMsg.value("content").toString()}});
+                    }
+                    contentArr.append(toolResObj);
+                    lastMsg.insert("content", contentArr);
+                    msgsArray[msgsArray.size() - 1] = lastMsg;
+                } else {
+                    QJsonObject msgObj;
+                    msgObj.insert("role", "user");
+                    QJsonArray contentArr;
+                    contentArr.append(toolResObj);
+                    msgObj.insert("content", contentArr);
+                    msgsArray.append(msgObj);
+                }
             } else if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
                 QJsonObject msgObj;
                 msgObj.insert("role", "assistant");
@@ -91,10 +106,28 @@ namespace llm::protocol::anthropic {
                 msgObj.insert("content", contentArr);
                 msgsArray.append(msgObj);
             } else {
-                QJsonObject msgObj;
-                msgObj.insert("role", (msg.role == domain::MessageRole::Assistant) ? "assistant" : "user");
-                msgObj.insert("content", msg.content);
-                msgsArray.append(msgObj);
+                const QString role = (msg.role == domain::MessageRole::Assistant) ? "assistant" : "user";
+                // 合并同角色连续纯文本消息
+                if (!msgsArray.isEmpty() && msgsArray.last().toObject().value("role").toString() == role) {
+                    QJsonObject lastMsg = msgsArray.last().toObject();
+                    if (lastMsg.value("content").isString()) {
+                        QString prevText = lastMsg.value("content").toString();
+                        if (!prevText.isEmpty() && !msg.content.isEmpty()) prevText += "\n\n";
+                        prevText += msg.content;
+                        lastMsg.insert("content", prevText);
+                        msgsArray[msgsArray.size() - 1] = lastMsg;
+                    } else if (lastMsg.value("content").isArray()) {
+                        QJsonArray contentArr = lastMsg.value("content").toArray();
+                        contentArr.append(QJsonObject{{"type", "text"}, {"text", msg.content}});
+                        lastMsg.insert("content", contentArr);
+                        msgsArray[msgsArray.size() - 1] = lastMsg;
+                    }
+                } else {
+                    QJsonObject msgObj;
+                    msgObj.insert("role", role);
+                    msgObj.insert("content", msg.content);
+                    msgsArray.append(msgObj);
+                }
             }
         }
 

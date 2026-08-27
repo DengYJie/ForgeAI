@@ -94,6 +94,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::userMessageCreated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] userMessageCreated -> sessionId: %1, msgId: %2")
+                .arg(sessionId, message.id.toString(QUuid::WithoutBraces));
             updateState([this, message](WorkState& state) {
                 state.messages.append(message);
                 for (auto& item : state.sessions) {
@@ -118,6 +120,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::assistantMessageStarted, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] assistantMessageStarted -> sessionId: %1, msgId: %2")
+                .arg(sessionId, message.id.toString(QUuid::WithoutBraces));
             updateState([message](WorkState& state) {
                 state.messages.append(message);
             });
@@ -169,6 +173,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::permissionRequested, this,
                 [this](const QString& sessionId, const domain::agent::ToolCall& call, const domain::agent::ToolPermission& permission) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] permissionRequested -> tool: %1, id: %2, reason: %3")
+                .arg(call.name, call.id, permission.reason);
             updateState([call, permission](WorkState& state) {
                 state.agentUiState.isWaitingPermission = true;
                 state.agentUiState.permissionPendingCall = call;
@@ -179,6 +185,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::toolCallFinished, this,
                 [this](const QString& sessionId, const QUuid& messageId, const domain::agent::ToolCall& call) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] toolCallFinished -> tool: %1, id: %2, args: %3")
+                .arg(call.name, call.id, call.arguments);
             updateState([messageId, call](WorkState& state) {
                 auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
                     return msg.id == messageId;
@@ -200,6 +208,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::toolResultReady, this,
                 [this](const QString& sessionId, const QUuid& messageId, const domain::agent::ToolResult& result) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] toolResultReady -> id: %1, isError: %2, content: %3")
+                .arg(result.toolCallId).arg(result.isError).arg(result.content.left(100));
             updateState([messageId, result](WorkState& state) {
                 auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
                     return msg.id == messageId;
@@ -221,6 +231,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::replyGenerated, this,
                 [this](const QString& sessionId, const domain::conversation::Message& message) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] replyGenerated -> msgId: %1, blocks: %2")
+                .arg(message.id.toString(QUuid::WithoutBraces)).arg(message.blocks.size());
             updateState([message](WorkState& state) {
                 auto it = std::find_if(state.messages.begin(), state.messages.end(), [&](const auto& msg) {
                     return msg.id == message.id;
@@ -235,6 +247,7 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::runCompleted, this,
                 [this](const QString& sessionId) {
             if (sessionId != m_agentSessionId) return;
+            qInfo().noquote() << QStringLiteral("[WorkViewModel] runCompleted for session: %1").arg(sessionId);
             updateState([](WorkState& state) {
                 state.isProcessing = false;
                 state.statusMessage.clear();
@@ -245,6 +258,8 @@ void WorkViewModel::setupUseCaseConnections() {
         connect(agent, &application::usecase::agent::RunAgentUseCase::runFailed, this,
                 [this](const QString& sessionId, const domain::llm::ChatError& error) {
             if (sessionId != m_agentSessionId) return;
+            qWarning().noquote() << QStringLiteral("[WorkViewModel] runFailed -> code: %1, msg: %2, userMsg: %3")
+                .arg(error.code, error.message, error.userMessage);
             updateState([error](WorkState& state) {
                 state.isProcessing = false;
                 state.statusMessage = error.userMessage.isEmpty() ? error.message : error.userMessage;
@@ -257,6 +272,7 @@ void WorkViewModel::setupUseCaseConnections() {
 
 void WorkViewModel::grantPermission(const QString& toolCallId, bool granted) {
     if (m_agentSessionId.isEmpty() || !m_useCases.runAgent) return;
+    qInfo().noquote() << QStringLiteral("[WorkViewModel] grantPermission -> toolCallId: %1, granted: %2").arg(toolCallId).arg(granted);
     updateState([](WorkState& state) {
         state.agentUiState.isWaitingPermission = false;
     });
@@ -270,7 +286,20 @@ QString WorkViewModel::taskTitle(const QString& task) {
 
 void WorkViewModel::startTask(const QString& task) {
     const QString trimmed = task.trimmed();
-    if (trimmed.isEmpty() || m_currentProjectId.isNull() || m_agentSessionId.isEmpty()) return;
+    if (trimmed.isEmpty()) {
+        qWarning().noquote() << QStringLiteral("[WorkViewModel] startTask ignored: prompt is empty");
+        return;
+    }
+    if (m_currentProjectId.isNull()) {
+        qWarning().noquote() << QStringLiteral("[WorkViewModel] startTask ignored: m_currentProjectId is null");
+        return;
+    }
+    if (m_agentSessionId.isEmpty()) {
+        qInfo().noquote() << QStringLiteral("[WorkViewModel] startTask: m_agentSessionId is empty, creating new session...");
+        newSession();
+    }
+    qInfo().noquote() << QStringLiteral("[WorkViewModel] startTask -> session: %1, project: %2, provider: %3, model: %4, prompt: %5")
+        .arg(m_agentSessionId, m_currentProjectId.toString(QUuid::WithoutBraces), m_state.currentModelProviderId, m_state.currentModelId, trimmed);
     updateState([trimmed](WorkState& state) { state.currentTask = taskTitle(trimmed); state.statusMessage.clear(); });
     if (m_useCases.runAgent) {
         // 调用 RunAgentUseCase 启动智能体编排任务
@@ -285,6 +314,8 @@ void WorkViewModel::startTask(const QString& task) {
             m_state.useDeepThinking,
             m_state.reasoningEffort
         );
+    } else {
+        qWarning().noquote() << QStringLiteral("[WorkViewModel] startTask failed: m_useCases.runAgent is null!");
     }
 }
 

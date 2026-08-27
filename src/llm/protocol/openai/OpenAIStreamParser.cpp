@@ -11,6 +11,7 @@ namespace llm::protocol::openai {
 
     void OpenAIStreamParser::reset() {
         m_buffer.clear();
+        m_toolCallIndexToId.clear();
         m_isFinished = false;
     }
 
@@ -109,23 +110,33 @@ namespace llm::protocol::openai {
             for (const auto &tcVal : tcArr) {
                 if (!tcVal.isObject()) continue;
                 QJsonObject tcObj = tcVal.toObject();
+                const int index = tcObj.value("index").toInt(0);
                 QString id = tcObj.value("id").toString();
+                if (!id.isEmpty()) {
+                    m_toolCallIndexToId[index] = id;
+                } else if (m_toolCallIndexToId.contains(index)) {
+                    id = m_toolCallIndexToId.value(index);
+                }
                 
                 QJsonObject funcObj = tcObj.value("function").toObject();
                 QString fnName = funcObj.value("name").toString();
                 QString argsDelta = funcObj.value("arguments").toString();
 
-                if (!fnName.isEmpty()) {
+                if (!fnName.isEmpty() && !id.isEmpty()) {
                     events.append(domain::llm::EventToolCallStarted{id, fnName});
                 }
-                if (!argsDelta.isEmpty()) {
+                if (!argsDelta.isEmpty() && !id.isEmpty()) {
                     events.append(domain::llm::EventToolCallDelta{id, argsDelta});
                 }
             }
         }
 
         if (choice.contains("finish_reason") && !choice.value("finish_reason").isNull()) {
-            events.append(domain::llm::EventFinished{choice.value("finish_reason").toString()});
+            const QString reason = choice.value("finish_reason").toString();
+            for (const auto& id : m_toolCallIndexToId) {
+                events.append(domain::llm::EventToolCallFinished{id});
+            }
+            events.append(domain::llm::EventFinished{reason});
         }
 
         return events;

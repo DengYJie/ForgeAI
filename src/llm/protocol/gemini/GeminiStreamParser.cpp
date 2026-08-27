@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QUuid>
 
 namespace llm::protocol::gemini {
 
@@ -103,7 +104,10 @@ namespace llm::protocol::gemini {
                     QJsonObject args = fnCall.value("args").toObject();
                     QJsonDocument argsDoc(args);
                     QString argsStr = QString::fromUtf8(argsDoc.toJson(QJsonDocument::Compact));
-                    QString callId = "gemini_call_" + name;
+                    QString callId = fnCall.value("id").toString();
+                    if (callId.isEmpty()) {
+                        callId = "gemini_call_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+                    }
                     events.append(domain::llm::EventToolCallStarted{callId, name});
                     events.append(domain::llm::EventToolCallDelta{callId, argsStr});
                     events.append(domain::llm::EventToolCallFinished{callId});

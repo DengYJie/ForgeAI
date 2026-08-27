@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QUuid>
 
 namespace llm::protocol::ollama {
 
@@ -109,7 +110,10 @@ namespace llm::protocol::ollama {
                     QJsonObject args = funcObj.value("arguments").toObject();
                     QJsonDocument argsDoc(args);
                     QString argsStr = QString::fromUtf8(argsDoc.toJson(QJsonDocument::Compact));
-                    QString callId = "ollama_call_" + name;
+                    QString callId = tcObj.value("id").toString();
+                    if (callId.isEmpty()) {
+                        callId = "ollama_call_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+                    }
                     events.append(domain::llm::EventToolCallStarted{callId, name});
                     events.append(domain::llm::EventToolCallDelta{callId, argsStr});
                     events.append(domain::llm::EventToolCallFinished{callId});

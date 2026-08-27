@@ -91,6 +91,9 @@ namespace llm::protocol::openai {
         if (request.maxTokens.has_value()) {
             bodyObj.insert("max_tokens", request.maxTokens.value());
         }
+        if (request.useDeepThinking || (!request.reasoningEffort.isEmpty() && request.reasoningEffort != QStringLiteral("none"))) {
+            bodyObj.insert("reasoning_effort", request.reasoningEffort.isEmpty() ? QStringLiteral("medium") : request.reasoningEffort);
+        }
 
         QJsonDocument doc(bodyObj);
         netReq.body = doc.toJson(QJsonDocument::Compact);

@@ -4,6 +4,8 @@
 #include <QList>
 #include "llm/protocol/IStreamParser.h"
 
+#include <QHash>
+
 namespace llm::protocol::openai {
 
     /**
@@ -23,6 +25,7 @@ namespace llm::protocol::openai {
         QList<domain::llm::ChatEvent> parseLine(const QByteArray &line);
 
         QByteArray m_buffer; // 处理跨 chunk 半包的缓冲区
+        QHash<int, QString> m_toolCallIndexToId;
         bool m_isFinished = false;
     };
 

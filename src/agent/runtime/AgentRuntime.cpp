@@ -140,6 +140,9 @@ namespace agent::runtime {
             {QStringLiteral("projectId"), context.projectId.toString(QUuid::WithoutBraces)}
         });
 
+        qInfo().noquote() << QStringLiteral("[AgentRuntime] === startRun ===\n  -> sessionId: %1\n  -> projectId: %2\n  -> provider: %3\n  -> model: %4\n  -> prompt: %5")
+            .arg(context.sessionId, context.projectId.toString(QUuid::WithoutBraces), context.provider.id, context.modelId, trimmed);
+
         setState(domain::agent::AgentRunStatus::Preparing);
 
         // 1. 构建并持久化用户消息
@@ -173,10 +176,14 @@ namespace agent::runtime {
             err.category = domain::llm::ChatErrorCategory::Configuration;
             err.code = QStringLiteral("MissingGateway");
             err.userMessage = QStringLiteral("网关服务未就绪。");
+            qWarning().noquote() << QStringLiteral("[AgentRuntime] startNextModelRequest failed: MissingGateway");
             setState(domain::agent::AgentRunStatus::Failed, err.userMessage);
             emit runFailed(m_context.sessionId, err);
             return;
         }
+
+        qInfo().noquote() << QStringLiteral("[AgentRuntime] startNextModelRequest -> Round: %1, Session: %2")
+            .arg(m_state.round).arg(m_context.sessionId);
 
         setState(domain::agent::AgentRunStatus::CallingModel);
 
@@ -255,13 +262,13 @@ namespace agent::runtime {
             request.messages.append({domain::MessageRole::System, m_context.systemPrompt});
         }
 
+        QHash<QString, QString> toolNames;
         for (const auto& msg : history) {
             if (msg.status != domain::MessageStatus::Sent) continue;
 
             domain::llm::ChatMessage llmMsg;
             llmMsg.role = msg.role;
             QList<domain::agent::ToolResult> results;
-            QHash<QString, QString> toolNames;
 
             for (const auto& block : msg.blocks) {
                 if (block.isText()) {
@@ -290,6 +297,9 @@ namespace agent::runtime {
                 request.messages.append(toolMessage);
             }
         }
+
+        qInfo().noquote() << QStringLiteral("[AgentRuntime] buildChatRequest -> model: %1, tools: %2, messages: %3")
+            .arg(request.model).arg(request.tools.size()).arg(request.messages.size());
 
         return request;
     }
@@ -577,14 +587,21 @@ namespace agent::runtime {
         }
 
         if (hasPendingPermission) {
+            qInfo().noquote() << QStringLiteral("[AgentRuntime] processExecutableToolCalls -> Waiting user permission");
             setState(domain::agent::AgentRunStatus::WaitingPermission);
             saveCheckpoint();
             return;
         }
 
         if (executableCalls.isEmpty()) {
+            qInfo().noquote() << QStringLiteral("[AgentRuntime] processExecutableToolCalls -> No executable calls, finishing round");
             finishToolExecutionRound();
             return;
+        }
+
+        qInfo().noquote() << QStringLiteral("[AgentRuntime] processExecutableToolCalls -> Executing %1 tool calls").arg(executableCalls.size());
+        for (const auto& call : executableCalls) {
+            qInfo().noquote() << QStringLiteral("  -> Tool [%1] id=%2 args=%3").arg(call.name, call.id, call.arguments);
         }
 
         setState(domain::agent::AgentRunStatus::ExecutingTool);
@@ -636,6 +653,8 @@ namespace agent::runtime {
                 {QStringLiteral("argKeys"), core::logging::SensitiveDataFilter::extractArgKeys(call.arguments)}
             });
 
+            qInfo().noquote() << QStringLiteral("[AgentRuntime] executeToolOperation -> %1 (id: %2)").arg(call.name, call.id);
+
             std::unique_ptr<application::ports::IToolOperation> op;
             if (m_toolRegistry) {
                 op = m_toolRegistry->execute(call, callContext);
@@ -667,6 +686,9 @@ namespace agent::runtime {
             safeResult.content = safeResult.content.left(maxOutputChars) +
                 QStringLiteral("\n\n[工具输出已截断：原始内容共 %1 字符，仅保留前 %2 字符以保护上下文窗口]").arg(originalLen).arg(maxOutputChars);
         }
+
+        qInfo().noquote() << QStringLiteral("[AgentRuntime] onToolOperationFinished -> id=%1, isError=%2, outputLen=%3, snippet: %4")
+            .arg(toolCallId).arg(safeResult.isError).arg(safeResult.content.length()).arg(safeResult.content.left(80).replace('\n', ' '));
 
         m_pendingToolResults.append(safeResult);
         m_state.results = m_pendingToolResults;
@@ -734,11 +756,15 @@ namespace agent::runtime {
         // 检查轮数上限
         if (m_state.round < m_context.policy.maxToolRounds) {
             ++m_state.round;
+            qInfo().noquote() << QStringLiteral("[AgentRuntime] Continuing to Round %1 (max %2)...")
+                .arg(m_state.round).arg(m_context.policy.maxToolRounds);
             setState(domain::agent::AgentRunStatus::Continuing);
             QTimer::singleShot(0, this, [this]() {
                 startNextModelRequest();
             });
         } else {
+            qInfo().noquote() << QStringLiteral("[AgentRuntime] Reached maxToolRounds (%1), completing run.")
+                .arg(m_context.policy.maxToolRounds);
             cleanupCurrentOp();
             setState(domain::agent::AgentRunStatus::Completed);
             saveCheckpoint();
@@ -753,7 +779,7 @@ namespace agent::runtime {
             using T = std::decay_t<decltype(arg)>;
 
             if constexpr (std::is_same_v<T, domain::llm::EventStarted>) {
-                // Started
+                qInfo().noquote() << QStringLiteral("[AgentRuntime] EventStarted received");
             } else if constexpr (std::is_same_v<T, domain::llm::EventTextDelta>) {
                 m_replyBuffer += arg.text;
                 emit tokenReceived(m_context.sessionId, m_currentAssistantMessageId, arg.text);
@@ -761,6 +787,7 @@ namespace agent::runtime {
                 m_thoughtBuffer += arg.thought;
                 emit thoughtReceived(m_context.sessionId, m_currentAssistantMessageId, arg.thought);
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallStarted>) {
+                qInfo().noquote() << QStringLiteral("[AgentRuntime] EventToolCallStarted -> tool: %1, id: %2").arg(arg.functionName, arg.id);
                 domain::agent::ToolCall call{arg.id, arg.functionName, {}};
                 m_activeToolCalls[arg.id] = call;
                 m_state.pendingCalls = m_activeToolCalls.values();
@@ -769,10 +796,13 @@ namespace agent::runtime {
                 if (m_activeToolCalls.contains(arg.id)) {
                     m_activeToolCalls[arg.id].arguments += arg.argumentsDelta;
                     m_state.pendingCalls = m_activeToolCalls.values();
+                } else {
+                    qWarning().noquote() << QStringLiteral("[AgentRuntime] EventToolCallDelta for unknown id: %1").arg(arg.id);
                 }
             } else if constexpr (std::is_same_v<T, domain::llm::EventToolCallFinished>) {
                 if (m_activeToolCalls.contains(arg.id)) {
                     const auto call = m_activeToolCalls[arg.id];
+                    qInfo().noquote() << QStringLiteral("[AgentRuntime] EventToolCallFinished -> id: %1, totalArgs: %2").arg(arg.id, call.arguments);
                     m_state.pendingCalls = m_activeToolCalls.values();
                     emit toolCallFinished(m_context.sessionId, m_currentAssistantMessageId, call);
                     emit stateChanged(m_state);
@@ -781,6 +811,8 @@ namespace agent::runtime {
                 if (m_timeoutTimer) {
                     m_timeoutTimer->stop();
                 }
+                qInfo().noquote() << QStringLiteral("[AgentRuntime] EventFinished -> reason: %1, replyLen: %2, thoughtLen: %3, toolCalls: %4")
+                    .arg(arg.finishReason).arg(m_replyBuffer.length()).arg(m_thoughtBuffer.length()).arg(m_activeToolCalls.size());
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_context.sessionId, assistantMsg);
@@ -798,6 +830,8 @@ namespace agent::runtime {
                 if (m_timeoutTimer) {
                     m_timeoutTimer->stop();
                 }
+                qWarning().noquote() << QStringLiteral("[AgentRuntime] EventError -> code: %1, msg: %2, userMsg: %3")
+                    .arg(arg.error.code, arg.error.message, arg.error.userMessage);
                 const bool isCancelled = (arg.error.category == domain::llm::ChatErrorCategory::Cancelled);
                 if (isCancelled) {
                     setState(domain::agent::AgentRunStatus::Cancelled);

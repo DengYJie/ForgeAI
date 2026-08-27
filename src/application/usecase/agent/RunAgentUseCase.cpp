@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <QDir>
 #include <QFile>
+#include <QDebug>
 
 namespace application::usecase::agent {
 
@@ -75,6 +76,7 @@ namespace application::usecase::agent {
             err.category = domain::llm::ChatErrorCategory::Configuration;
             err.code = QStringLiteral("MissingRuntime");
             err.userMessage = QStringLiteral("Agent 运行时未就绪。");
+            qWarning().noquote() << QStringLiteral("[RunAgentUseCase] execute failed: MissingRuntime");
             emit runFailed(sessionId, err);
             return;
         }
@@ -84,6 +86,7 @@ namespace application::usecase::agent {
             err.category = domain::llm::ChatErrorCategory::Configuration;
             err.code = QStringLiteral("MissingModelService");
             err.userMessage = QStringLiteral("模型服务未就绪。");
+            qWarning().noquote() << QStringLiteral("[RunAgentUseCase] execute failed: MissingModelService");
             emit runFailed(sessionId, err);
             return;
         }
@@ -131,6 +134,7 @@ namespace application::usecase::agent {
             err.code = QStringLiteral("NoActiveProvider");
             err.userMessage = QStringLiteral("未配置或启用任何模型提供商，请在设置中添加。");
             err.suggestedAction = QStringLiteral("OpenSettings");
+            qWarning().noquote() << QStringLiteral("[RunAgentUseCase] execute failed: NoActiveProvider");
             emit runFailed(sessionId, err);
             return;
         }
@@ -145,9 +149,14 @@ namespace application::usecase::agent {
             err.category = domain::llm::ChatErrorCategory::Configuration;
             err.code = QStringLiteral("SelectedModelUnavailable");
             err.userMessage = QStringLiteral("所选模型不可用，请重新选择。");
+            qWarning().noquote() << QStringLiteral("[RunAgentUseCase] execute failed: SelectedModelUnavailable (provider=%1, model=%2)")
+                .arg(effProviderId, effModelId);
             emit runFailed(sessionId, err);
             return;
         }
+
+        qInfo().noquote() << QStringLiteral("[RunAgentUseCase] execute -> resolved model: %1 (%2)")
+            .arg(selected->displayName(), selected->requestModelId());
 
         // 通过项目运行时协调器挂载项目关联资源（如 MCP 外部扩展）
         if (m_runtimeCoordinator && !workspaceRoot.isEmpty()) {
