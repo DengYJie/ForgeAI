@@ -230,20 +230,22 @@ namespace data::repository {
 
     QString SqliteModelRepository::getMetadata(const QString &key) const {
         auto db = getDatabase();
-        QSqlQuery query(db);
-        query.prepare(QStringLiteral("SELECT value FROM app_metadata WHERE key = ?;"));
-        query.bindValue(0, key);
-        if (query.exec() && query.next()) return query.value(0).toString();
-        return QString();
+        return data::sqlite::SqlHelper::scalarString(
+            QStringLiteral("SELECT value FROM app_metadata WHERE key = ?;"),
+            {key}, db
+        );
     }
 
     void SqliteModelRepository::setMetadata(const QString &key, const QString &value) {
         auto db = getDatabase();
-        QSqlQuery query(db);
-        query.prepare(QStringLiteral("INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?);"));
-        query.bindValue(0, key);
-        query.bindValue(1, value);
-        query.exec();
+        const auto res = data::sqlite::SqlHelper::execute(
+            QStringLiteral("INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?);"),
+            {key, value}, db
+        );
+        if (!res) {
+            qWarning().noquote() << QStringLiteral("[SqliteModelRepository] setMetadata failed: %1")
+                .arg(res.error.message);
+        }
     }
 
     bool SqliteModelRepository::initializeDatabase(const QString &apiJsonPath, const QString &modelsJsonPath) {
@@ -388,11 +390,11 @@ namespace data::repository {
             QCryptographicHash::hash(hashContent, QCryptographicHash::Md5).toHex());
         const QString storedHash  = getMetadata(QStringLiteral("models_dev_hash"));
         const int canonicalCount  = data::sqlite::SqlHelper::scalarInt(
-            QStringLiteral("SELECT COUNT(*) FROM canonical_models;"), {}, db);
+            QStringLiteral("SELECT COUNT(*) FROM canonical_models;"), db);
         const int providerCount   = data::sqlite::SqlHelper::scalarInt(
-            QStringLiteral("SELECT COUNT(*) FROM preset_providers;"), {}, db);
+            QStringLiteral("SELECT COUNT(*) FROM preset_providers;"), db);
         const int bindingCount    = data::sqlite::SqlHelper::scalarInt(
-            QStringLiteral("SELECT COUNT(*) FROM preset_provider_models;"), {}, db);
+            QStringLiteral("SELECT COUNT(*) FROM preset_provider_models;"), db);
 
         qInfo().noquote() << QStringLiteral(
             "[SqliteModelRepository] Hash 检查: stored=%1 current=%2 canonical=%3 providers=%4 bindings=%5")
@@ -444,95 +446,102 @@ namespace data::repository {
         data::sqlite::SqlHelper::exec(QStringLiteral("DELETE FROM canonical_models;"), db);
 
         // 2. 批量插入 CanonicalModels
-        QSqlQuery canonicalQuery(db);
-        canonicalQuery.prepare(QStringLiteral(
+        const QString canonicalSql = QStringLiteral(
             "INSERT INTO canonical_models ("
             "  id, name, family, description, capabilities, context_limit, max_input_limit, max_output_limit, "
             "  modalities_input, modalities_output, default_temperature, default_top_p, default_enable_thinking, "
             "  default_thinking_budget_tokens, open_weights, knowledge_cutoff, release_date"
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
-        ));
+        );
+        QList<QVariantList> canonicalRows;
+        canonicalRows.reserve(importResult.canonicalModels.size());
         for (const auto &cm : importResult.canonicalModels) {
-            canonicalQuery.bindValue(0,  cm.id);
-            canonicalQuery.bindValue(1,  cm.name);
-            canonicalQuery.bindValue(2,  cm.family);
-            canonicalQuery.bindValue(3,  cm.description);
-            canonicalQuery.bindValue(4,  static_cast<qint64>(cm.capabilities));
-            canonicalQuery.bindValue(5,  cm.limits.context);
-            canonicalQuery.bindValue(6,  cm.limits.maxInput);
-            canonicalQuery.bindValue(7,  cm.limits.maxOutput);
-            canonicalQuery.bindValue(8,  cm.modalities.input.join(QLatin1Char(',')));
-            canonicalQuery.bindValue(9,  cm.modalities.output.join(QLatin1Char(',')));
-            canonicalQuery.bindValue(10, cm.defaultParams.temperature);
-            canonicalQuery.bindValue(11, cm.defaultParams.topP);
-            canonicalQuery.bindValue(12, cm.defaultParams.enableThinking ? 1 : 0);
-            canonicalQuery.bindValue(13, cm.defaultParams.thinkingBudgetTokens);
-            canonicalQuery.bindValue(14, cm.openWeights ? 1 : 0);
-            canonicalQuery.bindValue(15, cm.knowledgeCutoff);
-            canonicalQuery.bindValue(16, cm.releaseDate);
-            if (!canonicalQuery.exec())
-                qWarning() << "[seed] canonical insert failed:" << canonicalQuery.lastError().text();
+            canonicalRows.append({
+                cm.id,
+                cm.name,
+                cm.family,
+                cm.description,
+                static_cast<qint64>(cm.capabilities),
+                cm.limits.context,
+                cm.limits.maxInput,
+                cm.limits.maxOutput,
+                cm.modalities.input.join(QLatin1Char(',')),
+                cm.modalities.output.join(QLatin1Char(',')),
+                cm.defaultParams.temperature,
+                cm.defaultParams.topP,
+                cm.defaultParams.enableThinking ? 1 : 0,
+                cm.defaultParams.thinkingBudgetTokens,
+                cm.openWeights ? 1 : 0,
+                cm.knowledgeCutoff,
+                cm.releaseDate
+            });
+        }
+        const auto canRes = data::sqlite::SqlHelper::executeBatch(canonicalSql, canonicalRows, db);
+        if (!canRes) {
+            qWarning().noquote() << "[SqliteModelRepository] canonical batch insert failed:" << canRes.error.message;
         }
 
         // 3. 批量插入 Preset Providers
-        QSqlQuery providerQuery(db);
-        providerQuery.prepare(QStringLiteral(
+        const QString providerSql = QStringLiteral(
             "INSERT INTO preset_providers ("
             "  id, name, icon, doc_url, env_var_name, type, base_url, proxy_url, timeout_ms"
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
-        ));
+        );
+        QList<QVariantList> providerRows;
+        providerRows.reserve(importResult.providers.size());
         for (const auto &p : importResult.providers) {
-            providerQuery.bindValue(0, p.id);
-            providerQuery.bindValue(1, p.name);
-            providerQuery.bindValue(2, p.icon);
-            providerQuery.bindValue(3, p.docUrl);
-            providerQuery.bindValue(4, p.envVarName);
-            providerQuery.bindValue(5, static_cast<int>(p.protocol));
-            providerQuery.bindValue(6, p.baseUrl.isEmpty() ? QStringLiteral("") : p.baseUrl);
-            providerQuery.bindValue(7, p.proxyUrl.has_value() ? QVariant(p.proxyUrl.value()) : QVariant());
-            providerQuery.bindValue(8, p.timeoutMs);
-            if (!providerQuery.exec())
-                qWarning() << "[seed] provider insert failed:" << p.id << providerQuery.lastError().text();
+            providerRows.append({
+                p.id,
+                p.name,
+                p.icon,
+                p.docUrl,
+                p.envVarName,
+                static_cast<int>(p.protocol),
+                p.baseUrl.isEmpty() ? QStringLiteral("") : p.baseUrl,
+                p.proxyUrl.has_value() ? QVariant(p.proxyUrl.value()) : QVariant(),
+                p.timeoutMs
+            });
+        }
+        const auto provRes = data::sqlite::SqlHelper::executeBatch(providerSql, providerRows, db);
+        if (!provRes) {
+            qWarning().noquote() << "[SqliteModelRepository] provider batch insert failed:" << provRes.error.message;
         }
 
         // 4. 批量插入 Preset Provider Models
-        QSqlQuery bindingQuery(db);
-        bindingQuery.prepare(QStringLiteral(
+        const QString bindingSql = QStringLiteral(
             "INSERT INTO preset_provider_models ("
             "  provider_id, remote_model_id, canonical_model_id, pricing_input, pricing_output, "
             "  pricing_cache_read, pricing_cache_write, pricing_currency, context_limit_override, "
             "  max_input_override, max_output_override, capabilities_override, reasoning_field, reasoning_options, "
             "  is_enabled, is_custom, origin"
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
-        ));
+        );
+        QList<QVariantList> bindingRows;
+        bindingRows.reserve(importResult.providerModels.size());
         for (const auto &binding : importResult.providerModels) {
-            bindingQuery.bindValue(0,  binding.providerId);
-            bindingQuery.bindValue(1,  binding.remoteModelId);
-            bindingQuery.bindValue(2,  binding.canonicalModelId.has_value()
-                                           ? QVariant(binding.canonicalModelId.value()) : QVariant());
-            bindingQuery.bindValue(3,  binding.pricing.inputPrice);
-            bindingQuery.bindValue(4,  binding.pricing.outputPrice);
-            bindingQuery.bindValue(5,  binding.pricing.cacheReadPrice);
-            bindingQuery.bindValue(6,  binding.pricing.cacheWritePrice);
-            bindingQuery.bindValue(7,  binding.pricing.currency);
-            if (binding.limitsOverride.has_value()) {
-                bindingQuery.bindValue(8,  binding.limitsOverride->context);
-                bindingQuery.bindValue(9,  binding.limitsOverride->maxInput);
-                bindingQuery.bindValue(10, binding.limitsOverride->maxOutput);
-            } else {
-                bindingQuery.bindValue(8,  QVariant());
-                bindingQuery.bindValue(9,  QVariant());
-                bindingQuery.bindValue(10, QVariant());
-            }
-            bindingQuery.bindValue(11, binding.capabilitiesOverride.has_value()
-                                           ? QVariant(static_cast<qint64>(*binding.capabilitiesOverride)) : QVariant());
-            bindingQuery.bindValue(12, binding.reasoningField);
-            bindingQuery.bindValue(13, binding.reasoningOptionsJson);
-            bindingQuery.bindValue(14, binding.isEnabled ? 1 : 0);
-            bindingQuery.bindValue(15, binding.isCustom  ? 1 : 0);
-            bindingQuery.bindValue(16, originToString(binding.origin));
-            if (!bindingQuery.exec())
-                qWarning() << "[seed] binding insert failed:" << bindingQuery.lastError().text();
+            bindingRows.append({
+                binding.providerId,
+                binding.remoteModelId,
+                binding.canonicalModelId.has_value() ? QVariant(binding.canonicalModelId.value()) : QVariant(),
+                binding.pricing.inputPrice,
+                binding.pricing.outputPrice,
+                binding.pricing.cacheReadPrice,
+                binding.pricing.cacheWritePrice,
+                binding.pricing.currency,
+                binding.limitsOverride.has_value() ? QVariant(binding.limitsOverride->context) : QVariant(),
+                binding.limitsOverride.has_value() ? QVariant(binding.limitsOverride->maxInput) : QVariant(),
+                binding.limitsOverride.has_value() ? QVariant(binding.limitsOverride->maxOutput) : QVariant(),
+                binding.capabilitiesOverride.has_value() ? QVariant(static_cast<qint64>(*binding.capabilitiesOverride)) : QVariant(),
+                binding.reasoningField,
+                binding.reasoningOptionsJson,
+                binding.isEnabled ? 1 : 0,
+                binding.isCustom ? 1 : 0,
+                originToString(binding.origin)
+            });
+        }
+        const auto bindRes = data::sqlite::SqlHelper::executeBatch(bindingSql, bindingRows, db);
+        if (!bindRes) {
+            qWarning().noquote() << "[SqliteModelRepository] binding batch insert failed:" << bindRes.error.message;
         }
 
         qInfo().noquote() << QStringLiteral(

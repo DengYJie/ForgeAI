@@ -172,6 +172,22 @@ if (BUILD_TESTING)
         )
     endif()
     add_test(NAME WorkIntegrationTests COMMAND WorkIntegrationTests)
+
+    qt_add_executable(SqlRepositoryTests tests/SqlRepositoryTests.cpp)
+    target_link_libraries(SqlRepositoryTests PRIVATE ForgeAICore Qt::Test Qt::Sql)
+    deploy_qt_application(SqlRepositoryTests)
+    if (WIN32 AND QT_QSQLITE_DLL)
+        add_custom_command(TARGET SqlRepositoryTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SqlRepositoryTests>/sqldrivers"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${QT_QSQLITE_DLL}"
+                "$<TARGET_FILE_DIR:SqlRepositoryTests>/sqldrivers/qsqlite.dll"
+            COMMENT "Deploying Qt sqlite plugin for SqlRepositoryTests..."
+        )
+    endif()
+    add_test(NAME SqlRepositoryTests COMMAND SqlRepositoryTests)
+    set_tests_properties(SqlRepositoryTests PROPERTIES TIMEOUT 60)
+
     set_tests_properties(AgentToolTests PROPERTIES TIMEOUT 60)
     set_tests_properties(AgentProtocolTests PROPERTIES TIMEOUT 60)
     set_tests_properties(WorkIntegrationTests PROPERTIES TIMEOUT 60)

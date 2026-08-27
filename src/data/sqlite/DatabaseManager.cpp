@@ -57,12 +57,17 @@ namespace data::sqlite {
     }
 
     void DatabaseManager::close() {
-        if (QSqlDatabase::contains(m_connectionName)) {
-            auto db = QSqlDatabase::database(m_connectionName);
-            if (db.isOpen()) {
-                db.close();
+        if (!m_connectionName.isEmpty() && QSqlDatabase::contains(m_connectionName)) {
+            {
+                auto db = QSqlDatabase::database(m_connectionName, false);
+                if (db.isOpen()) {
+                    db.close();
+                }
             }
+            QSqlDatabase::removeDatabase(m_connectionName);
         }
+        m_connectionName.clear();
+        m_dbPath.clear();
     }
 
 } // namespace data::sqlite

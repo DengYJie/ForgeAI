@@ -2,49 +2,15 @@
 #include "data/sqlite/SqlHelper.h"
 
 #include <QSqlDatabase>
-#include <QSqlQuery>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QVariant>
+#include <QDateTime>
+#include <QDebug>
 
 namespace data::repository {
 
-    SqliteAgentRepository::SqliteAgentRepository(const QString& connectionName)
-        : m_connectionName(connectionName.isEmpty() ? QStringLiteral("forgeai_db") : connectionName) {
-        initializeDatabase();
-    }
-
-    bool SqliteAgentRepository::initializeDatabase() {
-        const auto db = QSqlDatabase::database(m_connectionName);
-        const QString sql = QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS agent ("
-            "id TEXT PRIMARY KEY, "
-            "name TEXT NOT NULL, "
-            "description TEXT, "
-            "avatar TEXT, "
-            "system_prompt TEXT, "
-            "model_id TEXT, "
-            "provider_id TEXT, "
-            "enabled_tools TEXT, "
-            "enabled_skills TEXT, "
-            "enabled_mcp_servers TEXT, "
-            "project_id TEXT, "
-            "created_at INTEGER, "
-            "updated_at INTEGER"
-            ")"
-        );
-        return sqlite::SqlHelper::exec(sql, db);
-    }
-
-    QList<domain::agent::Agent> SqliteAgentRepository::getAllAgents() const {
-        QList<domain::agent::Agent> list;
-        const auto db = QSqlDatabase::database(m_connectionName);
-        QSqlQuery q(db);
-        if (!q.exec(QStringLiteral("SELECT id, name, description, avatar, system_prompt, model_id, provider_id, enabled_tools, enabled_skills, enabled_mcp_servers, project_id, created_at, updated_at FROM agent ORDER BY updated_at DESC"))) {
-            return list;
-        }
-
-        while (q.next()) {
+    namespace {
+        domain::agent::Agent mapAgent(const QSqlQuery& q) {
             domain::agent::Agent a;
             a.id = QUuid::fromString(q.value(0).toString());
             a.name = q.value(1).toString();
@@ -76,19 +42,55 @@ namespace data::repository {
 
             a.createdAt = QDateTime::fromMSecsSinceEpoch(q.value(11).toLongLong());
             a.updatedAt = QDateTime::fromMSecsSinceEpoch(q.value(12).toLongLong());
-            list.append(a);
+            return a;
         }
+    } // anonymous namespace
 
-        return list;
+    SqliteAgentRepository::SqliteAgentRepository(const QString& connectionName)
+        : m_connectionName(connectionName.isEmpty() ? QStringLiteral("forgeai_db") : connectionName) {
+        initializeDatabase();
+    }
+
+    bool SqliteAgentRepository::initializeDatabase() {
+        const auto db = QSqlDatabase::database(m_connectionName);
+        const QString sql = QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS agent ("
+            "id TEXT PRIMARY KEY, "
+            "name TEXT NOT NULL, "
+            "description TEXT, "
+            "avatar TEXT, "
+            "system_prompt TEXT, "
+            "model_id TEXT, "
+            "provider_id TEXT, "
+            "enabled_tools TEXT, "
+            "enabled_skills TEXT, "
+            "enabled_mcp_servers TEXT, "
+            "project_id TEXT, "
+            "created_at INTEGER, "
+            "updated_at INTEGER"
+            ")"
+        );
+        return sqlite::SqlHelper::exec(sql, db);
+    }
+
+    QList<domain::agent::Agent> SqliteAgentRepository::getAllAgents() const {
+        const auto db = QSqlDatabase::database(m_connectionName);
+        const QString sql = QStringLiteral(
+            "SELECT id, name, description, avatar, system_prompt, model_id, provider_id, "
+            "enabled_tools, enabled_skills, enabled_mcp_servers, project_id, created_at, updated_at "
+            "FROM agent ORDER BY updated_at DESC;"
+        );
+        return data::sqlite::SqlHelper::queryAll<domain::agent::Agent>(sql, db, mapAgent);
     }
 
     std::optional<domain::agent::Agent> SqliteAgentRepository::getAgent(const QUuid& id) const {
-        for (const auto& agent : getAllAgents()) {
-            if (agent.id == id) {
-                return agent;
-            }
-        }
-        return std::nullopt;
+        const auto db = QSqlDatabase::database(m_connectionName);
+        const QString sql = QStringLiteral(
+            "SELECT id, name, description, avatar, system_prompt, model_id, provider_id, "
+            "enabled_tools, enabled_skills, enabled_mcp_servers, project_id, created_at, updated_at "
+            "FROM agent WHERE id = ?;"
+        );
+        return data::sqlite::SqlHelper::queryOne<domain::agent::Agent>(sql, {id.toString()}, db, mapAgent);
     }
 
     bool SqliteAgentRepository::saveAgent(const domain::agent::Agent& agent) {
@@ -128,13 +130,23 @@ namespace data::repository {
             agent.updatedAt.toMSecsSinceEpoch()
         };
 
-        return sqlite::SqlHelper::exec(sql, args, db);
+        const auto result = sqlite::SqlHelper::execute(sql, args, db);
+        if (!result) {
+            qWarning().noquote() << QStringLiteral("[SqliteAgentRepository] saveAgent failed: %1")
+                .arg(result.error.message);
+        }
+        return result.success;
     }
 
     bool SqliteAgentRepository::deleteAgent(const QUuid& id) {
         const auto db = QSqlDatabase::database(m_connectionName);
-        const QString sql = QStringLiteral("DELETE FROM agent WHERE id = ?");
-        return sqlite::SqlHelper::exec(sql, {id.toString()}, db);
+        const QString sql = QStringLiteral("DELETE FROM agent WHERE id = ?;");
+        const auto result = sqlite::SqlHelper::execute(sql, {id.toString()}, db);
+        if (!result) {
+            qWarning().noquote() << QStringLiteral("[SqliteAgentRepository] deleteAgent failed: %1")
+                .arg(result.error.message);
+        }
+        return result.success;
     }
 
 } // namespace data::repository
