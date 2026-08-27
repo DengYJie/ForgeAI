@@ -13,6 +13,7 @@
 #include "ui/screen/settings/logging/LoggingSettingsUIFactory.h"
 #include "ui/screen/settings/model/ModelSettingsPageFactory.h"
 #include "data/sqlite/DatabaseManager.h"
+#include "services/process/ShellService.h"
 #include <QSysInfo>
 #include <QUuid>
 
@@ -91,8 +92,9 @@ namespace app {
 
         // 2. 领域服务与工具体系初始化
         m_workspaceFs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
-        m_processTaskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
-        m_builtinToolProvider = std::make_shared<agent::tool::BuiltinToolProvider>(m_processTaskRuntime, m_workspaceFs);
+        m_shellService = std::make_shared<services::process::ShellService>();
+        m_processTaskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>(m_shellService);
+        m_builtinToolProvider = std::make_shared<agent::tool::BuiltinToolProvider>(m_processTaskRuntime, m_shellService, m_workspaceFs);
         m_mcpManager = std::make_unique<llm::mcp::McpManager>();
         m_toolRegistry = std::make_unique<agent::tool::ToolRegistry>();
         m_toolRegistry->registerProvider(m_builtinToolProvider);

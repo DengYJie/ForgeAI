@@ -2,9 +2,9 @@
 
 #include <memory>
 #include "application/ports/IToolProvider.h"
-#include "llm/workspace/WorkspaceFileSystem.h"
-
 #include "application/ports/IProcessTaskRuntime.h"
+#include "application/ports/IShellService.h"
+#include "llm/workspace/WorkspaceFileSystem.h"
 
 namespace agent::tool {
 
@@ -13,12 +13,15 @@ namespace agent::tool {
      */
     class BuiltinToolProvider final : public application::ports::IToolProvider {
     public:
+        BuiltinToolProvider();
+
         explicit BuiltinToolProvider(
             std::shared_ptr<llm::workspace::WorkspaceFileSystem> fs
         );
 
         explicit BuiltinToolProvider(
-            std::shared_ptr<application::ports::IProcessTaskRuntime> taskRuntime = nullptr,
+            std::shared_ptr<application::ports::IProcessTaskRuntime> taskRuntime,
+            std::shared_ptr<application::ports::IShellService> shellService = nullptr,
             std::shared_ptr<llm::workspace::WorkspaceFileSystem> fs = nullptr
         );
         ~BuiltinToolProvider() override = default;
@@ -27,6 +30,7 @@ namespace agent::tool {
 
     private:
         std::shared_ptr<application::ports::IProcessTaskRuntime> m_taskRuntime;
+        std::shared_ptr<application::ports::IShellService> m_shellService;
         std::shared_ptr<llm::workspace::WorkspaceFileSystem> m_fs;
         QList<std::shared_ptr<application::ports::ITool>> m_tools;
     };

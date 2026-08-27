@@ -307,10 +307,10 @@ void WorkViewModel::setupUseCaseConnections() {
     }
 }
 
-void WorkViewModel::grantPermission(const QString& toolCallId, bool granted, domain::agent::PermissionScope scope) {
+void WorkViewModel::grantPermission(const QString& toolCallId, bool granted, domain::agent::PermissionScope scope, const QString& customInput) {
     if (m_agentSessionId.isEmpty() || !m_useCases.runAgent) return;
-    qInfo().noquote() << QStringLiteral("[WorkViewModel] grantPermission -> toolCallId: %1, granted: %2, scope: %3")
-        .arg(toolCallId).arg(granted).arg(static_cast<int>(scope));
+    qInfo().noquote() << QStringLiteral("[WorkViewModel] grantPermission -> toolCallId: %1, granted: %2, scope: %3, customInput: %4")
+        .arg(toolCallId).arg(granted).arg(static_cast<int>(scope)).arg(customInput);
     updateState([toolCallId](WorkState& state) {
         state.agentUiState.pendingPermissions.removeIf([&](const auto& p) {
             return p.call.id == toolCallId;
@@ -320,7 +320,7 @@ void WorkViewModel::grantPermission(const QString& toolCallId, bool granted, dom
             state.statusMessage.clear();
         }
     });
-    m_useCases.runAgent->grantPermission(m_agentSessionId, toolCallId, granted, scope);
+    m_useCases.runAgent->grantPermission(m_agentSessionId, toolCallId, granted, scope, customInput);
 }
 
 QString WorkViewModel::taskTitle(const QString& task) {

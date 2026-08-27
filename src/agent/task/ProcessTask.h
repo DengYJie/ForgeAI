@@ -8,6 +8,7 @@
 #include "domain/agent/task/ProcessTaskSpec.h"
 #include "domain/agent/task/ProcessTaskSnapshot.h"
 #include "domain/agent/task/ProcessOutputDelta.h"
+#include "application/ports/IShellService.h"
 #include "ProcessOutputBuffer.h"
 
 namespace agent::task {
@@ -22,6 +23,7 @@ namespace agent::task {
         ProcessTask(
             QString taskId,
             domain::agent::task::ProcessTaskSpec spec,
+            std::shared_ptr<application::ports::IShellService> shellService = nullptr,
             QObject* parent = nullptr
         );
 
@@ -73,6 +75,7 @@ namespace agent::task {
 
         QString m_taskId;
         domain::agent::task::ProcessTaskSpec m_spec;
+        std::shared_ptr<application::ports::IShellService> m_shellService;
         domain::agent::task::ProcessTaskState m_state = domain::agent::task::ProcessTaskState::Starting;
 
         QProcess* m_process = nullptr;
@@ -82,14 +85,13 @@ namespace agent::task {
         qint64 m_startedAtMs = 0;
         qint64 m_finishedAtMs = 0;
         qint64 m_pid = 0;
-        std::optional<int> m_exitCode;
+        int m_exitCode = -1;
         QString m_exitError;
+        bool m_timedOut = false;
+        bool m_finishedEmitted = false;
 
         mutable ProcessOutputBuffer m_stdoutBuffer;
         mutable ProcessOutputBuffer m_stderrBuffer;
-
-        bool m_finishedEmitted = false;
-        bool m_timedOut = false;
     };
 
 } // namespace agent::task

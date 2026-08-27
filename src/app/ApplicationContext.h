@@ -126,6 +126,7 @@ namespace app {
 
         // 工具、沙箱与 MCP
         std::shared_ptr<llm::workspace::WorkspaceFileSystem> m_workspaceFs;
+        std::shared_ptr<application::ports::IShellService> m_shellService;
         std::shared_ptr<agent::task::ProcessTaskRuntime> m_processTaskRuntime;
         std::shared_ptr<agent::tool::BuiltinToolProvider> m_builtinToolProvider;
         std::unique_ptr<llm::mcp::McpManager> m_mcpManager;

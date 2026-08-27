@@ -56,10 +56,11 @@ namespace application::usecase::agent {
         const QString& sessionId,
         const QString& toolCallId,
         bool granted,
-        domain::agent::PermissionScope scope
+        domain::agent::PermissionScope scope,
+        const QString& customInput
     ) {
         if (m_runtime) {
-            m_runtime->grantPermission(sessionId, toolCallId, granted, scope);
+            m_runtime->grantPermission(sessionId, toolCallId, granted, scope, customInput);
         }
     }
 

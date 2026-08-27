@@ -7,6 +7,7 @@
 #include <QVBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMouseEvent>
 #include <FluentQt/BasicInput.h>
 #include <FluentQt/Design.h>
 #include <FluentQt/TextFields.h>
@@ -140,6 +141,87 @@ protected:
     }
 };
 
+/**
+ * @brief 选项行单选指示器组件
+ */
+class ScopeRadioRow final : public QWidget, public fluent::FluentElement {
+public:
+    explicit ScopeRadioRow(const QString& title, std::function<void()> onClicked = nullptr, QWidget* parent = nullptr)
+        : QWidget(parent), m_title(title), m_onClicked(std::move(onClicked)) {
+        setCursor(Qt::PointingHandCursor);
+        setFixedHeight(28);
+
+        auto* layout = new QHBoxLayout(this);
+        layout->setContentsMargins(4, 2, 4, 2);
+        layout->setSpacing(8);
+
+        m_label = new fluent::textfields::Label(title, this);
+        m_label->setFluentTypography(Typography::FontRole::Body);
+        layout->addSpacing(22); // 为左侧 Radio 圆圈留白
+        layout->addWidget(m_label);
+        layout->addStretch(1);
+    }
+
+    void setOnClicked(std::function<void()> onClicked) {
+        m_onClicked = std::move(onClicked);
+    }
+
+    void setSelected(bool selected) {
+        if (m_selected != selected) {
+            m_selected = selected;
+            update();
+        }
+    }
+
+    bool isSelected() const { return m_selected; }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton) {
+            if (m_onClicked) {
+                m_onClicked();
+            }
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+    void paintEvent(QPaintEvent* /*event*/) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        const auto& colors = themeColorsRef();
+
+        // 绘制 Radio Button 圆圈 (x: 6, y: centerY - 7, d: 14)
+        const int centerY = height() / 2;
+        const QRectF outerRect(6, centerY - 7, 14, 14);
+
+        if (m_selected) {
+            painter.setPen(QPen(colors.textAccentPrimary, 1.5));
+            painter.setBrush(colors.bgSolid);
+            painter.drawEllipse(outerRect);
+
+            // 选中中心内圆点
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(colors.textAccentPrimary);
+            painter.drawEllipse(QRectF(9, centerY - 4, 8, 8));
+        } else {
+            painter.setPen(QPen(colors.strokeDefault, 1.2));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(outerRect);
+        }
+    }
+
+    void onThemeUpdated() override {
+        update();
+    }
+
+private:
+    QString m_title;
+    bool m_selected = false;
+    std::function<void()> m_onClicked;
+    fluent::textfields::Label* m_label = nullptr;
+};
+
 PermissionFloatingCard::PermissionFloatingCard(QWidget* parent)
     : QWidget(parent) {
     setupUi();
@@ -149,10 +231,10 @@ void PermissionFloatingCard::setupUi() {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(14, 12, 14, 12);
-    mainLayout->setSpacing(8);
+    mainLayout->setContentsMargins(16, 14, 16, 14);
+    mainLayout->setSpacing(10);
 
-    // 1. Top Header Row: Fluent Shield Icon + Header Title + Tool Pill Badge
+    // 1. Top Header Row: Shield Icon + Header Title + Tool Badge
     auto* topRow = new QWidget(this);
     auto* topLayout = new QHBoxLayout(topRow);
     topLayout->setContentsMargins(0, 0, 0, 0);
@@ -183,59 +265,113 @@ void PermissionFloatingCard::setupUi() {
     m_argsSurface = new ArgumentsCodeSurface(this);
     mainLayout->addWidget(m_argsSurface);
 
-    // 4. Action Buttons Row (Fluent Button Standards)
-    auto* btnRow = new QWidget(this);
-    auto* btnLayout = new QHBoxLayout(btnRow);
-    btnLayout->setContentsMargins(0, 0, 0, 0);
-    btnLayout->setSpacing(8);
+    // 4. 垂直 5 项单选选项列表
+    auto* optionsContainer = new QWidget(this);
+    auto* optionsLayout = new QVBoxLayout(optionsContainer);
+    optionsLayout->setContentsMargins(0, 4, 0, 4);
+    optionsLayout->setSpacing(4);
 
-    m_denyBtn = new fluent::basicinput::Button(btnRow);
-    m_denyBtn->setText(tr("拒绝"));
-    m_denyBtn->setCriticalOnHover(true);
-    m_denyBtn->setFluentSize(fluent::basicinput::Button::ButtonSize::Small);
-    btnLayout->addWidget(m_denyBtn);
+    const QStringList optionTitles = {
+        tr("仅一次 (仅允许当前单次调用)"),
+        tr("本对话 (在当前会话中记住此授权)"),
+        tr("本项目 (在当前项目中记住此授权)"),
+        tr("全局 (全局记住此授权)")
+    };
 
-    btnLayout->addStretch(1);
+    for (int i = 0; i < optionTitles.size(); ++i) {
+        auto* row = new ScopeRadioRow(optionTitles[i], [this, i]() {
+            selectOption(i);
+        }, optionsContainer);
+        m_radioRows.append(row);
+        optionsLayout->addWidget(row);
+    }
 
-    m_allowOnceBtn = new fluent::basicinput::Button(btnRow);
-    m_allowOnceBtn->setText(tr("允许本次"));
-    m_allowOnceBtn->setFluentStyle(fluent::basicinput::Button::ButtonStyle::Accent);
-    m_allowOnceBtn->setFluentSize(fluent::basicinput::Button::ButtonSize::Small);
-    btnLayout->addWidget(m_allowOnceBtn);
+    // 5. 第 5 项：输入框选项
+    auto* customInputRow = new QWidget(optionsContainer);
+    auto* customInputLayout = new QHBoxLayout(customInputRow);
+    customInputLayout->setContentsMargins(4, 2, 4, 2);
+    customInputLayout->setSpacing(8);
 
-    m_allowRunBtn = new fluent::basicinput::Button(btnRow);
-    m_allowRunBtn->setText(tr("本次任务允许"));
-    m_allowRunBtn->setFluentSize(fluent::basicinput::Button::ButtonSize::Small);
-    btnLayout->addWidget(m_allowRunBtn);
+    auto* customRadio = new ScopeRadioRow(QString(), [this]() {
+        selectOption(4);
+    }, customInputRow);
+    customRadio->setFixedWidth(24);
+    m_radioRows.append(customRadio);
+    customInputLayout->addWidget(customRadio);
 
-    m_allowProjectBtn = new fluent::basicinput::Button(btnRow);
-    m_allowProjectBtn->setText(tr("项目永久允许"));
-    m_allowProjectBtn->setFluentSize(fluent::basicinput::Button::ButtonSize::Small);
-    btnLayout->addWidget(m_allowProjectBtn);
+    m_customInputEdit = new fluent::textfields::LineEdit(customInputRow);
+    m_customInputEdit->setPlaceholderText(tr("输入不同意的原因或替代建议（按 Enter 确认并提交）..."));
+    customInputLayout->addWidget(m_customInputEdit);
 
-    mainLayout->addWidget(btnRow);
+    optionsLayout->addWidget(customInputRow);
+    mainLayout->addWidget(optionsContainer);
 
-    // Signals connection
-    connect(m_denyBtn, &QPushButton::clicked, this, [this] {
-        if (!m_currentCall.id.isEmpty()) {
-            emit permissionDecided(m_currentCall.id, false, domain::agent::PermissionScope::Once);
-        }
+    // 输入框回车触发 Approve
+    connect(m_customInputEdit, &QLineEdit::returnPressed, this, [this]() {
+        selectOption(4);
+        triggerApprove();
     });
-    connect(m_allowOnceBtn, &QPushButton::clicked, this, [this] {
-        if (!m_currentCall.id.isEmpty()) {
-            emit permissionDecided(m_currentCall.id, true, domain::agent::PermissionScope::Once);
-        }
-    });
-    connect(m_allowRunBtn, &QPushButton::clicked, this, [this] {
-        if (!m_currentCall.id.isEmpty()) {
-            emit permissionDecided(m_currentCall.id, true, domain::agent::PermissionScope::Run);
-        }
-    });
-    connect(m_allowProjectBtn, &QPushButton::clicked, this, [this] {
-        if (!m_currentCall.id.isEmpty()) {
-            emit permissionDecided(m_currentCall.id, true, domain::agent::PermissionScope::Project);
-        }
-    });
+
+    // 6. 底部操作栏：右侧放置 [Skip] 与 [Approve]
+    auto* bottomRow = new QWidget(this);
+    auto* bottomLayout = new QHBoxLayout(bottomRow);
+    bottomLayout->setContentsMargins(0, 4, 0, 0);
+    bottomLayout->setSpacing(8);
+
+    bottomLayout->addStretch(1);
+
+    m_skipBtn = new fluent::basicinput::Button(bottomRow);
+    m_skipBtn->setText(tr("Skip (跳过)"));
+    m_skipBtn->setFluentSize(fluent::basicinput::Button::ButtonSize::Small);
+    m_skipBtn->setCriticalOnHover(true);
+    bottomLayout->addWidget(m_skipBtn);
+
+    m_approveBtn = new fluent::basicinput::Button(bottomRow);
+    m_approveBtn->setText(tr("允许 (Approve)"));
+    m_approveBtn->setFluentStyle(fluent::basicinput::Button::ButtonStyle::Accent);
+    m_approveBtn->setFluentSize(fluent::basicinput::Button::ButtonSize::Small);
+    bottomLayout->addWidget(m_approveBtn);
+
+    mainLayout->addWidget(bottomRow);
+
+    // 默认选中第 0 项（仅一次）
+    selectOption(0);
+
+    // 按钮信号连接
+    connect(m_skipBtn, &QPushButton::clicked, this, &PermissionFloatingCard::triggerSkip);
+    connect(m_approveBtn, &QPushButton::clicked, this, &PermissionFloatingCard::triggerApprove);
+}
+
+void PermissionFloatingCard::selectOption(int index) {
+    m_selectedOptionIndex = index;
+    for (int i = 0; i < m_radioRows.size(); ++i) {
+        m_radioRows[i]->setSelected(i == index);
+    }
+}
+
+void PermissionFloatingCard::triggerApprove() {
+    if (m_currentCall.id.isEmpty()) return;
+
+    domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once;
+    if (m_selectedOptionIndex == 1) {
+        scope = domain::agent::PermissionScope::Run;
+    } else if (m_selectedOptionIndex == 2) {
+        scope = domain::agent::PermissionScope::Project;
+    } else if (m_selectedOptionIndex == 3) {
+        scope = domain::agent::PermissionScope::Global;
+    } else {
+        scope = domain::agent::PermissionScope::Once;
+    }
+
+    const QString customText = m_customInputEdit ? m_customInputEdit->text().trimmed() : QString();
+    emit permissionDecided(m_currentCall.id, true, scope, customText);
+}
+
+void PermissionFloatingCard::triggerSkip() {
+    if (m_currentCall.id.isEmpty()) return;
+
+    const QString customText = m_customInputEdit ? m_customInputEdit->text().trimmed() : QString();
+    emit permissionDecided(m_currentCall.id, false, domain::agent::PermissionScope::Once, customText);
 }
 
 void PermissionFloatingCard::setPermission(
@@ -260,13 +396,18 @@ void PermissionFloatingCard::setPermission(
         : permission.reason;
     m_reasonLabel->setText(reason);
 
-    // Format arguments nicely if JSON
+    // 格式化参数
     QString formattedArgs = call.arguments;
     const auto doc = QJsonDocument::fromJson(call.arguments.toUtf8());
     if (!doc.isNull()) {
         formattedArgs = QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
     }
     m_argsSurface->setCodeText(formattedArgs);
+
+    if (m_customInputEdit) {
+        m_customInputEdit->clear();
+    }
+    selectOption(0);
 }
 
 void PermissionFloatingCard::paintEvent(QPaintEvent* /*event*/) {

@@ -5,6 +5,7 @@
 #include "domain/service/IConversationService.h"
 #include "domain/repository/IAgentCheckpointRepository.h"
 #include "domain/agent/ToolPermission.h"
+#include "agent/runtime/AgentRunContext.h"
 #include "agent/tool/ToolRegistry.h"
 #include <QMap>
 #include <QHash>
@@ -48,7 +49,8 @@ namespace agent::runtime {
             const QString& sessionId,
             const QString& toolCallId,
             bool granted,
-            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once,
+            const QString& customInput = QString()
         ) override;
 
         bool isRunning() const override;
@@ -61,6 +63,7 @@ namespace agent::runtime {
     private:
         void setState(domain::agent::AgentRunStatus status, const QString& errorMessage = {});
         void startNextModelRequest();
+        void handleModelStreamFinished();
         domain::llm::ChatRequest buildChatRequest(const QList<domain::conversation::Message>& history) const;
         domain::conversation::Message makeAssistantMessage() const;
         void saveMessage(const domain::conversation::Message& message);
@@ -91,6 +94,9 @@ namespace agent::runtime {
         QSet<QString> m_runApprovedTools;
         QMap<QUuid, QSet<QString>> m_projectApprovedTools;
         QSet<QString> m_globalApprovedTools;
+        QSet<QString> m_runApprovedCommands;
+        QMap<QUuid, QSet<QString>> m_projectApprovedCommands;
+        QSet<QString> m_globalApprovedCommands;
         QList<QList<domain::agent::ToolCall>> m_pendingBatches;
         std::vector<std::unique_ptr<application::ports::IToolOperation>> m_activeOperations;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;

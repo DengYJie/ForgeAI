@@ -1,4 +1,5 @@
 #include "ProcessTaskRuntime.h"
+#include "services/process/ShellService.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
 
@@ -8,8 +9,14 @@
 
 namespace agent::task {
 
-    ProcessTaskRuntime::ProcessTaskRuntime(QObject* parent)
-        : QObject(parent) {
+    ProcessTaskRuntime::ProcessTaskRuntime(
+        std::shared_ptr<application::ports::IShellService> shellService,
+        QObject* parent
+    ) : QObject(parent),
+        m_shellService(std::move(shellService)) {
+        if (!m_shellService) {
+            m_shellService = std::make_shared<services::process::ShellService>();
+        }
     }
 
     ProcessTaskRuntime::~ProcessTaskRuntime() {
@@ -38,7 +45,7 @@ namespace agent::task {
             effectiveSpec.workingDirectory = context.workspaceRoot;
         }
 
-        auto task = std::make_shared<ProcessTask>(taskId, effectiveSpec, this);
+        auto task = std::make_shared<ProcessTask>(taskId, effectiveSpec, m_shellService, this);
         m_tasks.insert(taskId, task);
 
         task->start();
@@ -274,7 +281,7 @@ namespace {
                     callback();
                 }
             };
-            connect(timer, &QTimer::timeout, this, triggerOnce);
+            QObject::connect(timer, &QTimer::timeout, this, triggerOnce);
             timer->start(0);
             return std::make_shared<TaskWaitHandle>(timer, fired);
         }
@@ -297,7 +304,7 @@ namespace {
                     callback();
                 }
             };
-            connect(timer, &QTimer::timeout, this, triggerOnce);
+            QObject::connect(timer, &QTimer::timeout, this, triggerOnce);
             timer->start(0);
             return std::make_shared<TaskWaitHandle>(timer, fired);
         }
@@ -314,11 +321,11 @@ namespace {
             }
         };
 
-        connect(timer, &QTimer::timeout, this, triggerOnce);
-        connect(task.get(), &ProcessTask::outputAppended, timer, [triggerOnce](const QString&) {
+        QObject::connect(timer, &QTimer::timeout, this, triggerOnce);
+        QObject::connect(task.get(), &ProcessTask::outputAppended, timer, [triggerOnce](const QString&) {
             triggerOnce();
         });
-        connect(task.get(), &ProcessTask::finished, timer, [triggerOnce](const QString&, domain::agent::task::ProcessTaskState, int) {
+        QObject::connect(task.get(), &ProcessTask::finished, timer, [triggerOnce](const QString&, domain::agent::task::ProcessTaskState, int) {
             triggerOnce();
         });
 
@@ -326,6 +333,10 @@ namespace {
         timer->start(clampedWaitMs);
 
         return std::make_shared<TaskWaitHandle>(timer, fired);
+    }
+
+    std::shared_ptr<ProcessTask> ProcessTaskRuntime::findTask(const QString& taskId) const {
+        return getTask(taskId);
     }
 
     std::shared_ptr<ProcessTask> ProcessTaskRuntime::getTask(const QString& taskId) const {

@@ -280,8 +280,8 @@ using widget::basic::LeftAlignedButton;
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::webSearchToggled, m_viewModel, &WorkViewModel::setWebSearchEnabled);
             connect(m_pane->inputBox(), &ui::widget::chat::ChatInputBox::deepThinkToggled, m_viewModel, &WorkViewModel::setDeepThinkingEnabled);
             connect(m_permissionCard, &PermissionFloatingCard::permissionDecided, this,
-                    [this](const QString& toolCallId, bool allow, domain::agent::PermissionScope scope) {
-                m_viewModel->grantPermission(toolCallId, allow, scope);
+                    [this](const QString& toolCallId, bool allow, domain::agent::PermissionScope scope, const QString& customInput) {
+                m_viewModel->grantPermission(toolCallId, allow, scope, customInput);
             });
         }
 

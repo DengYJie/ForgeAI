@@ -40,6 +40,9 @@
 #include "agent/task/ProcessTaskRuntime.h"
 #include "agent/tool/builtin/CheckTaskTool.h"
 #include "agent/tool/builtin/RunCommandTool.h"
+#include "services/process/ShellService.h"
+#include "services/process/ProcessLaunchResolver.h"
+#include "services/process/ShellCommandRiskAnalyzer.h"
 
 class AgentToolTests final : public QObject {
     Q_OBJECT
@@ -78,7 +81,10 @@ private slots:
     void testSearchTextToolAdvanced();
     void testWriteFileToolOverwriteProtectionAndAtomicCommit();
     void testApplyPatchToolExactMatchingAndAtomicRollback();
+    void testShellServiceAndLaunchResolver();
+    void testShellCommandRiskAnalyzer();
     void testRunCommandToolExecutionAndSandboxing();
+    void testRunCommandCompoundCommandsAndPipes();
     void testProcessOutputBufferCursorTracking();
     void testRunCommandBackgroundModeAndCheckTask();
     void testCheckTaskIncrementalCursorStreaming();
@@ -546,13 +552,13 @@ void AgentToolTests::mcpServerRegistryOperationsAndSignals() {
     int unregisteredCount = 0;
     int changedCount = 0;
 
-    connect(&registry, &llm::mcp::McpServerRegistry::serverRegistered, [&](const domain::mcp::McpServerConfig&) {
+    QObject::connect(&registry, &llm::mcp::McpServerRegistry::serverRegistered, [&](const domain::mcp::McpServerConfig&) {
         registeredCount++;
     });
-    connect(&registry, &llm::mcp::McpServerRegistry::serverUnregistered, [&](const QString&) {
+    QObject::connect(&registry, &llm::mcp::McpServerRegistry::serverUnregistered, [&](const QString&) {
         unregisteredCount++;
     });
-    connect(&registry, &llm::mcp::McpServerRegistry::registryChanged, [&]() {
+    QObject::connect(&registry, &llm::mcp::McpServerRegistry::registryChanged, [&]() {
         changedCount++;
     });
 
@@ -604,7 +610,7 @@ void AgentToolTests::mcpRuntimeLifecycleAndTransportFactory() {
 
     // 启动失败应优雅报错并发出信号，不发生崩溃
     bool errorTriggered = false;
-    connect(&runtime, &llm::mcp::McpRuntime::serverError, [&](const QString& id, const QString&) {
+    QObject::connect(&runtime, &llm::mcp::McpRuntime::serverError, [&](const QString& id, const QString&) {
         if (id == QStringLiteral("dummy")) {
             errorTriggered = true;
         }
@@ -675,7 +681,7 @@ void AgentToolTests::mcpSecurityTrustAndEnvMaskingTests() {
         registry.registerServer(unapprovedCfg);
 
         QString runtimeError;
-        connect(&runtime, &llm::mcp::McpRuntime::serverError, [&](const QString&, const QString& err) {
+        QObject::connect(&runtime, &llm::mcp::McpRuntime::serverError, [&](const QString&, const QString& err) {
             runtimeError = err;
         });
 
@@ -866,10 +872,10 @@ void AgentToolTests::streamableHttpMcpTransportSseIntegrationTests() {
     quint16 port = server.serverPort();
 
     // 模拟 HTTP / SSE MCP 服务端
-    connect(&server, &QTcpServer::newConnection, [&]() {
+    QObject::connect(&server, &QTcpServer::newConnection, [&]() {
         while (server.hasPendingConnections()) {
             QTcpSocket* sock = server.nextPendingConnection();
-            connect(sock, &QTcpSocket::readyRead, [sock]() {
+            QObject::connect(sock, &QTcpSocket::readyRead, [sock]() {
                 const QByteArray reqData = sock->readAll();
                 if (reqData.startsWith("GET /events")) {
                     // 发送 SSE 握手响应
@@ -904,7 +910,7 @@ void AgentToolTests::streamableHttpMcpTransportSseIntegrationTests() {
     llm::mcp::StreamableHttpMcpTransport transport(httpCfg);
 
     QList<QJsonObject> receivedMessages;
-    connect(&transport, &llm::mcp::IMcpTransport::messageReceived, [&](const QJsonObject& obj) {
+    QObject::connect(&transport, &llm::mcp::IMcpTransport::messageReceived, [&](const QJsonObject& obj) {
         receivedMessages.append(obj);
     });
 
@@ -1388,6 +1394,51 @@ void AgentToolTests::testApplyPatchToolExactMatchingAndAtomicRollback() {
     QVERIFY(finalContent.contains("int b = 20;"));
 }
 
+void AgentToolTests::testShellServiceAndLaunchResolver() {
+    services::process::ShellService shellService;
+    const auto shells = shellService.availableShells();
+    QVERIFY(!shells.isEmpty());
+
+    const auto defShell = shellService.defaultShell();
+    QVERIFY(defShell.has_value());
+    QVERIFY(!defShell->executable.isEmpty());
+    QVERIFY(!defShell->id.isEmpty());
+
+    // 测试 ProcessLaunchResolver
+    services::process::ProcessLaunchResolver resolver;
+    domain::agent::task::ProcessTaskSpec spec;
+    spec.launchMode = domain::agent::task::ProcessLaunchMode::ShellCommand;
+    spec.command = QStringLiteral("cmake --build build && ctest");
+
+    auto launch = resolver.resolveShellCommand(spec, defShell.value());
+    QCOMPARE(launch.executable, defShell->executable);
+    QVERIFY(launch.arguments.contains(QStringLiteral("cmake --build build && ctest")));
+}
+
+void AgentToolTests::testShellCommandRiskAnalyzer() {
+    services::process::ShellCommandRiskAnalyzer analyzer;
+
+    // 安全命令
+    auto safe1 = analyzer.analyze(QStringLiteral("echo hello"));
+    QVERIFY(!safe1.destructive);
+
+    auto safe2 = analyzer.analyze(QStringLiteral("git status && git log -n 5"));
+    QVERIFY(!safe2.destructive);
+
+    // 危险命令
+    auto riskRm = analyzer.analyze(QStringLiteral("rm -rf /tmp/test"));
+    QVERIFY(riskRm.destructive);
+
+    auto riskGit = analyzer.analyze(QStringLiteral("git reset --hard HEAD~1"));
+    QVERIFY(riskGit.destructive);
+
+    auto riskPs = analyzer.analyze(QStringLiteral("Remove-Item -Recurse -Force ./build"));
+    QVERIFY(riskPs.destructive);
+
+    auto riskReboot = analyzer.analyze(QStringLiteral("shutdown /r /t 0"));
+    QVERIFY(riskReboot.destructive);
+}
+
 void AgentToolTests::testRunCommandToolExecutionAndSandboxing() {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
@@ -1403,38 +1454,61 @@ void AgentToolTests::testRunCommandToolExecutionAndSandboxing() {
     domain::agent::ToolCall callRm{
         QStringLiteral("rc1"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"rm\",\"args\":[\"-rf\",\".\"]}")
+        QStringLiteral("{\"command\":\"rm -rf .\"}")
     };
     const auto permsRm = runTool->permissions(callRm);
     QCOMPARE(permsRm.size(), 2);
     QCOMPARE(permsRm.at(0).type, domain::agent::ToolPermissionType::ProcessExecute);
     QCOMPARE(permsRm.at(1).type, domain::agent::ToolPermissionType::DestructiveOperation);
 
-    domain::agent::ToolCall callCmake{
+    domain::agent::ToolCall callEcho{
         QStringLiteral("rc2"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"]}")
+        QStringLiteral("{\"command\":\"echo \\\"ForgeAI Shell Ready\\\"\"}")
     };
-    const auto permsCmake = runTool->permissions(callCmake);
-    QCOMPARE(permsCmake.size(), 1);
-    QCOMPARE(permsCmake.first().type, domain::agent::ToolPermissionType::ProcessExecute);
+    const auto permsEcho = runTool->permissions(callEcho);
+    QCOMPARE(permsEcho.size(), 1);
+    QCOMPARE(permsEcho.first().type, domain::agent::ToolPermissionType::ProcessExecute);
 
     // 2. 工作目录越界逃逸防护
     domain::agent::ToolCall callEscape{
         QStringLiteral("rc3"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"cmake\",\"working_directory\":\"../../escape_dir\"}")
+        QStringLiteral("{\"command\":\"echo test\",\"working_directory\":\"../../escape_dir\"}")
     };
     auto resEscape = runOpSync(registry.execute(callEscape, ctx));
     QVERIFY(resEscape.isError);
     QCOMPARE(resEscape.errorCode, QStringLiteral("WorkingDirectoryEscape"));
 
-    // 3. 执行真实命令 (cmake --version)
-    auto resCmake = runOpSync(registry.execute(callCmake, ctx));
-    QVERIFY(!resCmake.isError);
-    auto objCmake = QJsonDocument::fromJson(resCmake.content.toUtf8()).object();
-    QCOMPARE(objCmake.value(QStringLiteral("exit_code")).toInt(), 0);
-    QVERIFY(objCmake.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("cmake version")));
+    // 3. 执行真实命令 (echo "ForgeAI Shell Ready")
+    auto resEcho = runOpSync(registry.execute(callEcho, ctx));
+    QVERIFY(!resEcho.isError);
+    auto objEcho = QJsonDocument::fromJson(resEcho.content.toUtf8()).object();
+    QCOMPARE(objEcho.value(QStringLiteral("exit_code")).toInt(), 0);
+    QVERIFY(objEcho.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("ForgeAI Shell Ready")));
+}
+
+void AgentToolTests::testRunCommandCompoundCommandsAndPipes() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    agent::tool::ToolRegistry registry;
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>());
+    application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
+
+    // 复合命令：echo step1 && echo step2
+    domain::agent::ToolCall callCompound{
+        QStringLiteral("rc_compound"),
+        QStringLiteral("run_command"),
+        QStringLiteral("{\"command\":\"echo step1 && echo step2\"}")
+    };
+    auto resCompound = runOpSync(registry.execute(callCompound, ctx));
+    QVERIFY(!resCompound.isError);
+    auto objCompound = QJsonDocument::fromJson(resCompound.content.toUtf8()).object();
+    QCOMPARE(objCompound.value(QStringLiteral("exit_code")).toInt(), 0);
+    const QString out = objCompound.value(QStringLiteral("stdout")).toString();
+    QVERIFY(out.contains(QStringLiteral("step1")));
+    QVERIFY(out.contains(QStringLiteral("step2")));
 }
 
 void AgentToolTests::testProcessOutputBufferCursorTracking() {
@@ -1478,7 +1552,7 @@ void AgentToolTests::testRunCommandBackgroundModeAndCheckTask() {
     auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
     auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
     agent::tool::ToolRegistry registry;
-    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, fs));
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, nullptr, fs));
 
     application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
 
@@ -1486,7 +1560,7 @@ void AgentToolTests::testRunCommandBackgroundModeAndCheckTask() {
     domain::agent::ToolCall bgCall{
         QStringLiteral("bg1"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"],\"background\":true}")
+        QStringLiteral("{\"command\":\"echo \\\"bg_test_message_123\\\"\",\"background\":true}")
     };
     auto bgRes = runOpSync(registry.execute(bgCall, ctx));
     QVERIFY(!bgRes.isError);
@@ -1507,7 +1581,7 @@ void AgentToolTests::testRunCommandBackgroundModeAndCheckTask() {
 
     auto checkObj = QJsonDocument::fromJson(checkRes.content.toUtf8()).object();
     QCOMPARE(checkObj.value(QStringLiteral("task_id")).toString(), taskId);
-    QVERIFY(checkObj.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("cmake version")));
+    QVERIFY(checkObj.value(QStringLiteral("stdout")).toString().contains(QStringLiteral("bg_test_message_123")));
 }
 
 void AgentToolTests::testCheckTaskIncrementalCursorStreaming() {
@@ -1517,14 +1591,14 @@ void AgentToolTests::testCheckTaskIncrementalCursorStreaming() {
     auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
     auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
     agent::tool::ToolRegistry registry;
-    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, fs));
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, nullptr, fs));
 
     application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
 
     domain::agent::ToolCall bgCall{
         QStringLiteral("bg2"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"--version\"],\"background\":true}")
+        QStringLiteral("{\"command\":\"echo \\\"1234567890abcdefghij\\\"\",\"background\":true}")
     };
     auto bgRes = runOpSync(registry.execute(bgCall, ctx));
     const QString taskId = QJsonDocument::fromJson(bgRes.content.toUtf8()).object().value(QStringLiteral("task_id")).toString();
@@ -1580,7 +1654,7 @@ void AgentToolTests::testProcessTaskCancellationAndOwnership() {
     auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
     auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
     agent::tool::ToolRegistry registry;
-    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, fs));
+    registry.registerProvider(std::make_shared<agent::tool::BuiltinToolProvider>(taskRuntime, nullptr, fs));
 
     const QUuid runA = QUuid::createUuid();
     const QUuid runB = QUuid::createUuid();
@@ -1591,7 +1665,7 @@ void AgentToolTests::testProcessTaskCancellationAndOwnership() {
     domain::agent::ToolCall bgCall{
         QStringLiteral("bg_own"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"-E\",\"sleep\",\"2\"],\"background\":true}")
+        QStringLiteral("{\"command\":\"ping 127.0.0.1 -n 5 > nul || sleep 5\",\"background\":true}")
     };
     auto bgRes = runOpSync(registry.execute(bgCall, ctxA));
     const QString taskId = QJsonDocument::fromJson(bgRes.content.toUtf8()).object().value(QStringLiteral("task_id")).toString();
@@ -1656,8 +1730,8 @@ void AgentToolTests::testCheckTaskCancelDoesNotUAF() {
     application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
 
     domain::agent::task::ProcessTaskSpec spec;
-    spec.program = QStringLiteral("cmake");
-    spec.arguments = {QStringLiteral("-E"), QStringLiteral("sleep"), QStringLiteral("2")};
+    spec.launchMode = domain::agent::task::ProcessLaunchMode::ShellCommand;
+    spec.command = QStringLiteral("ping 127.0.0.1 -n 5 > nul || sleep 5");
     spec.workingDirectory = temp.path();
     spec.background = true;
     spec.runId = ctx.runId;
@@ -1688,14 +1762,14 @@ void AgentToolTests::testForegroundRunCancelDoesNotUAF() {
 
     auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
     auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
-    agent::tool::builtin::RunCommandTool runTool(taskRuntime, fs);
+    agent::tool::builtin::RunCommandTool runTool(taskRuntime, nullptr, fs);
 
     application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
 
     domain::agent::ToolCall runCall{
         QStringLiteral("run_uaf"),
         QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"cmake\",\"args\":[\"-E\",\"sleep\",\"2\"],\"background\":false}")
+        QStringLiteral("{\"command\":\"ping 127.0.0.1 -n 5 > nul || sleep 5\",\"background\":false}")
     };
 
     auto op = runTool.execute(runCall, ctx);
@@ -1713,18 +1787,18 @@ void AgentToolTests::testRunCommandFailedToStartReturnsFailed() {
 
     auto taskRuntime = std::make_shared<agent::task::ProcessTaskRuntime>();
     auto fs = std::make_shared<llm::workspace::WorkspaceFileSystem>();
-    agent::tool::builtin::RunCommandTool runTool(taskRuntime, fs);
+    agent::tool::builtin::RunCommandTool runTool(taskRuntime, nullptr, fs);
 
     application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
 
-    domain::agent::ToolCall bgCall{
-        QStringLiteral("bg_fail"),
-        QStringLiteral("run_command"),
-        QStringLiteral("{\"program\":\"/__non_existent_forge_ai_binary__\",\"background\":true}")
-    };
-    auto res = runOpSync(runTool.execute(bgCall, ctx));
-    auto obj = QJsonDocument::fromJson(res.content.toUtf8()).object();
-    const QString taskId = obj.value(QStringLiteral("task_id")).toString();
+    domain::agent::task::ProcessTaskSpec spec;
+    spec.launchMode = domain::agent::task::ProcessLaunchMode::DirectProcess;
+    spec.program = QStringLiteral("/__non_existent_forge_ai_binary__");
+    spec.workingDirectory = temp.path();
+    spec.background = true;
+    spec.runId = ctx.runId;
+
+    const QString taskId = taskRuntime->start(spec, ctx);
     QVERIFY(!taskId.isEmpty());
 
     // 等待子进程启动失败信号派发
@@ -1743,8 +1817,8 @@ void AgentToolTests::testProcessTaskRuntimeCleanupAndTTL() {
     application::ports::ToolExecutionContext ctx{QUuid::createUuid(), QStringLiteral("s1"), QUuid::createUuid(), temp.path(), 30000, {}};
 
     domain::agent::task::ProcessTaskSpec spec;
-    spec.program = QStringLiteral("cmake");
-    spec.arguments = {QStringLiteral("--version")};
+    spec.launchMode = domain::agent::task::ProcessLaunchMode::ShellCommand;
+    spec.command = QStringLiteral("echo \"done_cleanup_test\"");
     spec.workingDirectory = temp.path();
     spec.background = true;
     spec.runId = ctx.runId;
@@ -1752,7 +1826,13 @@ void AgentToolTests::testProcessTaskRuntimeCleanupAndTTL() {
     const QString taskId = taskRuntime->start(spec, ctx);
 
     // 等待执行完成
-    QTest::qWait(300);
+    for (int i = 0; i < 40; ++i) {
+        auto s = taskRuntime->snapshot(taskId);
+        if (s.has_value() && (s->state == domain::agent::task::ProcessTaskState::Completed || s->state == domain::agent::task::ProcessTaskState::Failed)) {
+            break;
+        }
+        QTest::qWait(50);
+    }
 
     auto snap = taskRuntime->snapshot(taskId);
     QVERIFY(snap.has_value());

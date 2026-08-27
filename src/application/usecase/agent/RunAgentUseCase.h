@@ -49,7 +49,8 @@ namespace application::usecase::agent {
             const QString& sessionId,
             const QString& toolCallId,
             bool granted,
-            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once,
+            const QString& customInput = QString()
         );
         bool isRunning() const;
         ports::IAgentRuntime* runtime() const;

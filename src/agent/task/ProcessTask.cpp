@@ -1,5 +1,6 @@
 #include "ProcessTask.h"
 #include "ProcessOutputDecoder.h"
+#include "services/process/ProcessLaunchResolver.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
 
@@ -10,10 +11,12 @@ namespace agent::task {
     ProcessTask::ProcessTask(
         QString taskId,
         domain::agent::task::ProcessTaskSpec spec,
+        std::shared_ptr<application::ports::IShellService> shellService,
         QObject* parent
     ) : QObject(parent),
         m_taskId(std::move(taskId)),
-        m_spec(std::move(spec)) {
+        m_spec(std::move(spec)),
+        m_shellService(std::move(shellService)) {
     }
 
     ProcessTask::~ProcessTask() {
@@ -56,7 +59,6 @@ namespace agent::task {
         m_elapsed.start();
 
         m_process = new QProcess(this);
-        m_process->setProcessEnvironment(QProcessEnvironment::systemEnvironment());
         if (!m_spec.workingDirectory.isEmpty()) {
             m_process->setWorkingDirectory(m_spec.workingDirectory);
         }
@@ -67,7 +69,6 @@ namespace agent::task {
         connect(m_process, &QProcess::errorOccurred, this, &ProcessTask::onProcessError);
         connect(m_process, &QProcess::started, this, [this]() {
             m_pid = m_process->processId();
-            m_process->closeWriteChannel();
             if (m_state == domain::agent::task::ProcessTaskState::Starting) {
                 setState(domain::agent::task::ProcessTaskState::Running);
             }
@@ -80,15 +81,47 @@ namespace agent::task {
             m_timeoutTimer->start(m_spec.timeoutMs);
         }
 
+        // 解析可执行程序与参数
+        services::process::ProcessLaunchResolver resolver;
+        services::process::ProcessLaunchSpec launch;
+
+        if (m_spec.launchMode == domain::agent::task::ProcessLaunchMode::ShellCommand) {
+            std::optional<domain::process::ShellProfile> shellOpt;
+            if (!m_spec.shellProfileId.isEmpty() && m_shellService) {
+                shellOpt = m_shellService->shell(m_spec.shellProfileId);
+            }
+            if (!shellOpt.has_value() && m_shellService) {
+                shellOpt = m_shellService->defaultShell();
+            }
+
+            if (!shellOpt.has_value()) {
+                if (m_timeoutTimer) m_timeoutTimer->stop();
+                m_exitCode = -1;
+                finalizeTask(domain::agent::task::ProcessTaskState::Failed, -1, QStringLiteral("未找到可用的 ShellProfile 终端配置"));
+                return true;
+            }
+
+            launch = resolver.resolveShellCommand(m_spec, shellOpt.value());
+        } else {
+            launch = resolver.resolveDirectProcess(m_spec);
+        }
+
         core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("启动进程任务"), {
             {QStringLiteral("taskId"), m_taskId},
-            {QStringLiteral("program"), m_spec.program},
+            {QStringLiteral("launchMode"), m_spec.launchMode == domain::agent::task::ProcessLaunchMode::ShellCommand ? QStringLiteral("ShellCommand") : QStringLiteral("DirectProcess")},
+            {QStringLiteral("program"), launch.executable},
             {QStringLiteral("workingDir"), m_spec.workingDirectory},
             {QStringLiteral("timeoutMs"), QString::number(m_spec.timeoutMs)},
             {QStringLiteral("background"), m_spec.background ? QStringLiteral("true") : QStringLiteral("false")}
         });
 
-        m_process->start(m_spec.program, m_spec.arguments);
+        m_process->setProgram(launch.executable);
+        m_process->setArguments(launch.arguments);
+        if (!launch.environment.isEmpty()) {
+            m_process->setProcessEnvironment(launch.environment);
+        }
+
+        m_process->start();
 
         return true;
     }
@@ -152,7 +185,10 @@ namespace agent::task {
         if (error == QProcess::FailedToStart) {
             if (m_timeoutTimer) m_timeoutTimer->stop();
             m_exitCode = -1;
-            finalizeTask(domain::agent::task::ProcessTaskState::Failed, -1, QStringLiteral("无法启动程序 '%1'，未找到可执行文件或缺少权限").arg(m_spec.program));
+            finalizeTask(domain::agent::task::ProcessTaskState::Failed, -1, QStringLiteral("无法启动程序 '%1'，未找到可执行文件或缺少执行权限").arg(m_spec.program.isEmpty() ? m_spec.command : m_spec.program));
+        } else if (error == QProcess::Crashed && !m_timedOut) {
+            if (m_timeoutTimer) m_timeoutTimer->stop();
+            finalizeTask(domain::agent::task::ProcessTaskState::Crashed, m_exitCode, QStringLiteral("进程异常崩溃退出"));
         }
     }
 
@@ -196,7 +232,7 @@ namespace agent::task {
         domain::agent::task::ProcessTaskSnapshot snap;
         snap.taskId = m_taskId;
         snap.state = m_state;
-        snap.program = m_spec.program;
+        snap.program = m_spec.program.isEmpty() ? m_spec.command : m_spec.program;
         snap.arguments = m_spec.arguments;
         snap.workingDirectory = m_spec.workingDirectory;
         snap.outputEncoding = m_spec.outputEncoding;
@@ -228,38 +264,34 @@ namespace agent::task {
                           m_state == domain::agent::task::ProcessTaskState::TimedOut ||
                           m_state == domain::agent::task::ProcessTaskState::Cancelled ||
                           m_state == domain::agent::task::ProcessTaskState::Crashed);
-        delta.exitCode = m_exitCode;
+        delta.exitCode = m_exitCode >= 0 ? std::make_optional(m_exitCode) : std::nullopt;
         delta.exitError = m_exitError;
-        delta.durationMs = m_elapsed.isValid() ? m_elapsed.elapsed() : 0;
-        delta.encoding = ProcessOutputDecoder::normalizeEncoding(m_spec.outputEncoding);
+        delta.durationMs = m_elapsed.elapsed();
+        delta.encoding = m_spec.outputEncoding;
 
-        quint64 rawNextStdout = 0;
-        const QByteArray rawStdout = m_stdoutBuffer.readBytesFrom(
-            stdoutCursor,
-            maxOutputBytes,
-            &delta.stdoutCursorLost,
-            &delta.stdoutAvailableFrom,
-            &rawNextStdout
-        );
-        const auto stdoutDecoded = ProcessOutputDecoder::decodeChunk(rawStdout, m_spec.outputEncoding, delta.finished);
+        bool stdoutLost = false;
+        quint64 stdoutAvail = 0;
+        quint64 nextStdoutCursor = stdoutCursor;
+        const QByteArray rawStdout = m_stdoutBuffer.readBytesFrom(stdoutCursor, maxOutputBytes, &stdoutLost, &stdoutAvail, &nextStdoutCursor);
+        delta.nextStdoutCursor = nextStdoutCursor;
+        delta.stdoutCursorLost = stdoutLost;
+        delta.stdoutAvailableFrom = stdoutAvail;
+
+        auto stdoutDecoded = ProcessOutputDecoder::decodeChunk(rawStdout, m_spec.outputEncoding, delta.finished);
         delta.stdoutDelta = stdoutDecoded.text;
-        const quint64 effectiveStdoutBase = delta.stdoutCursorLost ? delta.stdoutAvailableFrom : std::min(stdoutCursor, m_stdoutBuffer.totalProducedBytes());
-        delta.nextStdoutCursor = effectiveStdoutBase + static_cast<quint64>(stdoutDecoded.bytesConsumed);
+        delta.decodeError = stdoutDecoded.hasError;
 
-        quint64 rawNextStderr = 0;
-        const QByteArray rawStderr = m_stderrBuffer.readBytesFrom(
-            stderrCursor,
-            maxOutputBytes,
-            &delta.stderrCursorLost,
-            &delta.stderrAvailableFrom,
-            &rawNextStderr
-        );
-        const auto stderrDecoded = ProcessOutputDecoder::decodeChunk(rawStderr, m_spec.outputEncoding, delta.finished);
+        bool stderrLost = false;
+        quint64 stderrAvail = 0;
+        quint64 nextStderrCursor = stderrCursor;
+        const QByteArray rawStderr = m_stderrBuffer.readBytesFrom(stderrCursor, maxOutputBytes, &stderrLost, &stderrAvail, &nextStderrCursor);
+        delta.nextStderrCursor = nextStderrCursor;
+        delta.stderrCursorLost = stderrLost;
+        delta.stderrAvailableFrom = stderrAvail;
+
+        auto stderrDecoded = ProcessOutputDecoder::decodeChunk(rawStderr, m_spec.outputEncoding, delta.finished);
         delta.stderrDelta = stderrDecoded.text;
-        const quint64 effectiveStderrBase = delta.stderrCursorLost ? delta.stderrAvailableFrom : std::min(stderrCursor, m_stderrBuffer.totalProducedBytes());
-        delta.nextStderrCursor = effectiveStderrBase + static_cast<quint64>(stderrDecoded.bytesConsumed);
-
-        delta.decodeError = stdoutDecoded.hasError || stderrDecoded.hasError;
+        if (stderrDecoded.hasError) delta.decodeError = true;
 
         return delta;
     }

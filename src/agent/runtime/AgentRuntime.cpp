@@ -140,6 +140,7 @@ namespace agent::runtime {
         m_state.errorMessage.clear();
         m_pendingPermissions.clear();
         m_runApprovedTools.clear();
+        m_runApprovedCommands.clear();
 
         core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("Agent 任务启动"), {
             {QStringLiteral("runId"), m_state.runId.toString(QUuid::WithoutBraces)},
@@ -446,7 +447,8 @@ namespace agent::runtime {
         const QString& sessionId,
         const QString& toolCallId,
         bool granted,
-        domain::agent::PermissionScope scope
+        domain::agent::PermissionScope scope,
+        const QString& customInput
     ) {
         if (sessionId != m_context.sessionId) return;
         if (!m_pendingPermissions.contains(toolCallId)) return;
@@ -454,22 +456,46 @@ namespace agent::runtime {
         const auto [call, perm] = m_pendingPermissions.take(toolCallId);
 
         if (granted) {
-            if (scope == domain::agent::PermissionScope::Run) {
-                m_runApprovedTools.insert(call.name);
-                core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前会话内的工具授权"), {
-                    {QStringLiteral("toolName"), call.name}
-                });
-            } else if (scope == domain::agent::PermissionScope::Project) {
-                m_projectApprovedTools[m_context.projectId].insert(call.name);
-                core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前项目内的工具授权"), {
-                    {QStringLiteral("toolName"), call.name},
-                    {QStringLiteral("projectId"), m_context.projectId.toString()}
-                });
-            } else if (scope == domain::agent::PermissionScope::Global) {
-                m_globalApprovedTools.insert(call.name);
-                core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住全局工具授权"), {
-                    {QStringLiteral("toolName"), call.name}
-                });
+            if (call.name == QStringLiteral("run_command")) {
+                const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
+                const QString command = args.value(QStringLiteral("command")).toString().trimmed();
+                if (!command.isEmpty()) {
+                    if (scope == domain::agent::PermissionScope::Run) {
+                        m_runApprovedCommands.insert(command);
+                        core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("已在当前对话记住命令授权"), {
+                            {QStringLiteral("command"), command}
+                        });
+                    } else if (scope == domain::agent::PermissionScope::Project) {
+                        m_projectApprovedCommands[m_context.projectId].insert(command);
+                        core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("已在当前项目记住命令授权"), {
+                            {QStringLiteral("command"), command},
+                            {QStringLiteral("projectId"), m_context.projectId.toString()}
+                        });
+                    } else if (scope == domain::agent::PermissionScope::Global) {
+                        m_globalApprovedCommands.insert(command);
+                        core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("已全局永久记住命令授权"), {
+                            {QStringLiteral("command"), command}
+                        });
+                    }
+                }
+            } else {
+                if (scope == domain::agent::PermissionScope::Run) {
+                    m_runApprovedTools.insert(call.name);
+                    core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前会话内的工具授权"), {
+                        {QStringLiteral("toolName"), call.name}
+                    });
+                } else if (scope == domain::agent::PermissionScope::Project) {
+                    m_projectApprovedTools[m_context.projectId].insert(call.name);
+                    core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住当前项目内的工具授权"), {
+                        {QStringLiteral("toolName"), call.name},
+                        {QStringLiteral("projectId"), m_context.projectId.toString()}
+                    });
+                } else if (scope == domain::agent::PermissionScope::Global) {
+                    m_globalApprovedTools.insert(call.name);
+                    core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户已记住全局工具授权"), {
+                        {QStringLiteral("toolName"), call.name}
+                    });
+                }
             }
 
             const int toolTimeout = m_context.policy.toolTimeoutMs > 0 ? m_context.policy.toolTimeoutMs : (m_context.policy.timeoutMs > 0 ? m_context.policy.timeoutMs : 30000);
@@ -480,37 +506,33 @@ namespace agent::runtime {
                 m_context.workspaceRoot,
                 toolTimeout,
                 m_runCancellationToken,
-                call.id
+                QString()
             };
 
-            std::unique_ptr<application::ports::IToolOperation> op;
-            if (m_toolRegistry) {
-                op = m_toolRegistry->execute(call, execContext);
-            } else {
-                op = std::make_unique<application::ports::ImmediateToolOperation>(
-                    call.id,
-                    [call]() {
-                        return domain::agent::ToolResult{call.id, QStringLiteral("工具服务暂不可用，请稍后重试。"), true};
-                    }
-                );
-            }
-
+            auto tool = m_toolRegistry->findTool(call.name);
+            auto op = tool->execute(call, execContext);
             auto* opPtr = op.get();
-            connect(opPtr, &application::ports::IToolOperation::finished, this, [this, toolCallId](const domain::agent::ToolResult& result) {
+            connect(opPtr, &application::ports::IToolOperation::finished, this, [this, toolCallId = call.id](const domain::agent::ToolResult& result) {
                 onToolOperationFinished(toolCallId, result);
             });
             m_activeOperations.push_back(std::move(op));
             opPtr->start();
         } else {
-            core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户拒绝工具权限授权"), {
+            core::logging::LoggingService::instance().info(core::logging::Category::AgentRuntime, QStringLiteral("用户跳过/拒绝工具权限授权"), {
                 {QStringLiteral("toolName"), call.name},
-                {QStringLiteral("callId"), call.id}
+                {QStringLiteral("callId"), call.id},
+                {QStringLiteral("customInput"), customInput}
             });
+
+            const QString rejectMessage = customInput.trimmed().isEmpty()
+                ? QStringLiteral("Command was skipped by user.")
+                : QStringLiteral("Command was skipped by user. Feedback: %1").arg(customInput.trimmed());
 
             domain::agent::ToolResult result{
                 call.id,
-                QStringLiteral("你已拒绝该工具请求。"),
-                true
+                rejectMessage,
+                true,
+                QStringLiteral("Skipped")
             };
             m_pendingToolResults.append(result);
             m_state.results = m_pendingToolResults;
@@ -575,8 +597,23 @@ namespace agent::runtime {
             domain::agent::ToolPermission requiredPerm;
             domain::agent::PermissionDecision decision = domain::agent::PermissionDecision::Allow;
 
-            // 如果当前会话、当前项目或全局已授权该工具，直接允许
-            if (m_runApprovedTools.contains(call.name) ||
+            // 如果是 run_command，检查命令级白名单 (会话 / 项目 / 全局)
+            bool isCommandApproved = false;
+            if (call.name == QStringLiteral("run_command")) {
+                const QJsonObject args = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
+                const QString command = args.value(QStringLiteral("command")).toString().trimmed();
+                if (!command.isEmpty()) {
+                    if (m_runApprovedCommands.contains(command) ||
+                        m_globalApprovedCommands.contains(command) ||
+                        m_projectApprovedCommands.value(m_context.projectId).contains(command)) {
+                        isCommandApproved = true;
+                    }
+                }
+            }
+
+            // 如果当前命令/工具已在会话、项目或全局授权，直接允许
+            if (isCommandApproved ||
+                m_runApprovedTools.contains(call.name) ||
                 m_globalApprovedTools.contains(call.name) ||
                 m_projectApprovedTools.value(m_context.projectId).contains(call.name)) {
                 decision = domain::agent::PermissionDecision::Allow;

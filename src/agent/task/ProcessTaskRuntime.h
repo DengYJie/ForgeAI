@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include "application/ports/IProcessTaskRuntime.h"
+#include "application/ports/IShellService.h"
 #include "ProcessTask.h"
 
 namespace agent::task {
@@ -16,7 +17,10 @@ namespace agent::task {
     class ProcessTaskRuntime : public QObject, public application::ports::IProcessTaskRuntime {
         Q_OBJECT
     public:
-        explicit ProcessTaskRuntime(QObject* parent = nullptr);
+        explicit ProcessTaskRuntime(
+            std::shared_ptr<application::ports::IShellService> shellService = nullptr,
+            QObject* parent = nullptr
+        );
         ~ProcessTaskRuntime() override;
 
         QString start(
@@ -55,12 +59,11 @@ namespace agent::task {
             std::function<void()> callback
         ) override;
 
-        /**
-         * @brief 获取当前任务实例指针（内部或测试使用）
-         */
+        std::shared_ptr<ProcessTask> findTask(const QString& taskId) const;
         std::shared_ptr<ProcessTask> getTask(const QString& taskId) const;
 
     private:
+        std::shared_ptr<application::ports::IShellService> m_shellService;
         mutable std::mutex m_mutex;
         QHash<QString, std::shared_ptr<ProcessTask>> m_tasks;
     };

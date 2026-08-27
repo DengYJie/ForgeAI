@@ -114,7 +114,8 @@ namespace ui::screen::work {
         void grantPermission(
             const QString& toolCallId,
             bool granted,
-            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once
+            domain::agent::PermissionScope scope = domain::agent::PermissionScope::Once,
+            const QString& customInput = QString()
         );
 
         void setProjectRoot(const QString& rootPath);
