@@ -78,16 +78,9 @@ void MessageListView::setupUi()
         updateVisibleCards();
     });
 
-    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         scheduleVirtualRefresh();
         if (!m_visibleCheckTimer->isActive()) m_visibleCheckTimer->start();
-        if (!m_scrollAnimation || m_scrollAnimation->state() != QAbstractAnimation::Running) {
-            if (value < verticalScrollBar()->maximum() - 20) {
-                m_autoScrollToBottom = false;
-            } else if (value >= verticalScrollBar()->maximum() - 10) {
-                m_autoScrollToBottom = true;
-            }
-        }
     });
 }
 
@@ -122,9 +115,15 @@ void MessageListView::setCustomScrollBar(QScrollBar* scrollBar)
 void MessageListView::bindScrollBarSignals(QScrollBar* bar)
 {
     if (!bar) return;
-    connect(bar, &QScrollBar::sliderPressed, this, [this] { m_autoScrollToBottom = false; m_scrollAnimation->stop(); });
+    connect(bar, &QScrollBar::sliderPressed, this, [this] {
+        m_autoScrollToBottom = false;
+        m_scrollAnimation->stop();
+    });
     connect(bar, &QScrollBar::sliderReleased, this, [this, bar] {
-        if (bar->value() >= bar->maximum() - 10) m_autoScrollToBottom = true;
+        if (bar->value() >= bar->maximum() - 30) {
+            m_autoScrollToBottom = true;
+            executeFollowBottom();
+        }
     });
 }
 
@@ -146,7 +145,6 @@ void MessageListView::syncMessages(const QList<domain::conversation::Message>& m
     const int oldTop = findItemAtY(oldScroll);
     const QUuid anchorId = oldTop >= 0 ? m_items.at(oldTop).message.id : QUuid{};
     const int anchorOffset = oldTop >= 0 ? oldScroll - m_items.at(oldTop).y : 0;
-    const bool wasAtBottom = verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 10;
 
     QSet<QUuid> incoming;
     for (const auto& message : messages) incoming.insert(message.id);
@@ -168,8 +166,7 @@ void MessageListView::syncMessages(const QList<domain::conversation::Message>& m
         if (index >= 0) verticalScrollBar()->setValue(qMax(0, m_items.at(index).y + anchorOffset));
     }
     updateVisibleCards();
-    if (wasAtBottom) m_autoScrollToBottom = true;
-    scheduleFollowBottom();
+    if (m_autoScrollToBottom) scheduleFollowBottom();
 }
 
 void MessageListView::relayoutItems()
@@ -393,13 +390,11 @@ void MessageListView::scheduleFollowBottom()
 
 void MessageListView::executeFollowBottom()
 {
+    if (!m_autoScrollToBottom) return;
     QScrollBar* bar = verticalScrollBar();
-    if (bar->value() >= bar->maximum()) return;
-    m_scrollAnimation->stop();
-    m_scrollAnimation->setDuration(150);
-    m_scrollAnimation->setStartValue(bar->value());
-    m_scrollAnimation->setEndValue(bar->maximum());
-    m_scrollAnimation->start();
+    if (bar->value() < bar->maximum()) {
+        bar->setValue(bar->maximum());
+    }
 }
 
 void MessageListView::wheelEvent(QWheelEvent* event)
@@ -407,10 +402,14 @@ void MessageListView::wheelEvent(QWheelEvent* event)
     if (event->angleDelta().y() > 0) {
         m_autoScrollToBottom = false;
         m_scrollAnimation->stop();
+        m_followTimer->stop();
     }
     fluent::scrolling::ScrollView::wheelEvent(event);
-    if (event->angleDelta().y() < 0 && verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 10) {
-        m_autoScrollToBottom = true;
+    if (event->angleDelta().y() < 0) {
+        if (verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 30) {
+            m_autoScrollToBottom = true;
+            executeFollowBottom();
+        }
     }
 }
 

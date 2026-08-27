@@ -1729,7 +1729,6 @@ void MarkdownCoreTests::visualTest()
                 domain::conversation::TextBlock{*accumulatedText}
             };
             listView->syncMessages(*sessionMsgs);
-            listView->scrollToBottom();
         });
         streamTimer->start();
     });
@@ -1789,7 +1788,6 @@ void MarkdownCoreTests::visualTest()
                 domain::conversation::TextBlock{*accumulatedText}
             };
             listView->syncMessages(*sessionMsgs);
-            listView->scrollToBottom();
         });
         streamTimer->start();
     });
@@ -1820,8 +1818,7 @@ void MarkdownCoreTests::visualTest()
         );
 
         QEventLoop loop;
-        window.setAttribute(Qt::WA_DeleteOnClose, true);
-        QObject::connect(&window, &QWidget::destroyed, &loop, &QEventLoop::quit);
+        QObject::connect(qApp, &QGuiApplication::lastWindowClosed, &loop, &QEventLoop::quit);
         loop.exec();
 
         filter->dumpSessionSummary();
