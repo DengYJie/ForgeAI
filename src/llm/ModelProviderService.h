@@ -4,6 +4,7 @@
 #include "application/ports/IChatModelGateway.h"
 #include "network/IHttpClient.h"
 #include "llm/ProtocolRegistry.h"
+#include "domain/model/ResolvedModel.h"
 
 namespace llm {
 
@@ -19,7 +20,7 @@ namespace llm {
         ~ModelProviderService() override;
 
         application::ports::IChatOperation* sendRequest(
-            const domain::model::ModelProvider &provider,
+            const domain::model::ResolvedModel &model,
             const domain::llm::ChatRequest &request) override;
 
     private:

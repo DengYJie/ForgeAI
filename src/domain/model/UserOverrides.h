@@ -40,7 +40,7 @@ namespace domain::model {
         QString id;
         QString name;
         QString icon;
-        ProviderType type = ProviderType::OpenAIChatCompletionsCompatible;
+        ProtocolType protocol = ProtocolType::OpenAIChatCompletions;
         QString baseUrl;
         QString apiKey;
         QMap<QString, QString> customHeaders;

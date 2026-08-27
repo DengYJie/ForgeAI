@@ -260,11 +260,30 @@ void WorkViewModel::setupUseCaseConnections() {
             if (sessionId != m_agentSessionId) return;
             qWarning().noquote() << QStringLiteral("[WorkViewModel] runFailed -> code: %1, msg: %2, userMsg: %3")
                 .arg(error.code, error.message, error.userMessage);
-            updateState([error](WorkState& state) {
+            const QString displayErr = error.userMessage.isEmpty() ? error.message : error.userMessage;
+            updateState([error, displayErr](WorkState& state) {
                 state.isProcessing = false;
-                state.statusMessage = error.userMessage.isEmpty() ? error.message : error.userMessage;
+                state.statusMessage = displayErr;
                 state.agentUiState.status = domain::agent::AgentRunStatus::Failed;
                 state.agentUiState.isWaitingPermission = false;
+
+                // 如果存在未完成的 Assistant 消息占位，将其标记为失败并写入错误信息
+                if (!state.messages.isEmpty() && state.messages.last().role == domain::MessageRole::Assistant) {
+                    auto& lastMsg = state.messages.last();
+                    lastMsg.status = domain::MessageStatus::Failed;
+                    bool hasText = false;
+                    for (const auto& b : lastMsg.blocks) {
+                        if (b.isText() && !std::get<domain::conversation::TextBlock>(b.payload).text.isEmpty()) {
+                            hasText = true;
+                            break;
+                        }
+                    }
+                    if (!hasText) {
+                        lastMsg.blocks.append({domain::BlockType::Text, domain::conversation::TextBlock{
+                            QStringLiteral("⚠️ **任务执行失败**：%1").arg(displayErr)
+                        }});
+                    }
+                }
             });
         });
     }
@@ -618,7 +637,7 @@ void WorkViewModel::refreshAvailableModels(WorkState &s) {
                 || capabilities.testFlag(domain::model::ModelCapability::Pdf)
                 || capabilities.testFlag(domain::model::ModelCapability::Audio)
                 || capabilities.testFlag(domain::model::ModelCapability::Video),
-            model.provider.type == domain::model::ProviderType::OpenAIResponses,
+            model.provider.protocol == domain::model::ProtocolType::OpenAIResponses,
             capabilities.testFlag(domain::model::ModelCapability::Thinking), efforts
         });
     }

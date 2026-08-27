@@ -29,6 +29,8 @@ target_sources(ForgeAICore PRIVATE
     runtime/RetryDecision.h
     runtime/RetryDecision.cpp
     runtime/RequestMetrics.h
+    runtime/ChatRequestResolver.h
+    runtime/ChatRequestResolver.cpp
     runtime/ChatOperation.h
     runtime/ChatOperation.cpp
     ModelProviderService.h

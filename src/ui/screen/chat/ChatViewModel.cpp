@@ -441,7 +441,7 @@ namespace ui::screen::chat {
                     || capabilities.testFlag(domain::model::ModelCapability::Pdf)
                     || capabilities.testFlag(domain::model::ModelCapability::Audio)
                     || capabilities.testFlag(domain::model::ModelCapability::Video),
-                model.provider.type == domain::model::ProviderType::OpenAIResponses,
+                model.provider.protocol == domain::model::ProtocolType::OpenAIResponses,
                 capabilities.testFlag(domain::model::ModelCapability::Thinking), efforts
             });
         }

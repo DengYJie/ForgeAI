@@ -18,12 +18,14 @@ target_sources(ForgeAICore PRIVATE
     model/ModelParameters.h
     model/CanonicalModel.h
     model/ProviderModel.h
+    model/ReasoningSupport.h
     model/ResolvedModel.h
     model/ModelProvider.h
     model/UserOverrides.h
     llm/ChatError.h
     llm/ChatMessage.h
     llm/ChatRequest.h
+    llm/ResolvedChatOptions.h
     llm/ChatEvent.h
     repository/IConversationRepository.h
     repository/IMessageTranscriptRepository.h

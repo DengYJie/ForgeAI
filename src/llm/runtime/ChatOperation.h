@@ -7,7 +7,7 @@
 #include "application/ports/IChatModelGateway.h"
 #include "network/IHttpClient.h"
 #include "llm/protocol/IProtocolAdapter.h"
-#include "domain/model/ModelProvider.h"
+#include "domain/model/ResolvedModel.h"
 #include "domain/llm/ChatRequest.h"
 #include "domain/llm/ChatError.h"
 #include "RequestState.h"
@@ -28,7 +28,7 @@ namespace llm::runtime {
         ChatOperation(
             std::shared_ptr<network::IHttpClient> httpClient,
             std::shared_ptr<protocol::IProtocolAdapter> adapter,
-            const domain::model::ModelProvider &provider,
+            const domain::model::ResolvedModel &model,
             const domain::llm::ChatRequest &request,
             const TimeoutPolicy &timeoutPolicy = TimeoutPolicy{},
             const RetryPolicy &retryPolicy = RetryPolicy{},
@@ -73,7 +73,7 @@ namespace llm::runtime {
 
         std::shared_ptr<network::IHttpClient> m_httpClient;
         std::shared_ptr<protocol::IProtocolAdapter> m_adapter;
-        domain::model::ModelProvider m_provider;
+        domain::model::ResolvedModel m_model;
         domain::llm::ChatRequest m_request;
 
         TimeoutPolicy m_timeoutPolicy;

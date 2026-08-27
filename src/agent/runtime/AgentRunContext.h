@@ -2,7 +2,7 @@
 
 #include <QUuid>
 #include <QString>
-#include "domain/model/ModelProvider.h"
+#include "domain/model/ResolvedModel.h"
 #include "domain/agent/AgentPolicy.h"
 
 namespace agent::runtime {
@@ -17,8 +17,16 @@ namespace agent::runtime {
         QString workspaceRoot;
 
         QString systemPrompt;
-        domain::model::ModelProvider provider;
-        QString modelId;
+        domain::model::ResolvedModel model = []() {
+            domain::model::ResolvedModel m;
+            domain::model::CanonicalModel c;
+            c.capabilities = domain::model::ModelCapability::Chat |
+                             domain::model::ModelCapability::Streaming |
+                             domain::model::ModelCapability::ToolCalling;
+            c.limits.maxOutput = 8192;
+            m.canonical = c;
+            return m;
+        }(); ///< 统一聚合模型实体
 
         bool useWebSearch = false;
         bool useDeepThinking = false;

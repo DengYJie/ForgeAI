@@ -76,7 +76,7 @@ namespace llm {
             return nullptr;
         }
 
-        auto adapter = m_registry->adapter(provider.type);
+        auto adapter = m_registry->adapter(provider.protocol);
         if (!adapter || !adapter->supportsModelDiscovery()) {
             auto op = new ModelDiscoveryOperationImpl(nullptr, nullptr, provider.id);
             QMetaObject::invokeMethod(op, [op]() {

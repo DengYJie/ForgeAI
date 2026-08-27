@@ -3,8 +3,10 @@
 #include <QByteArray>
 #include "network/HttpRequest.h"
 #include "domain/llm/ChatRequest.h"
+#include "domain/llm/ResolvedChatOptions.h"
 #include "domain/llm/ChatError.h"
 #include "domain/model/ModelProvider.h"
+#include "domain/model/ResolvedModel.h"
 #include "IStreamParser.h"
 
 namespace llm::protocol {
@@ -17,14 +19,16 @@ namespace llm::protocol {
         virtual ~IProtocolAdapter() = default;
 
         /**
-         * @brief 将统一的请求抽象转换成具体的 HTTP 请求载荷
-         * @param provider 配置信息 (包含 baseUrl, apiKey 等)
-         * @param request 领域层的统一请求实体
+         * @brief 将语义选项与领域请求转换为具体的 HTTP 请求载荷
+         * @param model 运行时聚合模型实体
+         * @param request 领域层的统一请求意图
+         * @param options 经过 Resolver 解析后的最终语义参数
          * @return 构造好的 HTTP 请求对象
          */
         virtual network::HttpRequest buildChatRequest(
-            const domain::model::ModelProvider &provider,
-            const domain::llm::ChatRequest &request) const = 0;
+            const domain::model::ResolvedModel &model,
+            const domain::llm::ChatRequest &request,
+            const domain::llm::ResolvedChatOptions &options) const = 0;
 
         /**
          * @brief 创建处理该协议特有流格式的解析器

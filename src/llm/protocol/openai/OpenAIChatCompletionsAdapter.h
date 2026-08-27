@@ -13,8 +13,9 @@ namespace llm::protocol::openai {
         bool supportsModelDiscovery() const override { return true; }
 
         network::HttpRequest buildChatRequest(
-            const domain::model::ModelProvider &provider,
-            const domain::llm::ChatRequest &request) const override;
+            const domain::model::ResolvedModel &model,
+            const domain::llm::ChatRequest &request,
+            const domain::llm::ResolvedChatOptions &options) const override;
 
         std::unique_ptr<IStreamParser> createStreamParser() const override;
 

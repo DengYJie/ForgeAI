@@ -7,16 +7,17 @@
 namespace domain::model {
 
     /**
-     * @brief 服务商协议驱动类型
+     * @brief 协议驱动类型
      */
-    enum class ProviderType {
-        OpenAIChatCompletionsCompatible, ///< OpenAI 兼容协议 (基于 /v1/chat/completions)
-        OpenAIResponses,                 ///< OpenAI 原生 Responses API
-        Anthropic,                       ///< Anthropic 原生 Messages 协议
-        Ollama,                          ///< 本地 Ollama 协议
-        GoogleGemini,                    ///< Google Gemini 原生协议
-        AzureOpenAI,                     ///< Azure OpenAI 专用协议
-        AmazonBedrock                    ///< Amazon Bedrock 原生协议
+    enum class ProtocolType {
+        Unknown = 0,                 ///< 未知/不支持的协议类型
+        OpenAIChatCompletions = 1,   ///< OpenAI 兼容 Chat Completions 协议 (/v1/chat/completions)
+        OpenAIResponses = 2,         ///< OpenAI 原生 Responses 协议 (/v1/responses)
+        AnthropicMessages = 3,       ///< Anthropic 原生 Messages 协议 (/v1/messages)
+        OllamaChat = 4,              ///< 本地 Ollama 协议 (/api/chat)
+        GeminiGenerateContent = 5,   ///< Google Gemini 原生协议 (:generateContent / :streamGenerateContent)
+        AzureOpenAI = 6,             ///< Azure OpenAI 专用协议
+        AmazonBedrock = 7            ///< Amazon Bedrock 原生协议
     };
 
     /**
@@ -28,7 +29,8 @@ namespace domain::model {
         QString icon;                         ///< 服务商图标路径或内置图标标识
         QString docUrl;                       ///< 官方文档或 API 说明地址
         QString envVarName;                   ///< 环境变量名
-        ProviderType type = ProviderType::OpenAIChatCompletionsCompatible; ///< 协议驱动类型
+        QString sdkPackage;                   ///< models.dev npm package 原值 (adapter-family hint)
+        ProtocolType protocol = ProtocolType::Unknown; ///< 协议驱动类型
 
         QString baseUrl;                      ///< API 基础请求地址
         QString apiKey;                       ///< API 密钥

@@ -34,6 +34,9 @@ namespace network {
         if (m_isCancelled) return;
         QByteArray data = m_reply->readAll();
         if (!data.isEmpty()) {
+            if (m_receivedBuffer.size() < 65536) {
+                m_receivedBuffer.append(data.left(65536 - m_receivedBuffer.size()));
+            }
             emit dataReceived(data);
         }
     }
@@ -59,6 +62,9 @@ namespace network {
         int httpStatusCode = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         QString errorMsg = m_reply->errorString();
         QByteArray responseBody = m_reply->readAll();
+        if (responseBody.isEmpty()) {
+            responseBody = m_receivedBuffer;
+        }
         core::logging::LoggingService::instance().warning(core::logging::Category::NetworkHttp, QStringLiteral("HTTP error occurred"), QMap<QString, QString>{
             {QStringLiteral("httpStatus"), QString::number(httpStatusCode)},
             {QStringLiteral("code"), QString::number(static_cast<int>(code))},

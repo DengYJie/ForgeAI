@@ -67,7 +67,6 @@ namespace application::usecase::chat {
             emit generationFailed(sessionId, err);
             return;
         }
-        const domain::model::ModelProvider provider = selected->provider;
         
         // 2. 创建并保存用户消息
         domain::conversation::Message userMsg;
@@ -110,7 +109,7 @@ namespace application::usecase::chat {
         m_requestTemplate.useDeepThinking = useDeepThinking;
         m_requestTemplate.reasoningEffort = reasoningEffort;
         m_systemPrompt = systemPrompt;
-        m_currentProvider = selected->provider;
+        m_currentModel = *selected;
 
         // 4. 清理旧任务并启动新任务
         cancelCurrent();
@@ -127,12 +126,12 @@ namespace application::usecase::chat {
         assistantPlaceholder.createdAt = QDateTime::currentDateTime();
         emit assistantMessageStarted(sessionId, assistantPlaceholder);
 
-        startRequest(provider, requestForHistory(history));
+        startRequest(*selected, requestForHistory(history));
     }
 
-    void SendMessageUseCase::startRequest(const domain::model::ModelProvider& provider,
+    void SendMessageUseCase::startRequest(const domain::model::ResolvedModel& model,
                                           const domain::llm::ChatRequest& request) {
-        m_currentOp = m_chatGateway->sendRequest(provider, request);
+        m_currentOp = m_chatGateway->sendRequest(model, request);
         if (!m_currentOp) {
             domain::llm::ChatError error;
             error.category = domain::llm::ChatErrorCategory::Provider;

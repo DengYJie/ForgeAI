@@ -10,14 +10,19 @@ namespace llm::protocol::ollama {
     OllamaProtocolAdapter::~OllamaProtocolAdapter() = default;
 
     network::HttpRequest OllamaProtocolAdapter::buildChatRequest(
-        const domain::model::ModelProvider &provider,
-        const domain::llm::ChatRequest &request) const {
+        const domain::model::ResolvedModel &model,
+        const domain::llm::ChatRequest &request,
+        const domain::llm::ResolvedChatOptions &options) const {
         
+        const auto &provider = model.provider;
         network::HttpRequest netReq;
-        QString baseUrl = provider.baseUrl.isEmpty() ? "http://localhost:11434" : provider.baseUrl;
+        QString baseUrl = provider.baseUrl.isEmpty() ? QStringLiteral("http://localhost:11434") : provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        
-        netReq.url = baseUrl + "/api/chat";
+        if (baseUrl.endsWith(QStringLiteral("/api"))) {
+            netReq.url = baseUrl + "/chat";
+        } else {
+            netReq.url = baseUrl + "/api/chat";
+        }
         netReq.method = network::HttpMethod::Post;
         netReq.timeoutMs = provider.timeoutMs;
 
@@ -43,10 +48,15 @@ namespace llm::protocol::ollama {
                 case domain::MessageRole::Tool: msgObj.insert("role", "tool"); break;
             }
             msgObj.insert("content", msg.content);
+            if (msg.role == domain::MessageRole::Assistant && !msg.reasoningContent.isEmpty()) {
+                msgObj.insert("thinking", msg.reasoningContent);
+            }
             if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
                 QJsonArray tcArr;
                 for (const auto &tc : msg.toolCalls.value()) {
                     QJsonObject tcObj;
+                    tcObj.insert("id", tc.id);
+                    tcObj.insert("type", "function");
                     QJsonObject fObj;
                     fObj.insert("name", tc.name);
                     QJsonDocument argsDoc = QJsonDocument::fromJson(tc.arguments.toUtf8());
@@ -59,11 +69,11 @@ namespace llm::protocol::ollama {
             msgsArray.append(msgObj);
         }
         bodyObj.insert("messages", msgsArray);
-        if (request.useDeepThinking) {
+        if (options.thinkingEnabled) {
             bodyObj.insert("think", true);
         }
 
-        if (request.tools.has_value() && !request.tools->isEmpty()) {
+        if (options.toolsEnabled && request.tools.has_value() && !request.tools->isEmpty()) {
             QJsonArray toolsArr;
             for (const auto &tool : request.tools.value()) {
                 QJsonObject toolObj;
@@ -80,11 +90,11 @@ namespace llm::protocol::ollama {
 
         // options
         QJsonObject optionsObj;
-        if (request.temperature.has_value()) {
-            optionsObj.insert("temperature", request.temperature.value());
+        if (options.temperature.has_value()) {
+            optionsObj.insert("temperature", options.temperature.value());
         }
-        if (request.maxTokens.has_value()) {
-            optionsObj.insert("num_predict", request.maxTokens.value());
+        if (options.maxOutputTokens.has_value()) {
+            optionsObj.insert("num_predict", options.maxOutputTokens.value());
         }
         if (!optionsObj.isEmpty()) {
             bodyObj.insert("options", optionsObj);
@@ -162,9 +172,13 @@ namespace llm::protocol::ollama {
 
     network::HttpRequest OllamaProtocolAdapter::buildListModelsRequest(const domain::model::ModelProvider &provider) const {
         network::HttpRequest netReq;
-        QString baseUrl = provider.baseUrl.isEmpty() ? "http://localhost:11434" : provider.baseUrl;
+        QString baseUrl = provider.baseUrl.isEmpty() ? QStringLiteral("http://localhost:11434") : provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        netReq.url = baseUrl + "/api/tags";
+        if (baseUrl.endsWith(QStringLiteral("/api"))) {
+            netReq.url = baseUrl + "/tags";
+        } else {
+            netReq.url = baseUrl + "/api/tags";
+        }
         netReq.method = network::HttpMethod::Get;
         netReq.timeoutMs = provider.timeoutMs;
 

@@ -10,14 +10,19 @@ namespace llm::protocol::openai_responses {
     OpenAIResponsesAdapter::~OpenAIResponsesAdapter() = default;
 
     network::HttpRequest OpenAIResponsesAdapter::buildChatRequest(
-        const domain::model::ModelProvider &provider,
-        const domain::llm::ChatRequest &request) const {
+        const domain::model::ResolvedModel &model,
+        const domain::llm::ChatRequest &request,
+        const domain::llm::ResolvedChatOptions &options) const {
         
+        const auto &provider = model.provider;
         network::HttpRequest netReq;
         QString baseUrl = provider.baseUrl.isEmpty() ? "https://api.openai.com" : provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        
-        netReq.url = baseUrl + "/v1/responses";
+        if (baseUrl.endsWith(QStringLiteral("/v1"))) {
+            netReq.url = baseUrl + "/responses";
+        } else {
+            netReq.url = baseUrl + "/v1/responses";
+        }
         netReq.method = network::HttpMethod::Post;
         netReq.timeoutMs = provider.timeoutMs;
 
@@ -67,7 +72,7 @@ namespace llm::protocol::openai_responses {
         }
         bodyObj.insert("input", inputArray);
 
-        if (request.tools.has_value() && !request.tools->isEmpty()) {
+        if (options.toolsEnabled && request.tools.has_value() && !request.tools->isEmpty()) {
             QJsonArray toolsArr;
             for (const auto &tool : request.tools.value()) {
                 QJsonObject toolObj;
@@ -79,20 +84,24 @@ namespace llm::protocol::openai_responses {
             }
             bodyObj.insert("tools", toolsArr);
         }
-        if (request.useWebSearch) {
+        if (options.webSearchEnabled) {
             QJsonArray tools = bodyObj.value("tools").toArray();
             tools.append(QJsonObject{{"type", "web_search_preview"}});
             bodyObj.insert("tools", tools);
         }
-        if (request.useDeepThinking) {
-            bodyObj.insert("reasoning", QJsonObject{{"effort", request.reasoningEffort.isEmpty() ? QStringLiteral("medium") : request.reasoningEffort}});
+        if (options.thinkingEnabled) {
+            QJsonObject reasoning;
+            if (!options.reasoningEffort.isEmpty()) {
+                reasoning.insert("effort", options.reasoningEffort);
+            }
+            bodyObj.insert("reasoning", reasoning);
         }
 
-        if (request.temperature.has_value()) {
-            bodyObj.insert("temperature", request.temperature.value());
+        if (options.temperature.has_value()) {
+            bodyObj.insert("temperature", options.temperature.value());
         }
-        if (request.maxTokens.has_value()) {
-            bodyObj.insert("max_output_tokens", request.maxTokens.value());
+        if (options.maxOutputTokens.has_value()) {
+            bodyObj.insert("max_output_tokens", options.maxOutputTokens.value());
         }
 
         QJsonDocument doc(bodyObj);
@@ -196,7 +205,11 @@ namespace llm::protocol::openai_responses {
         network::HttpRequest netReq;
         QString baseUrl = provider.baseUrl.isEmpty() ? "https://api.openai.com" : provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        netReq.url = baseUrl + "/v1/models";
+        if (baseUrl.endsWith(QStringLiteral("/v1"))) {
+            netReq.url = baseUrl + "/models";
+        } else {
+            netReq.url = baseUrl + "/v1/models";
+        }
         netReq.method = network::HttpMethod::Get;
         netReq.timeoutMs = provider.timeoutMs;
 

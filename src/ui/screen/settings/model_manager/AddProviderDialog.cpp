@@ -86,14 +86,14 @@ namespace ui::screen::settings::model_manager {
 
         int typeIdx = m_typeCombo ? m_typeCombo->currentIndex() : 0;
         switch (typeIdx) {
-            case 0: provider.type = domain::model::ProviderType::OpenAIChatCompletionsCompatible; break;
-            case 1: provider.type = domain::model::ProviderType::OpenAIResponses; break;
-            case 2: provider.type = domain::model::ProviderType::Anthropic; break;
-            case 3: provider.type = domain::model::ProviderType::GoogleGemini; break;
-            case 4: provider.type = domain::model::ProviderType::Ollama; break;
-            case 5: provider.type = domain::model::ProviderType::AzureOpenAI; break;
-            case 6: provider.type = domain::model::ProviderType::AmazonBedrock; break;
-            default: provider.type = domain::model::ProviderType::OpenAIChatCompletionsCompatible; break;
+            case 0: provider.protocol = domain::model::ProtocolType::OpenAIChatCompletions; break;
+            case 1: provider.protocol = domain::model::ProtocolType::OpenAIResponses; break;
+            case 2: provider.protocol = domain::model::ProtocolType::AnthropicMessages; break;
+            case 3: provider.protocol = domain::model::ProtocolType::GeminiGenerateContent; break;
+            case 4: provider.protocol = domain::model::ProtocolType::OllamaChat; break;
+            case 5: provider.protocol = domain::model::ProtocolType::AzureOpenAI; break;
+            case 6: provider.protocol = domain::model::ProtocolType::AmazonBedrock; break;
+            default: provider.protocol = domain::model::ProtocolType::OpenAIChatCompletions; break;
         }
 
         provider.baseUrl = m_urlEdit ? m_urlEdit->text().trimmed() : QString();

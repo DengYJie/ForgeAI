@@ -11,6 +11,8 @@ namespace llm::protocol::openai_responses {
     void OpenAIResponsesStreamParser::reset() {
         m_buffer.clear();
         m_currentEventType.clear();
+        m_itemIdToCallId.clear();
+        m_currentCallId.clear();
         m_isFinished = false;
     }
 
@@ -96,21 +98,47 @@ namespace llm::protocol::openai_responses {
             if (obj.contains("item") && obj.value("item").isObject()) {
                 QJsonObject itemObj = obj.value("item").toObject();
                 if (itemObj.value("type").toString() == "function_call") {
+                    QString itemId = itemObj.value("id").toString();
                     QString callId = itemObj.value("call_id").toString();
-                    if (callId.isEmpty()) callId = itemObj.value("id").toString();
+                    if (callId.isEmpty()) callId = itemId;
+                    if (!itemId.isEmpty()) m_itemIdToCallId[itemId] = callId;
+                    m_currentCallId = callId;
                     QString name = itemObj.value("name").toString();
                     events.append(domain::llm::EventToolCallStarted{callId, name});
                 }
             }
         } else if (type == "response.function_call_arguments.delta") {
+            QString itemId = obj.value("item_id").toString();
             QString callId = obj.value("call_id").toString();
+            if (callId.isEmpty() && m_itemIdToCallId.contains(itemId)) {
+                callId = m_itemIdToCallId.value(itemId);
+            }
+            if (callId.isEmpty()) callId = m_currentCallId;
             QString delta = obj.value("delta").toString();
             if (!delta.isEmpty()) {
                 events.append(domain::llm::EventToolCallDelta{callId, delta});
             }
         } else if (type == "response.function_call_arguments.done") {
+            QString itemId = obj.value("item_id").toString();
             QString callId = obj.value("call_id").toString();
+            if (callId.isEmpty() && m_itemIdToCallId.contains(itemId)) {
+                callId = m_itemIdToCallId.value(itemId);
+            }
+            if (callId.isEmpty()) callId = m_currentCallId;
             events.append(domain::llm::EventToolCallFinished{callId});
+        } else if (type == "response.output_item.done") {
+            if (obj.contains("item") && obj.value("item").isObject()) {
+                QJsonObject itemObj = obj.value("item").toObject();
+                if (itemObj.value("type").toString() == "function_call") {
+                    QString itemId = itemObj.value("id").toString();
+                    QString callId = itemObj.value("call_id").toString();
+                    if (callId.isEmpty() && m_itemIdToCallId.contains(itemId)) {
+                        callId = m_itemIdToCallId.value(itemId);
+                    }
+                    if (callId.isEmpty()) callId = m_currentCallId;
+                    events.append(domain::llm::EventToolCallFinished{callId});
+                }
+            }
         } else if (type == "response.completed") {
             if (obj.contains("response") && obj.value("response").isObject()) {
                 QJsonObject respObj = obj.value("response").toObject();

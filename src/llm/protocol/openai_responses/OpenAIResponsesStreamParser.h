@@ -24,6 +24,8 @@ namespace llm::protocol::openai_responses {
 
         QByteArray m_buffer;
         QString m_currentEventType;
+        QHash<QString, QString> m_itemIdToCallId;
+        QString m_currentCallId;
         bool m_isFinished = false;
     };
 

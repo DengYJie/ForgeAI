@@ -10,14 +10,20 @@ namespace llm::protocol::openai {
     OpenAIChatCompletionsAdapter::~OpenAIChatCompletionsAdapter() = default;
 
     network::HttpRequest OpenAIChatCompletionsAdapter::buildChatRequest(
-        const domain::model::ModelProvider &provider,
-        const domain::llm::ChatRequest &request) const {
+        const domain::model::ResolvedModel &model,
+        const domain::llm::ChatRequest &request,
+        const domain::llm::ResolvedChatOptions &options) const {
         
+        const auto &provider = model.provider;
         network::HttpRequest netReq;
         // 拼接 endpoint
         QString baseUrl = provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        netReq.url = baseUrl + "/v1/chat/completions";
+        if (baseUrl.endsWith(QStringLiteral("/v1"))) {
+            netReq.url = baseUrl + "/chat/completions";
+        } else {
+            netReq.url = baseUrl + "/v1/chat/completions";
+        }
         netReq.method = network::HttpMethod::Post;
         netReq.timeoutMs = provider.timeoutMs;
 
@@ -48,6 +54,9 @@ namespace llm::protocol::openai {
             if (msg.role == domain::MessageRole::Tool && !msg.toolCallId.isEmpty()) {
                 msgObj.insert("tool_call_id", msg.toolCallId);
             }
+            if (msg.role == domain::MessageRole::Assistant && !msg.reasoningContent.isEmpty()) {
+                msgObj.insert("reasoning_content", msg.reasoningContent);
+            }
             if (msg.role == domain::MessageRole::Assistant && msg.toolCalls.has_value() && !msg.toolCalls->isEmpty()) {
                 QJsonArray tcArr;
                 for (const auto &tc : msg.toolCalls.value()) {
@@ -67,7 +76,7 @@ namespace llm::protocol::openai {
         }
         bodyObj.insert("messages", msgsArray);
 
-        if (request.tools.has_value() && !request.tools->isEmpty()) {
+        if (options.toolsEnabled && request.tools.has_value() && !request.tools->isEmpty()) {
             QJsonArray toolsArr;
             for (const auto &tool : request.tools.value()) {
                 QJsonObject toolObj;
@@ -85,14 +94,14 @@ namespace llm::protocol::openai {
         if (request.stream.value_or(true)) {
             bodyObj.insert("stream", true);
         }
-        if (request.temperature.has_value()) {
-            bodyObj.insert("temperature", request.temperature.value());
+        if (options.temperature.has_value()) {
+            bodyObj.insert("temperature", options.temperature.value());
         }
-        if (request.maxTokens.has_value()) {
-            bodyObj.insert("max_tokens", request.maxTokens.value());
+        if (options.maxOutputTokens.has_value()) {
+            bodyObj.insert("max_tokens", options.maxOutputTokens.value());
         }
-        if (request.useDeepThinking || (!request.reasoningEffort.isEmpty() && request.reasoningEffort != QStringLiteral("none"))) {
-            bodyObj.insert("reasoning_effort", request.reasoningEffort.isEmpty() ? QStringLiteral("medium") : request.reasoningEffort);
+        if (!options.reasoningEffort.isEmpty() && options.reasoningEffort != QStringLiteral("none")) {
+            bodyObj.insert("reasoning_effort", options.reasoningEffort);
         }
 
         QJsonDocument doc(bodyObj);
@@ -207,7 +216,11 @@ namespace llm::protocol::openai {
         network::HttpRequest netReq;
         QString baseUrl = provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        netReq.url = baseUrl + "/v1/models";
+        if (baseUrl.endsWith(QStringLiteral("/v1"))) {
+            netReq.url = baseUrl + "/models";
+        } else {
+            netReq.url = baseUrl + "/v1/models";
+        }
         netReq.method = network::HttpMethod::Get;
         netReq.timeoutMs = provider.timeoutMs;
 

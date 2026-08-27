@@ -5,23 +5,58 @@
 
 namespace data::importer {
 
-    domain::model::ProviderType ModelsDevImporter::mapNpmToProviderType(QStringView npm) {
-        if (npm == u"@ai-sdk/anthropic") {
-            return domain::model::ProviderType::Anthropic;
+    static const QHash<QString, domain::model::ProtocolType> kProviderOverrides{
+        {QStringLiteral("openai"), domain::model::ProtocolType::OpenAIResponses},
+        {QStringLiteral("deepseek"), domain::model::ProtocolType::OpenAIResponses},
+        {QStringLiteral("ollama"), domain::model::ProtocolType::OllamaChat}
+    };
+
+    domain::model::ProtocolType ModelsDevImporter::resolveProtocol(
+        const QString &providerId,
+        const QJsonObject &providerObj
+    ) {
+        // 1. ForgeAI 显式内置 Provider Override 优先
+        if (const auto it = kProviderOverrides.constFind(providerId); it != kProviderOverrides.cend()) {
+            return it.value();
         }
-        if (npm == u"@ai-sdk/google") {
-            return domain::model::ProviderType::GoogleGemini;
+
+        // 2. models.dev npm 适配器家族映射（作为 AdapterFamilyHint）
+        const QString npm = providerObj.value(QStringLiteral("npm")).toString();
+        if (npm == u"@ai-sdk/anthropic" || npm == u"@ai-sdk/google-vertex/anthropic") {
+            return domain::model::ProtocolType::AnthropicMessages;
+        }
+        if (npm == u"@ai-sdk/google" || npm == u"@ai-sdk/google-vertex") {
+            return domain::model::ProtocolType::GeminiGenerateContent;
+        }
+        if (npm == u"@ai-sdk/ollama") {
+            return domain::model::ProtocolType::OllamaChat;
         }
         if (npm == u"@ai-sdk/azure") {
-            return domain::model::ProviderType::AzureOpenAI;
+            return domain::model::ProtocolType::AzureOpenAI;
         }
         if (npm == u"@ai-sdk/amazon-bedrock") {
-            return domain::model::ProviderType::AmazonBedrock;
+            return domain::model::ProtocolType::AmazonBedrock;
         }
-        if (npm == u"@ai-sdk/openai") {
-            return domain::model::ProviderType::OpenAIResponses;
+        if (npm == u"@ai-sdk/openai-compatible" ||
+            npm == u"@ai-sdk/openai" ||
+            npm == u"@openrouter/ai-sdk-provider" ||
+            npm == u"@ai-sdk/groq" ||
+            npm == u"@ai-sdk/xai" ||
+            npm == u"@ai-sdk/togetherai" ||
+            npm == u"@ai-sdk/deepinfra" ||
+            npm == u"@ai-sdk/cerebras" ||
+            npm == u"@ai-sdk/mistral" ||
+            npm == u"@ai-sdk/perplexity" ||
+            npm == u"@aihubmix/ai-sdk-provider" ||
+            npm == u"@saladtechnologies-oss/ai-sdk-provider" ||
+            npm == u"ai-gateway-provider" ||
+            npm == u"merge-gateway-ai-sdk-provider" ||
+            npm == u"venice-ai-sdk-provider") {
+            return domain::model::ProtocolType::OpenAIChatCompletions;
         }
-        return domain::model::ProviderType::OpenAIChatCompletionsCompatible;
+
+        // 3. 真正未知/不支持的专属包（如 @ai-sdk/cohere、gitlab-ai-provider 等）坚决返回 Unknown
+        return domain::model::ProtocolType::Unknown;
     }
 
     domain::model::CanonicalModel ModelsDevImporter::parseCanonicalModel(
@@ -91,14 +126,14 @@ namespace data::importer {
         provider.name = providerObj.value(QStringLiteral("name")).toString(id);
         provider.docUrl = providerObj.value(QStringLiteral("doc")).toString();
         provider.baseUrl = providerObj.value(QStringLiteral("api")).toString();
+        provider.sdkPackage = providerObj.value(QStringLiteral("npm")).toString();
 
         QJsonArray envArray = providerObj.value(QStringLiteral("env")).toArray();
         if (!envArray.isEmpty()) {
             provider.envVarName = envArray.first().toString();
         }
 
-        QString npm = providerObj.value(QStringLiteral("npm")).toString();
-        provider.type = mapNpmToProviderType(npm);
+        provider.protocol = resolveProtocol(id, providerObj);
         provider.timeoutMs = 60000;
         provider.isEnabled = false;
         provider.isCustom = false;
@@ -111,12 +146,18 @@ namespace data::importer {
         const QString &providerId,
         const QString &providerName,
         const QString &modelKey,
-        const QJsonObject &modelObj
+        const QJsonObject &modelObj,
+        const QHash<QString, QString> &canonicalKeyToId
     ) {
+        Q_UNUSED(providerName);
         domain::model::ProviderModel binding;
         binding.providerId = providerId;
         binding.remoteModelId = modelObj.value(QStringLiteral("id")).toString(modelKey);
-        binding.canonicalModelId = binding.remoteModelId;
+        if (canonicalKeyToId.contains(modelKey)) {
+            binding.canonicalModelId = canonicalKeyToId.value(modelKey);
+        } else {
+            binding.canonicalModelId = binding.remoteModelId;
+        }
 
         QJsonObject costObj = modelObj.value(QStringLiteral("cost")).toObject();
         binding.pricing.inputPrice = costObj.value(QStringLiteral("input")).toDouble(0.0);
@@ -138,6 +179,34 @@ namespace data::importer {
         binding.reasoningField = interleavedObj.value(QStringLiteral("field")).toString();
         const QJsonArray reasoningOptions = modelObj.value(QStringLiteral("reasoning_options")).toArray();
         binding.reasoningOptionsJson = QString::fromUtf8(QJsonDocument(reasoningOptions).toJson(QJsonDocument::Compact));
+
+        // 解析结构化推理支持
+        if (modelObj.value(QStringLiteral("reasoning")).toBool(false) || !reasoningOptions.isEmpty()) {
+            domain::model::ReasoningSupport supp;
+            supp.supported = true;
+            for (const auto &optVal : reasoningOptions) {
+                if (optVal.isObject()) {
+                    QJsonObject optObj = optVal.toObject();
+                    QString typeStr = optObj.value(QStringLiteral("type")).toString();
+                    if (typeStr == QStringLiteral("effort")) {
+                        for (const auto &e : optObj.value(QStringLiteral("effort")).toArray()) {
+                            supp.effortLevels.append(e.toString());
+                        }
+                    } else if (typeStr == QStringLiteral("budget")) {
+                        if (optObj.contains(QStringLiteral("min"))) {
+                            supp.minBudgetTokens = optObj.value(QStringLiteral("min")).toInt();
+                        }
+                        if (optObj.contains(QStringLiteral("max"))) {
+                            supp.maxBudgetTokens = optObj.value(QStringLiteral("max")).toInt();
+                        }
+                        if (optObj.contains(QStringLiteral("default"))) {
+                            supp.defaultBudgetTokens = optObj.value(QStringLiteral("default")).toInt();
+                        }
+                    }
+                }
+            }
+            binding.reasoningSupport = supp;
+        }
 
         binding.isEnabled = true;
         binding.isCustom = false;
@@ -161,7 +230,7 @@ namespace data::importer {
     }
 
     std::pair<QList<domain::model::ModelProvider>, QList<domain::model::ProviderModel>>
-    ModelsDevImporter::parseProvidersAndBindings(const QJsonObject &apiRoot) {
+    ModelsDevImporter::parseProvidersAndBindings(const QJsonObject &apiRoot, const QHash<QString, QString> &canonicalKeyToId) {
         QList<domain::model::ModelProvider> providers;
         QList<domain::model::ProviderModel> providerModels;
         providers.reserve(apiRoot.size());
@@ -177,7 +246,7 @@ namespace data::importer {
                 QString modelKey = modelIt.key();
                 QJsonObject modelObj = modelIt.value().toObject();
 
-                auto binding = parseProviderModel(providerId, provider.name, modelKey, modelObj);
+                auto binding = parseProviderModel(providerId, provider.name, modelKey, modelObj, canonicalKeyToId);
                 providerModels.append(binding);
             }
 
@@ -190,9 +259,18 @@ namespace data::importer {
     ModelsDevImportResult ModelsDevImporter::parseAll(const QJsonObject &apiRoot, const QJsonObject &modelsRoot) {
         ModelsDevImportResult result;
 
-        result.canonicalModels = parseCanonicalModels(modelsRoot);
+        QHash<QString, QString> canonicalKeyToId;
+        result.canonicalModels.reserve(modelsRoot.size());
 
-        auto [providers, bindings] = parseProvidersAndBindings(apiRoot);
+        for (auto it = modelsRoot.begin(); it != modelsRoot.end(); ++it) {
+            QString modelKey = it.key();
+            QJsonObject modelObj = it.value().toObject();
+            auto model = parseCanonicalModel(modelKey, modelObj);
+            canonicalKeyToId.insert(modelKey, model.id);
+            result.canonicalModels.insert(model.id, model);
+        }
+
+        auto [providers, bindings] = parseProvidersAndBindings(apiRoot, canonicalKeyToId);
         result.providers = std::move(providers);
         result.providerModels = std::move(bindings);
 

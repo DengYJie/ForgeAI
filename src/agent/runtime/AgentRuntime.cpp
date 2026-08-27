@@ -141,7 +141,7 @@ namespace agent::runtime {
         });
 
         qInfo().noquote() << QStringLiteral("[AgentRuntime] === startRun ===\n  -> sessionId: %1\n  -> projectId: %2\n  -> provider: %3\n  -> model: %4\n  -> prompt: %5")
-            .arg(context.sessionId, context.projectId.toString(QUuid::WithoutBraces), context.provider.id, context.modelId, trimmed);
+            .arg(context.sessionId, context.projectId.toString(QUuid::WithoutBraces), context.model.provider.id, context.model.requestModelId(), trimmed);
 
         setState(domain::agent::AgentRunStatus::Preparing);
 
@@ -183,7 +183,7 @@ namespace agent::runtime {
         }
 
         qInfo().noquote() << QStringLiteral("[AgentRuntime] startNextModelRequest -> Round: %1, Session: %2")
-            .arg(m_state.round).arg(m_context.sessionId);
+            .arg(QString::number(m_state.round), m_context.sessionId);
 
         setState(domain::agent::AgentRunStatus::CallingModel);
 
@@ -212,7 +212,7 @@ namespace agent::runtime {
             m_timeoutTimer->start(m_context.policy.timeoutMs);
         }
 
-        m_currentOp = m_chatGateway->sendRequest(m_context.provider, request);
+        m_currentOp = m_chatGateway->sendRequest(m_context.model, request);
         if (!m_currentOp) {
             if (m_timeoutTimer) {
                 m_timeoutTimer->stop();
@@ -235,13 +235,14 @@ namespace agent::runtime {
         const QList<domain::conversation::Message>& history
     ) const {
         domain::llm::ChatRequest request;
-        request.model = m_context.modelId.isEmpty() ? m_context.provider.id : m_context.modelId;
+        request.model = m_context.model.requestModelId();
         request.stream = true;
         request.useWebSearch = m_context.useWebSearch;
         request.useDeepThinking = m_context.useDeepThinking;
         request.reasoningEffort = m_context.reasoningEffort;
 
-        if (m_toolRegistry) {
+        const bool supportsToolCalling = m_context.model.effectiveCapabilities().testFlag(domain::model::ModelCapability::ToolCalling);
+        if (supportsToolCalling && m_toolRegistry) {
             const auto allDefs = m_toolRegistry->definitions();
             QList<domain::agent::ToolDefinition> defs;
             if (!m_context.enabledTools.isEmpty()) {
@@ -274,6 +275,9 @@ namespace agent::runtime {
                 if (block.isText()) {
                     if (!llmMsg.content.isEmpty()) llmMsg.content += QLatin1Char('\n');
                     llmMsg.content += std::get<domain::conversation::TextBlock>(block.payload).text;
+                } else if (block.isThought()) {
+                    if (!llmMsg.reasoningContent.isEmpty()) llmMsg.reasoningContent += QLatin1Char('\n');
+                    llmMsg.reasoningContent += std::get<domain::conversation::ThoughtBlock>(block.payload).thought;
                 } else if (block.isToolCall()) {
                     llmMsg.toolCalls = std::get<domain::conversation::ToolCallBlock>(block.payload).calls;
                     for (const auto& call : llmMsg.toolCalls.value()) {
@@ -284,7 +288,7 @@ namespace agent::runtime {
                 }
             }
 
-            if (!llmMsg.content.isEmpty() || llmMsg.toolCalls.has_value()) {
+            if (!llmMsg.content.isEmpty() || !llmMsg.reasoningContent.isEmpty() || llmMsg.toolCalls.has_value()) {
                 request.messages.append(llmMsg);
             }
 
@@ -298,8 +302,9 @@ namespace agent::runtime {
             }
         }
 
+        const int toolsCount = request.tools.has_value() ? static_cast<int>(request.tools->size()) : 0;
         qInfo().noquote() << QStringLiteral("[AgentRuntime] buildChatRequest -> model: %1, tools: %2, messages: %3")
-            .arg(request.model).arg(request.tools.size()).arg(request.messages.size());
+            .arg(request.model, QString::number(toolsCount), QString::number(request.messages.size()));
 
         return request;
     }
@@ -599,7 +604,7 @@ namespace agent::runtime {
             return;
         }
 
-        qInfo().noquote() << QStringLiteral("[AgentRuntime] processExecutableToolCalls -> Executing %1 tool calls").arg(executableCalls.size());
+        qInfo().noquote() << QStringLiteral("[AgentRuntime] processExecutableToolCalls -> Executing %1 tool calls").arg(QString::number(executableCalls.size()));
         for (const auto& call : executableCalls) {
             qInfo().noquote() << QStringLiteral("  -> Tool [%1] id=%2 args=%3").arg(call.name, call.id, call.arguments);
         }
@@ -688,7 +693,8 @@ namespace agent::runtime {
         }
 
         qInfo().noquote() << QStringLiteral("[AgentRuntime] onToolOperationFinished -> id=%1, isError=%2, outputLen=%3, snippet: %4")
-            .arg(toolCallId).arg(safeResult.isError).arg(safeResult.content.length()).arg(safeResult.content.left(80).replace('\n', ' '));
+            .arg(toolCallId, safeResult.isError ? QStringLiteral("true") : QStringLiteral("false"),
+                 QString::number(safeResult.content.length()), safeResult.content.left(80).replace('\n', ' '));
 
         m_pendingToolResults.append(safeResult);
         m_state.results = m_pendingToolResults;
@@ -757,14 +763,14 @@ namespace agent::runtime {
         if (m_state.round < m_context.policy.maxToolRounds) {
             ++m_state.round;
             qInfo().noquote() << QStringLiteral("[AgentRuntime] Continuing to Round %1 (max %2)...")
-                .arg(m_state.round).arg(m_context.policy.maxToolRounds);
+                .arg(QString::number(m_state.round), QString::number(m_context.policy.maxToolRounds));
             setState(domain::agent::AgentRunStatus::Continuing);
             QTimer::singleShot(0, this, [this]() {
                 startNextModelRequest();
             });
         } else {
             qInfo().noquote() << QStringLiteral("[AgentRuntime] Reached maxToolRounds (%1), completing run.")
-                .arg(m_context.policy.maxToolRounds);
+                .arg(QString::number(m_context.policy.maxToolRounds));
             cleanupCurrentOp();
             setState(domain::agent::AgentRunStatus::Completed);
             saveCheckpoint();
@@ -812,7 +818,8 @@ namespace agent::runtime {
                     m_timeoutTimer->stop();
                 }
                 qInfo().noquote() << QStringLiteral("[AgentRuntime] EventFinished -> reason: %1, replyLen: %2, thoughtLen: %3, toolCalls: %4")
-                    .arg(arg.finishReason).arg(m_replyBuffer.length()).arg(m_thoughtBuffer.length()).arg(m_activeToolCalls.size());
+                    .arg(arg.finishReason, QString::number(m_replyBuffer.length()),
+                         QString::number(m_thoughtBuffer.length()), QString::number(m_activeToolCalls.size()));
                 const auto assistantMsg = makeAssistantMessage();
                 saveMessage(assistantMsg);
                 emit replyGenerated(m_context.sessionId, assistantMsg);

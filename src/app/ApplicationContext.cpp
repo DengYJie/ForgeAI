@@ -66,23 +66,23 @@ namespace app {
         
         // 注册各协议适配器
         m_protocolRegistry->registerAdapter(
-            domain::model::ProviderType::OpenAIChatCompletionsCompatible,
+            domain::model::ProtocolType::OpenAIChatCompletions,
             std::make_shared<llm::protocol::openai::OpenAIChatCompletionsAdapter>()
         );
         m_protocolRegistry->registerAdapter(
-            domain::model::ProviderType::OpenAIResponses,
+            domain::model::ProtocolType::OpenAIResponses,
             std::make_shared<llm::protocol::openai_responses::OpenAIResponsesAdapter>()
         );
         m_protocolRegistry->registerAdapter(
-            domain::model::ProviderType::Anthropic,
+            domain::model::ProtocolType::AnthropicMessages,
             std::make_shared<llm::protocol::anthropic::AnthropicProtocolAdapter>()
         );
         m_protocolRegistry->registerAdapter(
-            domain::model::ProviderType::GoogleGemini,
+            domain::model::ProtocolType::GeminiGenerateContent,
             std::make_shared<llm::protocol::gemini::GeminiProtocolAdapter>()
         );
         m_protocolRegistry->registerAdapter(
-            domain::model::ProviderType::Ollama,
+            domain::model::ProtocolType::OllamaChat,
             std::make_shared<llm::protocol::ollama::OllamaProtocolAdapter>()
         );
 

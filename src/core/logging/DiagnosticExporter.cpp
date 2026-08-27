@@ -155,7 +155,8 @@ namespace core::logging {
             QJsonObject obj;
             obj[QStringLiteral("id")] = p.id;
             obj[QStringLiteral("name")] = p.name;
-            obj[QStringLiteral("type")] = static_cast<int>(p.type);
+            obj[QStringLiteral("protocol")] = static_cast<int>(p.protocol);
+            obj[QStringLiteral("sdkPackage")] = p.sdkPackage;
             obj[QStringLiteral("isEnabled")] = p.isEnabled;
             obj[QStringLiteral("isCustom")] = p.isCustom;
             obj[QStringLiteral("origin")] = p.origin == domain::model::DataOrigin::User ? QStringLiteral("User") : QStringLiteral("BuiltIn");

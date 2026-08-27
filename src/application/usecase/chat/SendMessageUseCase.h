@@ -63,7 +63,7 @@ namespace application::usecase::chat {
         void onChatEventReceived(const domain::llm::ChatEvent &event);
 
     private:
-        void startRequest(const domain::model::ModelProvider& provider, const domain::llm::ChatRequest& request);
+        void startRequest(const domain::model::ResolvedModel& model, const domain::llm::ChatRequest& request);
         domain::llm::ChatRequest requestForHistory(const QList<domain::conversation::Message>& history) const;
         domain::conversation::Message makeAssistantMessage() const;
         void saveMessage(const domain::conversation::Message& message);
@@ -80,7 +80,7 @@ namespace application::usecase::chat {
         
         QString m_replyBuffer;
         QString m_thoughtBuffer;
-        domain::model::ModelProvider m_currentProvider;
+        domain::model::ResolvedModel m_currentModel;
         domain::llm::ChatRequest m_requestTemplate;
         QString m_systemPrompt;
         QHash<QString, QList<domain::conversation::Message>> m_transientHistories;

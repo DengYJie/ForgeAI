@@ -19,6 +19,7 @@ namespace domain::llm {
         // 工具调用与结果字段
         QString name; ///< Tool 的名称或调用函数名
         QString toolCallId; ///< Tool 调用的关联 ID
+        QString reasoningContent; ///< Assistant 消息的深度思考链内容 (如 DeepSeek/Qwen 的 reasoning_content)
         std::optional<QList<domain::agent::ToolCall>> toolCalls; ///< Assistant 消息包含的工具调用指令
 
         bool operator==(const ChatMessage &other) const = default;

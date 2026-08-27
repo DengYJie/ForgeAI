@@ -360,6 +360,8 @@ using widget::basic::LeftAlignedButton;
             if (!matches.isEmpty()) m_sessionTree->setCurrentIndex(matches.first());
         }
         m_pane->messageList()->syncMessages(state.messages);
+        m_pane->statusLabel()->setText(state.statusMessage);
+        m_pane->statusLabel()->setVisible(!state.statusMessage.isEmpty());
         m_pane->inputBox()->setEnabled(!state.currentSessionId.isEmpty());
         m_pane->inputBox()->setSendState(state.isProcessing ? ui::widget::chat::ChatInputBox::SendState::Generating : ui::widget::chat::ChatInputBox::SendState::Idle);
         m_pane->inputBox()->setModelPresentation(state.currentModelName, state.reasoningEffort);

@@ -64,10 +64,10 @@ public:
     }
 
     application::ports::IChatOperation* sendRequest(
-        const domain::model::ModelProvider& provider,
+        const domain::model::ResolvedModel& model,
         const domain::llm::ChatRequest& request
     ) override {
-        Q_UNUSED(provider);
+        Q_UNUSED(model);
         Q_UNUSED(request);
 
         QList<domain::llm::ChatEvent> events;

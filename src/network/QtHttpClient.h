@@ -22,6 +22,7 @@ namespace network {
 
     private:
         QNetworkReply *m_reply;
+        QByteArray m_receivedBuffer;
         bool m_isCancelled = false;
     };
 

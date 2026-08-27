@@ -10,7 +10,7 @@ namespace ui::screen::settings::model_manager {
     enum ProviderRoles {
         ProviderIdRole = Qt::UserRole + 1,
         ProviderNameRole,
-        ProviderTypeRole,
+        ProviderProtocolRole,
         ProviderEnabledRole,
         ProviderIconPathRole
     };

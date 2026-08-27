@@ -116,6 +116,10 @@ namespace llm::mcp {
     }
 
     void StdioMcpTransport::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+        if (m_process) {
+            onReadyReadStandardOutput();
+            onReadyReadStandardError();
+        }
         core::logging::LoggingService::instance().info(core::logging::Category::McpTransport, QStringLiteral("MCP 进程退出"), {
             {QStringLiteral("command"), m_config.command},
             {QStringLiteral("exitCode"), QString::number(exitCode)},

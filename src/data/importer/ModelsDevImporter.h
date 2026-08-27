@@ -46,7 +46,7 @@ namespace data::importer {
          * @brief 解析 api.json 根对象，提取所有 ModelProvider 与 ProviderModel 挂载
          */
         static std::pair<QList<domain::model::ModelProvider>, QList<domain::model::ProviderModel>>
-        parseProvidersAndBindings(const QJsonObject &apiRoot);
+        parseProvidersAndBindings(const QJsonObject &apiRoot, const QHash<QString, QString> &canonicalKeyToId = {});
 
         /**
          * @brief 解析单个 Canonical 模型对象
@@ -65,13 +65,14 @@ namespace data::importer {
             const QString &providerId,
             const QString &providerName,
             const QString &modelKey,
-            const QJsonObject &modelObj
+            const QJsonObject &modelObj,
+            const QHash<QString, QString> &canonicalKeyToId = {}
         );
 
         /**
-         * @brief 将 models.dev npm 驱动包名映射到领域 ProviderType
+         * @brief 根据 providerId 和 models.dev 元数据解析对应的协议驱动类型
          */
-        static domain::model::ProviderType mapNpmToProviderType(QStringView npm);
+        static domain::model::ProtocolType resolveProtocol(const QString &providerId, const QJsonObject &providerObj);
     };
 
 } // namespace data::importer

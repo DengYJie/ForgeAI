@@ -10,14 +10,16 @@ namespace llm::protocol::gemini {
     GeminiProtocolAdapter::~GeminiProtocolAdapter() = default;
 
     network::HttpRequest GeminiProtocolAdapter::buildChatRequest(
-        const domain::model::ModelProvider &provider,
-        const domain::llm::ChatRequest &request) const {
+        const domain::model::ResolvedModel &model,
+        const domain::llm::ChatRequest &request,
+        const domain::llm::ResolvedChatOptions &options) const {
         
+        const auto &provider = model.provider;
         network::HttpRequest netReq;
-        QString baseUrl = provider.baseUrl.isEmpty() ? "https://generativelanguage.googleapis.com" : provider.baseUrl;
+        QString baseUrl = provider.baseUrl.isEmpty() ? QStringLiteral("https://generativelanguage.googleapis.com") : provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
         
-        netReq.url = QString("%1/v1beta/models/%2:streamGenerateContent?alt=sse").arg(baseUrl, request.model);
+        netReq.url = QStringLiteral("%1/v1beta/models/%2:streamGenerateContent?alt=sse").arg(baseUrl, request.model);
         netReq.method = network::HttpMethod::Post;
         netReq.timeoutMs = provider.timeoutMs;
 
@@ -120,7 +122,7 @@ namespace llm::protocol::gemini {
 
         bodyObj.insert("contents", contentsArray);
 
-        if (request.tools.has_value() && !request.tools->isEmpty()) {
+        if (options.toolsEnabled && request.tools.has_value() && !request.tools->isEmpty()) {
             QJsonArray toolsArr;
             QJsonObject toolItem;
             QJsonArray fnDecls;
@@ -138,18 +140,18 @@ namespace llm::protocol::gemini {
 
         // generationConfig
         QJsonObject genConfig;
-        if (request.temperature.has_value()) {
-            genConfig.insert("temperature", request.temperature.value());
+        if (options.temperature.has_value()) {
+            genConfig.insert("temperature", options.temperature.value());
         }
-        if (request.maxTokens.has_value()) {
-            genConfig.insert("maxOutputTokens", request.maxTokens.value());
+        if (options.maxOutputTokens.has_value()) {
+            genConfig.insert("maxOutputTokens", options.maxOutputTokens.value());
         }
-        if (request.useDeepThinking) {
-            const QString effort = request.reasoningEffort;
-            const int budget = effort == QStringLiteral("low") ? 1024
-                : effort == QStringLiteral("high") ? 8192
-                : effort == QStringLiteral("max") ? 16384 : 4096;
-            genConfig.insert("thinkingConfig", QJsonObject{{"thinkingBudget", budget}});
+        if (options.thinkingEnabled) {
+            QJsonObject thinkingConfig;
+            if (options.thinkingBudgetTokens.has_value()) {
+                thinkingConfig.insert("thinkingBudget", options.thinkingBudgetTokens.value());
+            }
+            genConfig.insert("thinkingConfig", thinkingConfig);
         }
         if (!genConfig.isEmpty()) {
             bodyObj.insert("generationConfig", genConfig);

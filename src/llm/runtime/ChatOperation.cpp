@@ -1,4 +1,5 @@
 #include "ChatOperation.h"
+#include "ChatRequestResolver.h"
 #include "RetryDecision.h"
 #include "core/logging/LoggingService.h"
 #include "core/logging/LogCategory.h"
@@ -10,7 +11,7 @@ namespace llm::runtime {
     ChatOperation::ChatOperation(
         std::shared_ptr<network::IHttpClient> httpClient,
         std::shared_ptr<protocol::IProtocolAdapter> adapter,
-        const domain::model::ModelProvider &provider,
+        const domain::model::ResolvedModel &model,
         const domain::llm::ChatRequest &request,
         const TimeoutPolicy &timeoutPolicy,
         const RetryPolicy &retryPolicy,
@@ -18,13 +19,13 @@ namespace llm::runtime {
         : application::ports::IChatOperation(parent)
         , m_httpClient(std::move(httpClient))
         , m_adapter(std::move(adapter))
-        , m_provider(provider)
+        , m_model(model)
         , m_request(request)
         , m_timeoutPolicy(timeoutPolicy)
         , m_retryPolicy(retryPolicy) {
         
         m_metrics.requestId = QStringLiteral("req_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
-        m_metrics.providerId = provider.id;
+        m_metrics.providerId = model.provider.id;
         m_metrics.modelId = request.model;
         m_metrics.createdAt = QDateTime::currentMSecsSinceEpoch();
 
@@ -87,7 +88,7 @@ namespace llm::runtime {
         err.code = cancelReasonToString(reason);
         err.message = QString("Request cancelled with reason: %1").arg(cancelReasonToString(reason));
         err.userMessage = QStringLiteral("已停止生成");
-        err.providerId = m_provider.id;
+        err.providerId = m_model.provider.id;
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
 
@@ -112,11 +113,13 @@ namespace llm::runtime {
             err.code = QStringLiteral("MissingDependencies");
             err.message = QStringLiteral("HttpClient or ProtocolAdapter is not available");
             err.userMessage = QStringLiteral("客户端配置异常，缺少请求依赖。");
+            err.providerId = m_model.provider.id;
             finalizeRequest(RequestState::Failed, err);
             return;
         }
 
         m_currentAttempt++;
+        stopAllTimers();
         setState(RequestState::Connecting);
 
         if (m_currentHttpOp) {
@@ -125,7 +128,8 @@ namespace llm::runtime {
             m_currentHttpOp = nullptr;
         }
 
-        auto httpReq = m_adapter->buildChatRequest(m_provider, m_request);
+        const auto options = ChatRequestResolver::resolve(m_model, m_request);
+        auto httpReq = m_adapter->buildChatRequest(m_model, m_request, options);
         httpReq.timeoutMs = m_timeoutPolicy.connectTimeoutMs;
 
         m_currentParser = m_adapter->createStreamParser();
@@ -143,7 +147,7 @@ namespace llm::runtime {
 
         core::logging::LoggingService::instance().info(core::logging::Category::LlmRequest, QStringLiteral("Chat request started"), {
             {QStringLiteral("req"), m_metrics.requestId},
-            {QStringLiteral("provider"), m_provider.id},
+            {QStringLiteral("provider"), m_model.provider.id},
             {QStringLiteral("model"), m_request.model},
             {QStringLiteral("stream"), m_request.stream ? QStringLiteral("true") : QStringLiteral("false")},
             {QStringLiteral("messages"), QString::number(m_request.messages.size())},
@@ -280,7 +284,7 @@ namespace llm::runtime {
         }
 
         err.httpStatus = httpStatusCode;
-        err.providerId = m_provider.id;
+        err.providerId = m_model.provider.id;
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
 
@@ -321,7 +325,7 @@ namespace llm::runtime {
         err.userMessage = QStringLiteral("等待大模型响应首字超时，请稍后重试。");
         err.retryable = true;
         err.suggestedAction = QStringLiteral("Retry");
-        err.providerId = m_provider.id;
+        err.providerId = m_model.provider.id;
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
 
@@ -366,7 +370,7 @@ namespace llm::runtime {
         err.message = QStringLiteral("Stream idle timeout after %1 ms").arg(m_timeoutPolicy.idleTimeoutMs);
         err.userMessage = QStringLiteral("流式输出长时间无数据中断，请重试。");
         err.suggestedAction = QStringLiteral("Retry");
-        err.providerId = m_provider.id;
+        err.providerId = m_model.provider.id;
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
 
@@ -384,7 +388,7 @@ namespace llm::runtime {
         err.code = QStringLiteral("OverallTimeout");
         err.message = QStringLiteral("Overall duration limit reached (%1 ms)").arg(m_timeoutPolicy.overallTimeoutMs);
         err.userMessage = QStringLiteral("会话生成耗时过长已超时。");
-        err.providerId = m_provider.id;
+        err.providerId = m_model.provider.id;
         err.modelId = m_request.model;
         err.requestId = m_metrics.requestId;
 

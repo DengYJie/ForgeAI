@@ -90,7 +90,7 @@ namespace data::repository {
             p.icon       = q.value(off + 2).toString();
             p.docUrl     = q.value(off + 3).toString();
             p.envVarName = q.value(off + 4).toString();
-            p.type       = static_cast<domain::model::ProviderType>(q.value(off + 5).toInt());
+            p.protocol   = static_cast<domain::model::ProtocolType>(q.value(off + 5).toInt());
             // base_url: user override 优先
             p.baseUrl    = q.value(off + 10).isNull() || q.value(off + 10).toString().isEmpty()
                              ? q.value(off + 6).toString()
@@ -115,7 +115,7 @@ namespace data::repository {
             p.id        = q.value(off + 0).toString();
             p.name      = q.value(off + 1).toString();
             p.icon      = q.value(off + 2).toString();
-            p.type      = static_cast<domain::model::ProviderType>(q.value(off + 3).toInt());
+            p.protocol  = static_cast<domain::model::ProtocolType>(q.value(off + 3).toInt());
             p.baseUrl   = q.value(off + 4).toString();
             p.apiKey    = q.value(off + 5).toString();
             const int timeout = q.value(off + 6).toInt();
@@ -135,7 +135,7 @@ namespace data::repository {
             rm.provider.icon       = q.value(2).toString();
             rm.provider.docUrl     = q.value(3).toString();
             rm.provider.envVarName = q.value(4).toString();
-            rm.provider.type       = static_cast<domain::model::ProviderType>(q.value(5).toInt());
+            rm.provider.protocol   = static_cast<domain::model::ProtocolType>(q.value(5).toInt());
             rm.provider.baseUrl    = q.value(10).isNull() || q.value(10).toString().isEmpty()
                                        ? q.value(6).toString()
                                        : q.value(10).toString();
@@ -482,7 +482,7 @@ namespace data::repository {
             providerQuery.bindValue(2, p.icon);
             providerQuery.bindValue(3, p.docUrl);
             providerQuery.bindValue(4, p.envVarName);
-            providerQuery.bindValue(5, static_cast<int>(p.type));
+            providerQuery.bindValue(5, static_cast<int>(p.protocol));
             providerQuery.bindValue(6, p.baseUrl.isEmpty() ? QStringLiteral("") : p.baseUrl);
             providerQuery.bindValue(7, p.proxyUrl.has_value() ? QVariant(p.proxyUrl.value()) : QVariant());
             providerQuery.bindValue(8, p.timeoutMs);
@@ -633,7 +633,7 @@ namespace data::repository {
             q.bindValue(0, provider.id);
             q.bindValue(1, provider.name);
             q.bindValue(2, provider.icon);
-            q.bindValue(3, static_cast<int>(provider.type));
+            q.bindValue(3, static_cast<int>(provider.protocol));
             q.bindValue(4, provider.baseUrl);
             q.bindValue(5, provider.apiKey);
             q.bindValue(6, provider.timeoutMs);

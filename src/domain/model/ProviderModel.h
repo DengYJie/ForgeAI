@@ -3,6 +3,7 @@
 #include <optional>
 #include "CanonicalModel.h"
 #include "ModelCapabilities.h"
+#include "ReasoningSupport.h"
 
 namespace domain::model {
 
@@ -40,6 +41,7 @@ namespace domain::model {
         std::optional<ModelLimit> limitsOverride; ///< 上下文与输出上限覆盖
         std::optional<ModelCapabilities> capabilitiesOverride; ///< 能力开关覆盖
 
+        std::optional<ReasoningSupport> reasoningSupport; ///< 结构化推理支持
         QString reasoningField;               ///< 思考流专用字段名
         QString reasoningOptionsJson;         ///< models.dev 的 provider-model 推理选项原始 JSON
         bool isEnabled = true;                ///< 是否启用

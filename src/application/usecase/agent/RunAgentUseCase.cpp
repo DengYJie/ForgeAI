@@ -155,6 +155,32 @@ namespace application::usecase::agent {
             return;
         }
 
+        const auto caps = selected->effectiveCapabilities();
+        if (!caps.testFlag(domain::model::ModelCapability::Chat)) {
+            domain::llm::ChatError err;
+            err.category = domain::llm::ChatErrorCategory::Configuration;
+            err.code = QStringLiteral("UnsupportedChatModel");
+            err.userMessage = QStringLiteral("所选模型不支持对话功能。");
+            qWarning().noquote() << QStringLiteral("[RunAgentUseCase] execute failed: UnsupportedChatModel");
+            emit runFailed(sessionId, err);
+            return;
+        }
+
+        QStringList enabledTools;
+        if (agentConfig.has_value()) {
+            enabledTools = agentConfig->enabledTools;
+        }
+
+        if (!enabledTools.isEmpty() && !caps.testFlag(domain::model::ModelCapability::ToolCalling)) {
+            domain::llm::ChatError err;
+            err.category = domain::llm::ChatErrorCategory::Configuration;
+            err.code = QStringLiteral("AgentModelToolCallingUnsupported");
+            err.userMessage = QStringLiteral("当前 Agent 配置了工具，但所选模型不支持工具调用（Tool Calling）。");
+            qWarning().noquote() << QStringLiteral("[RunAgentUseCase] execute failed: AgentModelToolCallingUnsupported");
+            emit runFailed(sessionId, err);
+            return;
+        }
+
         qInfo().noquote() << QStringLiteral("[RunAgentUseCase] execute -> resolved model: %1 (%2)")
             .arg(selected->displayName(), selected->requestModelId());
 
@@ -168,14 +194,11 @@ namespace application::usecase::agent {
         context.sessionId = sessionId;
         context.projectId = projectId;
         context.workspaceRoot = workspaceRoot;
-        context.provider = selected->provider;
-        context.modelId = selected->requestModelId();
+        context.model = *selected;
         context.useWebSearch = useWebSearch;
         context.useDeepThinking = useDeepThinking;
         context.reasoningEffort = reasoningEffort;
-        if (agentConfig.has_value()) {
-            context.enabledTools = agentConfig->enabledTools;
-        }
+        context.enabledTools = enabledTools;
 
         if (!effSystemPrompt.trimmed().isEmpty()) {
             context.systemPrompt = effSystemPrompt;

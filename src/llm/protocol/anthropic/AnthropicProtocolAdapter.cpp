@@ -10,13 +10,19 @@ namespace llm::protocol::anthropic {
     AnthropicProtocolAdapter::~AnthropicProtocolAdapter() = default;
 
     network::HttpRequest AnthropicProtocolAdapter::buildChatRequest(
-        const domain::model::ModelProvider &provider,
-        const domain::llm::ChatRequest &request) const {
+        const domain::model::ResolvedModel &model,
+        const domain::llm::ChatRequest &request,
+        const domain::llm::ResolvedChatOptions &options) const {
         
+        const auto &provider = model.provider;
         network::HttpRequest netReq;
-        QString baseUrl = provider.baseUrl;
+        QString baseUrl = provider.baseUrl.isEmpty() ? QStringLiteral("https://api.anthropic.com") : provider.baseUrl;
         if (baseUrl.endsWith('/')) baseUrl.chop(1);
-        netReq.url = baseUrl + "/v1/messages";
+        if (baseUrl.endsWith(QStringLiteral("/v1"))) {
+            netReq.url = baseUrl + "/messages";
+        } else {
+            netReq.url = baseUrl + "/v1/messages";
+        }
         netReq.method = network::HttpMethod::Post;
         netReq.timeoutMs = provider.timeoutMs;
 
@@ -33,21 +39,22 @@ namespace llm::protocol::anthropic {
         bodyObj.insert("model", request.model);
         
         // Anthropic 要求必须指定 max_tokens
-        int maxTokens = request.maxTokens.value_or(4096);
+        const int maxTokens = options.maxOutputTokens.value_or(model.effectiveLimits().maxOutput);
         bodyObj.insert("max_tokens", maxTokens);
 
         if (request.stream.value_or(true)) {
             bodyObj.insert("stream", true);
         }
-        if (request.temperature.has_value()) {
-            bodyObj.insert("temperature", request.temperature.value());
+        if (options.temperature.has_value()) {
+            bodyObj.insert("temperature", options.temperature.value());
         }
-        if (request.useDeepThinking) {
-            const QString effort = request.reasoningEffort;
-            const int budget = effort == QStringLiteral("low") ? 1024
-                : effort == QStringLiteral("high") ? 8192
-                : effort == QStringLiteral("max") ? 16384 : 4096;
-            bodyObj.insert("thinking", QJsonObject{{"type", "enabled"}, {"budget_tokens", budget}});
+        if (options.thinkingEnabled) {
+            QJsonObject thinking;
+            thinking.insert("type", "enabled");
+            if (options.thinkingBudgetTokens.has_value()) {
+                thinking.insert("budget_tokens", options.thinkingBudgetTokens.value());
+            }
+            bodyObj.insert("thinking", thinking);
         }
 
         // 分离 system prompt 与普通消息
@@ -88,6 +95,12 @@ namespace llm::protocol::anthropic {
                 QJsonObject msgObj;
                 msgObj.insert("role", "assistant");
                 QJsonArray contentArr;
+                if (!msg.reasoningContent.isEmpty()) {
+                    QJsonObject thinkObj;
+                    thinkObj.insert("type", "thinking");
+                    thinkObj.insert("thinking", msg.reasoningContent);
+                    contentArr.append(thinkObj);
+                }
                 if (!msg.content.isEmpty()) {
                     QJsonObject txtObj;
                     txtObj.insert("type", "text");
@@ -136,7 +149,7 @@ namespace llm::protocol::anthropic {
         }
         bodyObj.insert("messages", msgsArray);
 
-        if (request.tools.has_value() && !request.tools->isEmpty()) {
+        if (options.toolsEnabled && request.tools.has_value() && !request.tools->isEmpty()) {
             QJsonArray toolsArr;
             for (const auto &tool : request.tools.value()) {
                 QJsonObject toolObj;

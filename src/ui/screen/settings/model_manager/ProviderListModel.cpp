@@ -1,4 +1,4 @@
-﻿#include "ProviderListModel.h"
+#include "ProviderListModel.h"
 
 #include <algorithm>
 
@@ -27,8 +27,8 @@ namespace ui::screen::settings::model_manager {
             return provider.name;
         case ProviderIdRole:
             return provider.id;
-        case ProviderTypeRole:
-            return static_cast<int>(provider.type);
+        case ProviderProtocolRole:
+            return static_cast<int>(provider.protocol);
         case ProviderEnabledRole:
             return provider.isEnabled;
         case ProviderIconPathRole:
@@ -67,7 +67,7 @@ namespace ui::screen::settings::model_manager {
                     Qt::DisplayRole,
                     Qt::DecorationRole,
                     ProviderNameRole,
-                    ProviderTypeRole,
+                    ProviderProtocolRole,
                     ProviderEnabledRole,
                     ProviderIconPathRole,
                     });
