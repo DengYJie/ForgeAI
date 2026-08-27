@@ -78,6 +78,12 @@ void MessageListView::setupUi()
         updateVisibleCards();
     });
 
+    connect(verticalScrollBar(), &QScrollBar::rangeChanged, this, [this](int, int max) {
+        if (m_autoScrollToBottom) {
+            verticalScrollBar()->setValue(max);
+        }
+    });
+
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         scheduleVirtualRefresh();
         if (!m_visibleCheckTimer->isActive()) m_visibleCheckTimer->start();
@@ -309,9 +315,7 @@ void MessageListView::onCardHeightChanged()
     const int delta = height - item.height;
     item.height = height;
     m_heightCache.insert(item.message.id, height);
-    relayoutItems();
     if (!m_autoScrollToBottom && aboveViewport) verticalScrollBar()->setValue(verticalScrollBar()->value() + delta);
-    scheduleVirtualRefresh();
     scheduleFollowBottom();
 }
 
@@ -385,16 +389,19 @@ void MessageListView::checkTopVisibleMessage()
 
 void MessageListView::scheduleFollowBottom()
 {
-    if (m_autoScrollToBottom && !m_followTimer->isActive()) m_followTimer->start();
+    if (!m_followTimer->isActive()) m_followTimer->start();
 }
 
 void MessageListView::executeFollowBottom()
 {
-    if (!m_autoScrollToBottom) return;
-    QScrollBar* bar = verticalScrollBar();
-    if (bar->value() < bar->maximum()) {
-        bar->setValue(bar->maximum());
+    relayoutItems();
+    if (m_autoScrollToBottom) {
+        QScrollBar* bar = verticalScrollBar();
+        if (bar->value() < bar->maximum()) {
+            bar->setValue(bar->maximum());
+        }
     }
+    updateVisibleCards();
 }
 
 void MessageListView::wheelEvent(QWheelEvent* event)
